@@ -40,10 +40,7 @@
     <string name="tool_extract">Extract</string>
     <string name="tool_merge">Merge</string>
     <string name="tool_split">Split</string>
-    <string name="tool_ocr">OCR</string>
-    <string name="tool_compress">Compress</string>
     <string name="tool_password">Password</string>
-    <string name="tool_convert">Convert</string>
     <string name="tool_print">Print</string>
     <string name="tool_share">Share</string>
     <string name="tool_info">Document info</string>
