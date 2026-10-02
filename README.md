@@ -36,7 +36,7 @@ Signing follows the flow of [DocuSeal](https://github.com/docusealco/docuseal), 
 
 ## Building
 
-Requires JDK 17 and the Android SDK (API 37).
+Requires JDK 21 (Robolectric screenshot tests need it) and the Android SDK (API 37).
 
 ```sh
 ./gradlew assembleDebug          # APK in app/build/outputs/apk/debug/
