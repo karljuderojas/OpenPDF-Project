@@ -1,17 +1,19 @@
 [versions]
-agp = "8.11.1"
-kotlin = "2.4.20"
-coreKtx = "1.16.0"
-activityCompose = "1.10.1"
-lifecycle = "2.9.1"
+agp = "9.3.1"
+kotlin = "2.4.10"
+coreKtx = "1.19.0"
+activityCompose = "1.13.0"
+lifecycle = "2.11.0"
 navigationCompose = "2.9.0"
-composeBom = "2025.06.01"
-coroutines = "1.10.2"
+composeBom = "2026.06.01"
+coroutines = "1.11.0"
 # Rendering: PDFium (the engine Chrome uses), Apache-2.0 Kotlin bindings.
 pdfium = "2.0.3"
 # Editing, annotating and signing: Apache PDFBox port for Android, Apache-2.0.
 pdfbox = "2.0.27.0"
 junit = "4.13.2"
+# No longer managed by the Compose BOM; the icon set is frozen at this version.
+materialIconsCore = "1.7.8"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -25,7 +27,7 @@ androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graph
 androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
-androidx-compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
+androidx-compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core", version.ref = "materialIconsCore" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 pdfium-android = { group = "io.legere", name = "pdfiumandroid", version.ref = "pdfium" }
 pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref = "pdfbox" }
@@ -33,5 +35,4 @@ junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

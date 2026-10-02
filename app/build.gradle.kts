@@ -1,12 +1,12 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
 android {
     namespace = "io.github.karljuderojas.freepdf"
-    compileSdk = 36
+    // PDFium bindings 2.x require compiling against API 37.
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "io.github.karljuderojas.freepdf"
@@ -39,10 +39,6 @@ android {
             excludes += setOf("META-INF/versions/9/OSGI-INF/MANIFEST.MF", "META-INF/{AL2.0,LGPL2.1}")
         }
     }
-}
-
-kotlin {
-    jvmToolchain(17)
 }
 
 dependencies {
