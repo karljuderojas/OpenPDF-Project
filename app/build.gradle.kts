@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -33,6 +34,11 @@ android {
         compose = true
     }
 
+    testOptions {
+        // Robolectric needs merged resources for screenshot tests.
+        unitTests.isIncludeAndroidResources = true
+    }
+
     packaging {
         resources {
             // BouncyCastle (pulled in by PdfBox for signing) ships duplicate metadata.
@@ -59,5 +65,12 @@ dependencies {
     implementation(libs.pdfbox.android)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
     testImplementation(libs.junit)
+    testImplementation(libs.androidx.test.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
 }

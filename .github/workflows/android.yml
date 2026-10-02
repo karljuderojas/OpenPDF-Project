@@ -21,3 +21,76 @@ jobs:
         with:
           name: freepdf-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+
+  # Renders every screen (see ScreenshotTest) and posts the images on the pull request.
+  screenshots:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # push images to the "screenshots" branch
+      pull-requests: write   # post the review comment
+    concurrency:
+      group: screenshots-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Render screenshots
+        run: ./gradlew recordRoborazziDebug
+      - name: Publish screenshots to the screenshots branch
+        id: publish
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin screenshots > /dev/null; then
+            git fetch --depth 1 origin screenshots
+            git worktree add ../shots FETCH_HEAD
+            git -C ../shots checkout -B screenshots
+          else
+            git worktree add --orphan -b screenshots ../shots
+          fi
+          rm -rf "../shots/pr-$PR" && mkdir -p "../shots/pr-$PR"
+          cp app/build/outputs/roborazzi/*.png "../shots/pr-$PR/"
+          cd ../shots
+          git add -A
+          git commit -m "Screenshots for PR #$PR at ${HEAD_SHA::7}" || true
+          for i in 1 2 3; do
+            git push origin screenshots && break
+            git fetch --depth 1 origin screenshots && git rebase FETCH_HEAD
+          done
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Post screenshots on the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SHOTS_SHA: ${{ steps.publish.outputs.sha }}
+        run: |
+          marker="<!-- screenshots -->"
+          {
+            echo "$marker"
+            echo "### Screenshots"
+            echo "Rendered from ${HEAD_SHA::7} on a Pixel 7-sized screen."
+            echo
+            for f in app/build/outputs/roborazzi/*.png; do
+              name=$(basename "$f" .png)
+              echo "**${name//_/ }**"
+              echo
+              echo "<img src=\"https://github.com/$GITHUB_REPOSITORY/blob/$SHOTS_SHA/pr-$PR/$name.png?raw=true\" width=\"270\">"
+              echo
+            done
+          } > body.md
+          id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@body.md > /dev/null
+          else
+            gh pr comment "$PR" --body-file body.md
+          fi
