@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -33,6 +34,19 @@ android {
         compose = true
     }
 
+    testOptions {
+        // Robolectric needs merged resources for screenshot tests.
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { test ->
+            // Robolectric's Android 16 sandbox sets raw FileDescriptor fields through JDK internals.
+            test.jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED", "--add-opens=java.base/java.io=ALL-UNNAMED")
+            test.testLogging {
+                events("failed")
+                exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+            }
+        }
+    }
+
     packaging {
         resources {
             // BouncyCastle (pulled in by PdfBox for signing) ships duplicate metadata.
@@ -59,5 +73,12 @@ dependencies {
     implementation(libs.pdfbox.android)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
     testImplementation(libs.junit)
+    testImplementation(libs.androidx.test.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
 }

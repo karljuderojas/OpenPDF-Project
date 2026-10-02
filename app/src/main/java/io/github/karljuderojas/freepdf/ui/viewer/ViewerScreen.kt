@@ -54,14 +54,25 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = viewModel()) {
     LaunchedEffect(uri) { viewModel.open(uri) }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    ViewerContent(state = state, onBack = onBack, loadPage = viewModel::page)
+}
+
+/** Stateless viewer UI, so it can be previewed and screenshot-tested without a real PDF. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ViewerContent(
+    state: ViewerState,
+    onBack: () -> Unit,
+    loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
+    initialMode: ViewerMode = ViewerMode.Read,
+) {
     val listState = rememberLazyListState()
     val currentPage by remember { derivedStateOf { listState.firstVisibleItemIndex + 1 } }
-    var mode by rememberSaveable { mutableStateOf(ViewerMode.Read) }
+    var mode by rememberSaveable { mutableStateOf(initialMode) }
     var selectedTool by rememberSaveable { mutableStateOf<Int?>(null) }
     val ready = state is ViewerState.Ready
 
@@ -109,7 +120,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
             when (val s = state) {
                 ViewerState.Loading -> CircularProgressIndicator()
                 is ViewerState.Failed -> Text(stringResource(R.string.error_open))
-                is ViewerState.Ready -> PageList(s.pageSizes, viewModel, listState)
+                is ViewerState.Ready -> PageList(s.pageSizes, loadPage, listState)
             }
         }
     }
@@ -118,7 +129,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
 @Composable
 private fun PageList(
     pageSizes: List<PageSize>,
-    viewModel: ViewerViewModel,
+    loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
     listState: LazyListState,
 ) {
     var zoom by remember { mutableFloatStateOf(1f) }
@@ -147,16 +158,21 @@ private fun PageList(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             itemsIndexed(pageSizes) { index, size ->
-                PageItem(index, size, widthPx, viewModel)
+                PageItem(index, size, widthPx, loadPage)
             }
         }
     }
 }
 
 @Composable
-private fun PageItem(index: Int, size: PageSize, widthPx: Int, viewModel: ViewerViewModel) {
+private fun PageItem(
+    index: Int,
+    size: PageSize,
+    widthPx: Int,
+    loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
+) {
     val bitmap by produceState<Bitmap?>(null, index, widthPx) {
-        value = viewModel.page(index, widthPx)
+        value = loadPage(index, widthPx)
     }
     Box(
         Modifier.fillMaxWidth().aspectRatio(size.aspectRatio).background(Color.White),
