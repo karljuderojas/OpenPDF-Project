@@ -38,8 +38,8 @@ android {
         // Robolectric needs merged resources for screenshot tests.
         unitTests.isIncludeAndroidResources = true
         unitTests.all { test ->
-            // Robolectric reaches into JDK internals (e.g. LinkedHashMap for android.util.LruCache).
-            test.jvmArgs("--add-opens=java.base/java.util=ALL-UNNAMED", "--add-opens=java.base/java.lang=ALL-UNNAMED")
+            // Robolectric's Android 16 sandbox sets raw FileDescriptor fields through JDK internals.
+            test.jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED", "--add-opens=java.base/java.io=ALL-UNNAMED")
             test.testLogging {
                 events("failed")
                 exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
