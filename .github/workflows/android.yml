@@ -17,7 +17,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Build, unit test and lint
         run: ./gradlew assembleDebug testDebugUnitTest lintDebug
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: freepdf-debug-apk
           path: app/build/outputs/apk/debug/*.apk
@@ -41,7 +41,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Render screenshots
         run: ./gradlew recordRoborazziDebug
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: screenshot-test-report
