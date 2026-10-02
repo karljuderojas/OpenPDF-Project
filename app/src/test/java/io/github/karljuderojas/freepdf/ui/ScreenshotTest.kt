@@ -47,6 +47,9 @@ class ScreenshotTest {
     @Test
     fun viewerPages() = capture("viewer_pages") { viewer(ViewerMode.Pages) }
 
+    @Test
+    fun viewerMore() = capture("viewer_more") { viewer(ViewerMode.More) }
+
     @Composable
     private fun viewer(mode: ViewerMode) {
         ViewerContent(state = letterPages, onBack = {}, loadPage = { _, _ -> null }, initialMode = mode)

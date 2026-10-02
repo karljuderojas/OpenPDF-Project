@@ -1,6 +1,6 @@
 # Roadmap
 
-Goal: the features people use in PDFGear and Xodo, free, offline and open source. Priorities are viewing, annotating, signing and editing. Converting comes later.
+Goal: the features people use in PDFGear and Xodo, free, offline and open source. Priorities are viewing, annotating, signing and editing. Anything that needs a server (cloud AI, Office conversion, cloud storage, collecting signatures from others) is out.
 
 ✅ done in the scaffold · 🧱 code exists, no UI yet · ⬜ not started
 
@@ -11,7 +11,9 @@ Goal: the features people use in PDFGear and Xodo, free, offline and open source
 - ⬜ Proper zoom and pan with sharp re-rendering at high zoom (tiled rendering)
 - ⬜ Text search, outline/bookmarks, go to page, page thumbnails
 - ⬜ Text selection with a Highlight / Underline / Note popup
-- ⬜ Recent files on Home, night mode, reading settings
+- ⬜ Files tab: open documents on top, recent history grouped by day, "Open file" through Android's file picker (stored on the device only)
+- ⬜ Switcher between open documents, tab style
+- ⬜ Night mode, reading settings
 - ⬜ Password-protected PDFs
 
 ## Annotating (Annotate mode)
@@ -42,9 +44,10 @@ Goal: the features people use in PDFGear and Xodo, free, offline and open source
 - ⬜ Edit existing text (hard; needs font handling)
 
 ## More
+- ⬜ Share: send the current PDF (or the signed copy) to any app through Android's share sheet
+- ⬜ Print
 - ⬜ Password protect / remove password
-- ⬜ Compress
-- ⬜ OCR (on-device, e.g. Tesseract or ML Kit)
-- ⬜ Scan to PDF (camera)
-- ⬜ Print and share
-- ⬜ Convert: images to PDF first, then PDF to images, and Office later
+- ⬜ Document info
+
+## Not planned for now
+Dropped from scope on 2026-10-02 to keep the app focused: OCR, compression, and converting PDFs to Word or other Office formats.
