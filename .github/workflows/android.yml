@@ -14,7 +14,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - name: Build, unit test and lint
         run: ./gradlew assembleDebug testDebugUnitTest lintDebug
       - uses: actions/upload-artifact@v4
@@ -38,7 +38,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - name: Render screenshots
         run: ./gradlew recordRoborazziDebug
       - uses: actions/upload-artifact@v4
