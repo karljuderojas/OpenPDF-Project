@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -15,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -33,8 +35,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.sign.CertificateInfo
+import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
 
 /** What Finish does besides recording the signer: see [FinishSigningDialog]. */
 data class FinishOptions(val lock: Boolean, val seal: Boolean, val share: Boolean)
@@ -126,6 +130,35 @@ fun FinishSigningDialog(
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
+/**
+ * Shown while the signed copy is being made: a spinner and which [step] it is on. Finishing
+ * cannot be cancelled part way, and a timestamp request gives up on its own after ten seconds,
+ * so the dialog has no buttons and does not close on a tap outside.
+ */
+@Composable
+fun FinishProgressDialog(step: SignedCopy.Step) {
+    AlertDialog(
+        onDismissRequest = {},
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+        title = { Text(stringResource(R.string.finish_title)) },
+        text = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                CircularProgressIndicator(modifier = Modifier.size(28.dp).testTag("finish-progress"))
+                Text(
+                    stringResource(
+                        when (step) {
+                            SignedCopy.Step.Signing -> R.string.finish_step_signing
+                            SignedCopy.Step.Timestamping -> R.string.finish_step_timestamp
+                        },
+                    ),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+        },
+        confirmButton = {},
     )
 }
 
