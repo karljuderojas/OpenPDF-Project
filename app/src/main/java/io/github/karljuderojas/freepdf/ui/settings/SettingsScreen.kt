@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
 
-/** The Settings tab: theme, history and about. Stateless so it can be screenshot-tested. */
+/** The Settings tab: theme, history, tips and about. Stateless so it can be screenshot-tested. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsContent(
@@ -41,6 +41,9 @@ fun SettingsContent(
     onClearHistory: () -> Unit,
     version: String,
     onSourceCode: () -> Unit,
+    showTips: Boolean = true,
+    onShowTips: (Boolean) -> Unit = {},
+    onResetTips: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var confirmClear by remember { mutableStateOf(false) }
@@ -72,6 +75,19 @@ fun SettingsContent(
                 headlineContent = { Text(stringResource(R.string.settings_clear_history)) },
                 supportingContent = { Text(stringResource(R.string.settings_clear_history_detail)) },
                 modifier = Modifier.clickable { confirmClear = true },
+            )
+
+            SectionHeader(R.string.settings_tips)
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.settings_show_tips)) },
+                supportingContent = { Text(stringResource(R.string.settings_show_tips_detail)) },
+                trailingContent = { Switch(checked = showTips, onCheckedChange = onShowTips) },
+                modifier = Modifier.clickable { onShowTips(!showTips) },
+            )
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.settings_reset_tips)) },
+                supportingContent = { Text(stringResource(R.string.settings_reset_tips_detail)) },
+                modifier = Modifier.clickable(onClick = onResetTips),
             )
 
             SectionHeader(R.string.settings_about)

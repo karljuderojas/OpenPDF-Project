@@ -121,6 +121,7 @@ private fun MainScreen(openPdf: (Uri, ViewerMode, Int?) -> Unit) {
             MainTab.Settings -> {
                 val theme by app.settings.theme.collectAsStateWithLifecycle()
                 val rememberHistory by app.settings.rememberHistory.collectAsStateWithLifecycle()
+                val showTips by app.tips.enabled.collectAsStateWithLifecycle()
                 SettingsContent(
                     theme = theme,
                     onTheme = app.settings::setTheme,
@@ -130,6 +131,12 @@ private fun MainScreen(openPdf: (Uri, ViewerMode, Int?) -> Unit) {
                     version = remember(context) { appVersion(context) },
                     onSourceCode = {
                         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, SOURCE_URL.toUri())) }
+                    },
+                    showTips = showTips,
+                    onShowTips = app.tips::setEnabled,
+                    onResetTips = {
+                        app.tips.resetAll()
+                        Toast.makeText(context, R.string.settings_reset_tips_done, Toast.LENGTH_SHORT).show()
                     },
                     modifier = modifier,
                 )
