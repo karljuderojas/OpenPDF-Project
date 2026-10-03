@@ -97,6 +97,7 @@ import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
+import io.github.karljuderojas.freepdf.print.Printing
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
@@ -118,8 +119,13 @@ sealed interface ViewerAction {
     data class Extract(val pages: List<Int>) : ViewerAction
     data class Split(val parts: List<List<Int>>) : ViewerAction
     data object Share : ViewerAction
+    data object ShowInfo : ViewerAction
+    data object Print : ViewerAction
     data class Search(val query: String) : ViewerAction
     data class Unlock(val password: String) : ViewerAction
+
+    /** Locks the PDF with [password], or takes its password off when it is empty. */
+    data class SetPassword(val password: String) : ViewerAction
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
     data class Stroke(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val points: List<Offset>) : ViewerAction
@@ -172,6 +178,7 @@ fun ViewerScreen(
     val resources = LocalResources.current
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    var shownInfo by remember { mutableStateOf<ViewerEffect.ShowInfo?>(null) }
     val scope = rememberCoroutineScope()
     fun launchMessage(@StringRes text: Int) {
         scope.launch { snackbarHostState.showSnackbar(resources.getString(text)) }
@@ -203,9 +210,11 @@ fun ViewerScreen(
                 is ViewerEffect.SaveAs -> saveAsPicker.launch(effect.suggestedName)
                 ViewerEffect.Close -> onBack()
                 is ViewerEffect.Share -> Sharing.shareFile(context, effect.file)
+                is ViewerEffect.Print -> Printing.print(context, effect.file, effect.name, effect.pageCount)
                 is ViewerEffect.SaveSigned -> signedCopyPicker.launch(effect.suggestedName)
                 is ViewerEffect.SaveExtract -> extractPicker.launch(effect.suggestedName)
                 ViewerEffect.PickSplitFolder -> splitFolderPicker.launch(null)
+                is ViewerEffect.ShowInfo -> shownInfo = effect
             }
         }
     }
@@ -238,8 +247,11 @@ fun ViewerScreen(
                 is ViewerAction.Extract -> viewModel.extract(action.pages)
                 is ViewerAction.Split -> viewModel.split(action.parts)
                 ViewerAction.Share -> viewModel.share()
+                ViewerAction.ShowInfo -> viewModel.documentInfo()
+                ViewerAction.Print -> viewModel.print()
                 is ViewerAction.Search -> viewModel.search(action.query)
                 is ViewerAction.Unlock -> viewModel.unlock(action.password)
+                is ViewerAction.SetPassword -> viewModel.setPassword(action.password)
                 is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.style)
                 is ViewerAction.Box -> action.tool.markup.let { kind ->
                     if (kind != null) {
@@ -275,6 +287,8 @@ fun ViewerScreen(
             }
         },
     )
+
+    shownInfo?.let { DocumentInfoDialog(it.name, it.info, onDismiss = { shownInfo = null }) }
 }
 
 /** Stateless viewer UI, so it can be previewed and screenshot-tested without a real PDF. */
@@ -312,6 +326,7 @@ fun ViewerContent(
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
+    var choosingPassword by remember { mutableStateOf(false) }
     // Chosen here so the page preview follows at once; the view model remembers them for next time.
     var styles by remember { mutableStateOf(toolStyles) }
     LaunchedEffect(toolStyles) { styles = styles + toolStyles }
@@ -546,7 +561,12 @@ fun ViewerContent(
                     })
                 }
                 else -> ToolStrip(mode, selectedTool = null, onToolSelected = {
-                    if (it == R.string.tool_share) onAction(ViewerAction.Share)
+                    when (it) {
+                        R.string.tool_share -> onAction(ViewerAction.Share)
+                        R.string.tool_password -> choosingPassword = true
+                        R.string.tool_info -> onAction(ViewerAction.ShowInfo)
+                        R.string.tool_print -> onAction(ViewerAction.Print)
+                    }
                 })
             }
         },
@@ -736,6 +756,17 @@ fun ViewerContent(
                 finishing = false
                 backToReading()
                 onAction(ViewerAction.FinishSigning(name, consentText, seal))
+            },
+        )
+    }
+
+    if (choosingPassword) {
+        PasswordDialog(
+            isProtected = ready?.isProtected == true,
+            onDismiss = { choosingPassword = false },
+            onSetPassword = {
+                choosingPassword = false
+                onAction(ViewerAction.SetPassword(it))
             },
         )
     }

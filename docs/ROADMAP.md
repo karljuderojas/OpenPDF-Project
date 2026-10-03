@@ -52,9 +52,9 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 
 ## More
 - ✅ Share: send the current PDF, unsaved changes included, to any app through Android's share sheet; also from a Recent row's menu
-- ⬜ Print
-- ⬜ Password protect / remove password
-- ⬜ Document info
+- ✅ Print: Android's print dialog, with any printer the phone knows and Save as PDF; prints unsaved changes too, and respects PDFs that turn printing off
+- ✅ Password: add a password (AES-256) to a PDF, or change or remove the one it has; undo puts the old one back, and Save keeps the change
+- ✅ Document info: title, author, dates, the app that made it, page count and size, file size, PDF version, and whether it is password protected, has form fields or is digitally signed
 
 ## Not planned for now
 Dropped from scope on 2026-10-02 to keep the app focused: OCR, compression, and converting PDFs to Word or other Office formats.
