@@ -20,8 +20,17 @@ object PageEditor {
         page.rotation = ((page.rotation + degrees) % 360 + 360) % 360
     }
 
+    fun rotate(document: PDDocument, pageIndexes: Collection<Int>, degrees: Int) {
+        pageIndexes.toSet().forEach { rotate(document, it, degrees) }
+    }
+
     fun delete(document: PDDocument, pageIndex: Int) {
         document.removePage(pageIndex)
+    }
+
+    /** Deletes several pages. From the last one back, so the indexes still to go stay valid. */
+    fun delete(document: PDDocument, pageIndexes: Collection<Int>) {
+        pageIndexes.distinct().sortedDescending().forEach { document.removePage(it) }
     }
 
     /**
@@ -42,6 +51,19 @@ object PageEditor {
         val page = pages.get(fromIndex)
         pages.remove(fromIndex)
         if (toIndex >= pages.count) pages.add(page) else pages.insertBefore(page, pages.get(toIndex))
+    }
+
+    /**
+     * Moves each of [pageIndexes] [by] places (negative is earlier), keeping their order and the
+     * gaps between them. Pages in between close up around them.
+     */
+    fun shift(document: PDDocument, pageIndexes: Collection<Int>, by: Int) {
+        val pages = pageIndexes.distinct().sorted()
+        if (pages.isEmpty() || by == 0) return
+        require(pages.first() + by >= 0 && pages.last() + by < document.numberOfPages) { "Cannot move past either end" }
+        // The page nearest the destination goes first, so the others are still where they were.
+        val order = if (by < 0) pages else pages.asReversed()
+        order.forEach { move(document, it, it + by) }
     }
 
     fun insertBlank(document: PDDocument, atIndex: Int, size: PDRectangle = PDRectangle.LETTER) {
