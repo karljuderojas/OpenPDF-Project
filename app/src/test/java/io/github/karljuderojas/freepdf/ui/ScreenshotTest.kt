@@ -65,6 +65,9 @@ import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.home.HomeContent
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
 import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
+import io.github.karljuderojas.freepdf.ui.create.ImagesToPdfContent
+import io.github.karljuderojas.freepdf.pdf.create.PageFit
+import androidx.compose.ui.graphics.asImageBitmap
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
 import io.github.karljuderojas.freepdf.ui.viewer.DocumentInfoDialog
 import io.github.karljuderojas.freepdf.ui.viewer.AnnotateTool
@@ -137,6 +140,25 @@ class ScreenshotTest {
 
     @Test
     fun tools() = capture("tools") { shell(MainTab.Tools) { ToolsContent(onToolPicked = {}, modifier = it) } }
+
+    @Test
+    fun imagesToPdfEmpty() = capture("images_to_pdf_empty") {
+        ImagesToPdfContent(emptyList(), emptyMap(), PageFit.A4, null, false, {}, { _, _ -> }, {}, {}, {}, {})
+    }
+
+    @Test
+    fun imagesToPdfPicked() = capture("images_to_pdf_picked") {
+        val photos = listOf("content://a", "content://b", "content://c")
+        val thumbs = photos.zip(listOf(samplePages[0], samplePages[1], samplePages[0])).toMap().mapValues { it.value.asImageBitmap() }
+        ImagesToPdfContent(photos, thumbs, PageFit.A4, null, false, {}, { _, _ -> }, {}, {}, {}, {})
+    }
+
+    @Test
+    fun imagesToPdfMaking() = capture("images_to_pdf_making") {
+        val photos = listOf("content://a", "content://b", "content://c")
+        val thumbs = photos.zip(listOf(samplePages[0], samplePages[1], samplePages[0])).toMap().mapValues { it.value.asImageBitmap() }
+        ImagesToPdfContent(photos, thumbs, PageFit.Picture, 2, false, {}, { _, _ -> }, {}, {}, {}, {})
+    }
 
     @Test
     fun toolsSearch() = capture("tools_search_tick") {
