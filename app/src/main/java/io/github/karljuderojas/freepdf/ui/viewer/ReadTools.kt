@@ -120,7 +120,7 @@ internal fun GoToPageDialog(pageCount: Int, onDismiss: () -> Unit, onGo: (page: 
             OutlinedTextField(
                 value = text,
                 onValueChange = { new -> text = new.filter { it.isDigit() }.take(6) },
-                label = { Text(stringResource(R.string.page_number)) },
+                label = { Text(stringResource(R.string.page_number_label)) },
                 supportingText = { Text(stringResource(R.string.go_to_page_range, pageCount)) },
                 isError = text.isNotEmpty() && page == null,
                 singleLine = true,

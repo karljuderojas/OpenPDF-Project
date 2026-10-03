@@ -11,7 +11,7 @@
     <string name="search_previous">Previous result</string>
     <string name="search_next">Next result</string>
     <string name="go_to_page">Go to page</string>
-    <string name="page_number">Page number</string>
+    <string name="page_number_label">Page number</string>
     <string name="go_to_page_range">1 to %1$d</string>
     <string name="go">Go</string>
     <string name="contents">Contents</string>
