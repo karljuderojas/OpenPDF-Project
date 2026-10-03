@@ -50,6 +50,11 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils > /dev/null
           pdftoppm -png -f 1 -l 1 -scale-to 1080 -singlefile \
             app/build/outputs/qa/stamps-on-rotated-page.pdf app/build/outputs/roborazzi/pdf_stamps_on_rotated_page
+          # StampsTest writes a page with a text box and stamps as they come out in the PDF itself.
+          if [ -f app/build/outputs/qa/textbox-and-stamps.pdf ]; then
+            pdftoppm -png -f 1 -l 1 -scale-to 1080 -singlefile \
+              app/build/outputs/qa/textbox-and-stamps.pdf app/build/outputs/roborazzi/pdf_textbox_and_stamps
+          fi
       # FlattenerTest flattens a highlight, a drawing, a note and a box into the sample's first page.
       - name: Render the locked copy
         run: |
