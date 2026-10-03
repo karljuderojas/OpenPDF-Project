@@ -180,6 +180,9 @@ sealed interface ViewerAction {
     data class Share(val option: ShareOption, val pages: List<Int>) : ViewerAction
     data class Extract(val pages: List<Int>) : ViewerAction
     data class Split(val parts: List<List<Int>>) : ViewerAction
+
+    /** Saves a copy with everything under [boxes] removed and painted black; the open PDF is left as it is. */
+    data class Redact(val boxes: List<RedactBox>) : ViewerAction
     data object ShowInfo : ViewerAction
     data object Print : ViewerAction
     data class Search(val query: String) : ViewerAction
@@ -312,6 +315,9 @@ fun ViewerScreen(
     val extractPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) {
         if (it != null) viewModel.saveExtract(it) else viewModel.cancelExtract()
     }
+    val redactedPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) {
+        if (it != null) viewModel.saveRedacted(it) else viewModel.cancelRedaction()
+    }
     val splitFolderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) {
         if (it != null) viewModel.splitInto(it) else viewModel.cancelSplit()
     }
@@ -335,6 +341,7 @@ fun ViewerScreen(
                 is ViewerEffect.Print -> Printing.print(context, effect.file, effect.name, effect.pageCount)
                 is ViewerEffect.SaveSigned -> signedCopyPicker.launch(effect.suggestedName)
                 is ViewerEffect.SaveExtract -> extractPicker.launch(effect.suggestedName)
+                is ViewerEffect.SaveRedacted -> redactedPicker.launch(effect.suggestedName)
                 ViewerEffect.PickSplitFolder -> splitFolderPicker.launch(null)
                 is ViewerEffect.ShowInfo -> shownInfo = effect
             }
@@ -412,6 +419,7 @@ fun ViewerScreen(
                 is ViewerAction.Share -> viewModel.share(action.option, action.pages)
                 is ViewerAction.Extract -> viewModel.extract(action.pages)
                 is ViewerAction.Split -> viewModel.split(action.parts)
+                is ViewerAction.Redact -> viewModel.redact(action.boxes)
                 ViewerAction.ShowInfo -> viewModel.documentInfo()
                 ViewerAction.Print -> viewModel.print()
                 is ViewerAction.Search -> viewModel.search(action.query)
@@ -497,6 +505,8 @@ fun ViewerContent(
     initialSelectedPages: Set<Int> = setOf(initialSelectedPage),
     initialTool: Int? = null,
     initialSignField: Int? = null,
+    initialRedactions: List<RedactBox> = emptyList(),
+    initialConfirmRedact: Boolean = false,
     savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
     signerName: String = "",
     certificate: CertificateInfo? = null,
@@ -553,6 +563,9 @@ fun ViewerContent(
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     var extracting by rememberSaveable { mutableStateOf(false) }
     var splitting by rememberSaveable { mutableStateOf(false) }
+    // Areas marked with Redact stay until they are applied or removed; the screen does not forget them on Done.
+    var redactions by rememberSaveable(stateSaver = RedactBoxesSaver) { mutableStateOf(initialRedactions) }
+    var confirmRedact by rememberSaveable { mutableStateOf(initialConfirmRedact) }
     // The address a tapped link leads to, while asking whether to open it; and the box just dragged for a new link.
     var openingLink by rememberSaveable { mutableStateOf<String?>(null) }
     var newLinkBox by remember { mutableStateOf<Pair<Int, DisplayRect>?>(null) }
@@ -625,6 +638,16 @@ fun ViewerContent(
     }
 
     val ready = state as? ViewerState.Ready
+    // Marks are places on the pages as they were drawn: a page edit, an undo or another change
+    // to the document can move what is under them, and a saved redaction has used them. Either
+    // way they go, rather than redact something the user did not mark.
+    var marksMadeOn by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(ready?.revision, ready?.redactionsSaved) {
+        val current = ready ?: return@LaunchedEffect
+        val now = "${current.revision}/${current.redactionsSaved}"
+        if (marksMadeOn != null && marksMadeOn != now) redactions = emptyList()
+        marksMadeOn = now
+    }
     val signedFields = ready?.let { signedPlaces(it, stamps) }.orEmpty()
     val pageCount = ready?.pageSizes?.size ?: 0
     // Stamps still being placed count as changes, for Undo and for offering Finish.
@@ -981,6 +1004,13 @@ fun ViewerContent(
                     if (selectedTool == R.string.tool_add_text) EditHint(R.string.edit_hint_text)
                     if (selectedTool == R.string.tool_add_link) EditHint(R.string.edit_hint_link)
                     if (selectedTool == R.string.tool_edit_text) EditHint(R.string.edit_hint_edit_text)
+                    if (selectedTool == R.string.tool_redact) {
+                        RedactBar(
+                            count = redactions.size,
+                            onRemoveLast = { redactions = redactions.dropLast(1) },
+                            onApply = { confirmRedact = true },
+                        )
+                    }
                     ToolStrip(mode, selectedTool, onToolSelected = { label ->
                         when {
                             // Add image acts once: pick a picture and it lands on the page in view.
@@ -1198,6 +1228,17 @@ fun ViewerContent(
                                 },
                             )
                         }
+                        val redacting = mode == ViewerMode.Edit && selectedTool == R.string.tool_redact
+                        if (mode == ViewerMode.Edit && (redacting || redactions.any { it.page == page })) {
+                            RedactionLayer(
+                                page = page,
+                                boxes = redactions.filter { it.page == page },
+                                active = redacting,
+                                pageWidthPt = ready.pageSizes[page].widthPt,
+                                words = words,
+                                onBox = { redactions = redactions + RedactBox(page, it) },
+                            )
+                        }
                         if (tool != null) {
                             val style = styleOf(tool)
                             AnnotationLayer(
@@ -1288,6 +1329,19 @@ fun ViewerContent(
             },
             dismissButton = {
                 TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+
+    if (confirmRedact) {
+        RedactConfirmDialog(
+            count = redactions.size,
+            onDismiss = { confirmRedact = false },
+            onConfirm = {
+                confirmRedact = false
+                // Text and pictures placed with Add text or Add image are part of the page being redacted.
+                if (stamps.isNotEmpty()) onAction(ViewerAction.CommitStamps)
+                onAction(ViewerAction.Redact(redactions))
             },
         )
     }

@@ -77,6 +77,13 @@ jobs:
         run: |
           pdftoppm -png -f 1 -l 1 -scale-to-x 1080 -scale-to-y -1 -singlefile \
             app/build/outputs/qa/filled-form.pdf app/build/outputs/roborazzi/pdf_filled_form
+      # RedactorTest redacts a patient record. Show it, and have poppler's own text extraction confirm
+      # that nothing is left under the black boxes.
+      - name: Render the redacted example
+        run: |
+          pdf=app/build/outputs/qa/redacted-example.pdf
+          pdftoppm -png -f 1 -l 1 -scale-to 1080 -singlefile "$pdf" app/build/outputs/roborazzi/pdf_redacted_example
+          if pdftotext "$pdf" - | grep -q -e 6789 -e 04/12; then echo "Redacted text can still be extracted"; exit 1; fi
       # SignedCopyTest writes a signed copy of the sample agreement. Show its signing certificate
       # page, and have poppler check the digital signature independently of our own code.
       - name: Render the signing certificate page

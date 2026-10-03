@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -95,12 +96,15 @@ import io.github.karljuderojas.freepdf.ui.viewer.GoToPageDialog
 import io.github.karljuderojas.freepdf.ui.viewer.SearchResults
 import io.github.karljuderojas.freepdf.ui.viewer.TextMatch
 import io.github.karljuderojas.freepdf.ui.viewer.PlacedStamp
+import io.github.karljuderojas.freepdf.ui.viewer.RedactBox
 import io.github.karljuderojas.freepdf.ui.viewer.StampContent
 import io.github.karljuderojas.freepdf.ui.viewer.StampGeometry
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerAction
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerContent
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerMode
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerState
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -1025,6 +1029,53 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerRedact() = capture("viewer_redact") { viewer(ViewerMode.Edit, tool = R.string.tool_redact) }
+
+    @Test
+    fun viewerRedactMarkedByDragging() {
+        // Dragging over text with Redact chosen marks whole words, one box per line.
+        show { viewer(ViewerMode.Edit, tool = R.string.tool_redact) }
+        val from = wordIndex(0, "Northwind")
+        val layer = "annotation-layer-0"
+        composeRule.onNodeWithTag(layer).performTouchInput {
+            down(wordCentre(layer, 0, from))
+            moveTo(wordCentre(layer, 0, from + 3))
+            moveTo(wordCentre(layer, 0, from + 17))
+            up()
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Apply").assertExists()
+        captureRoot("viewer_redact_dragged")
+    }
+
+    @Test
+    fun viewerRedactMarked() = capture("viewer_redact_marked") {
+        viewer(ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions())
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerRedactConfirm() {
+        show { viewer(ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(), confirmRedact = true) }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_redact_confirm.png")
+    }
+
+    @Test
+    fun viewerRedactApplyAsksThenSendsTheMarks() {
+        val actions = mutableListOf<ViewerAction>()
+        show { viewer(ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(), onAction = { actions += it }) }
+        composeRule.onNodeWithText("Apply").performClick()
+        composeRule.waitForIdle()
+        // Nothing is sent until the dialog is confirmed.
+        assertTrue(actions.none { it is ViewerAction.Redact })
+        composeRule.onNodeWithText("Save redacted copy").performClick()
+        composeRule.waitForIdle()
+        val redact = actions.filterIsInstance<ViewerAction.Redact>().single()
+        assertEquals(sampleRedactions(), redact.boxes)
+    }
+
+    @Test
     fun viewerPages() = capture("viewer_pages") {
         viewer(ViewerMode.Pages, sample.copy(canUndo = true, hasUnsavedChanges = true), selectedPage = 1)
     }
@@ -1442,6 +1493,8 @@ class ScreenshotTest {
         tip: Int? = null,
         stamps: List<PlacedStamp> = emptyList(),
         selectedStamp: Long? = null,
+        redactions: List<RedactBox> = emptyList(),
+        confirmRedact: Boolean = false,
         onAction: (ViewerAction) -> Unit = {},
         pages: List<Bitmap> = samplePages,
         signField: Int? = null,
@@ -1492,11 +1545,19 @@ class ScreenshotTest {
             tip = tip,
             stamps = stamps,
             initialSelectedStamp = selectedStamp,
+            initialRedactions = redactions,
+            initialConfirmRedact = confirmRedact,
             onAction = onAction,
         )
     }
 
     private val letter = PageSize(612f, 792f)
+
+    /** The agreement's company name and the first line of its next paragraph, marked for redaction. */
+    private fun sampleRedactions(): List<RedactBox> {
+        val from = wordIndex(0, "Northwind")
+        return sampleWords[0].subList(from, from + 2).map { RedactBox(0, Rect(it.left, it.top, it.right, it.bottom)) }
+    }
 
     /** On page 2 of the sample: a signature on the Provider line and a date on its Date line. */
     private fun placedStamps(): List<PlacedStamp> {
