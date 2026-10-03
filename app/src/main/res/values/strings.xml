@@ -476,6 +476,11 @@
     <string name="page_colors_sepia">Sepia</string>
     <string name="settings_reading">Reading</string>
     <string name="settings_page_colors_detail">Night and sepia are easier on the eyes in the dark. Your PDF is not changed.</string>
+    <string name="settings_speech_rate">Read aloud speed</string>
+    <string name="settings_speech_rate_detail">How fast the voice reads. Takes effect from the next sentence.</string>
+    <string name="speech_rate_slow">Slow</string>
+    <string name="speech_rate_normal">Normal</string>
+    <string name="speech_rate_fast">Fast</string>
     <!-- Tips -->
     <string name="tip_read_zoom">Pinch to zoom. Double-tap to go back to the full page.</string>
     <string name="tip_annotate">Pick a tool, then mark the page. Pick it again to scroll with one finger.</string>

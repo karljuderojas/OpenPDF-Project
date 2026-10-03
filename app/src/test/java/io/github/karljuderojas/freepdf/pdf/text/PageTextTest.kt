@@ -2,6 +2,10 @@ package io.github.karljuderojas.freepdf.pdf.text
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.displayToPdf
 import io.github.karljuderojas.freepdf.pdf.edit.CropMargins
@@ -66,6 +70,54 @@ class PageTextTest {
         val services = words.first { it.text == "Services" }
         assertTrue(services.line > words[0].line)
         assertEquals(words.map { it.line }.sorted(), words.map { it.line })
+    }
+
+    /** A title across the page, then [rows] lines in each of two columns, drawn line by line across both. */
+    private fun twoColumnPage(rows: Int = 5): PDDocument {
+        val document = PDDocument()
+        val page = PDPage(PDRectangle.LETTER)
+        document.addPage(page)
+        PDPageContentStream(document, page).use { content ->
+            fun text(x: Float, y: Float, size: Float, s: String) {
+                content.beginText()
+                content.setFont(PDType1Font.HELVETICA, size)
+                content.newLineAtOffset(x, y)
+                content.showText(s)
+                content.endText()
+            }
+            text(72f, 720f, 18f, "A Title Across The Whole Page")
+            for (i in 0 until rows) {
+                text(72f, 680f - i * 14f, 11f, "left row $i of the first column")
+                text(320f, 680f - i * 14f, 11f, "right row $i of the second column")
+            }
+            text(72f, 400f, 11f, "A closing line that spans the whole width of the page under both columns")
+        }
+        return document
+    }
+
+    @Test
+    fun aTwoColumnPageReadsColumnByColumn() {
+        val words = twoColumnPage().use { PageText.words(it, 0) }
+        val text = words.joinToString(" ") { it.text }
+        val expected = "A Title Across The Whole Page " +
+            (0 until 5).joinToString(" ") { "left row $it of the first column" } + " " +
+            (0 until 5).joinToString(" ") { "right row $it of the second column" } +
+            " A closing line that spans the whole width of the page under both columns"
+        assertEquals(expected, text)
+        assertEquals("line numbers follow the new order", words.map { it.line }.sorted(), words.map { it.line })
+        assertTrue("each row of a column is its own line", words.first { it.text == "row" }.line != words.last { it.text == "row" }.line)
+        // Reading mode joins each column's rows, so the left column reads before the right one.
+        val paragraphs = Reflow.paragraphs(words)
+        assertTrue(paragraphs.joinToString(" ").indexOf("left row 4") < paragraphs.joinToString(" ").indexOf("right row 0"))
+    }
+
+    @Test
+    fun aPageWithOneWideGapIsNotTakenForColumns() {
+        // Only two lines break at the same place (a signature line and a date), which is a table row, not a column.
+        val words = twoColumnPage(rows = 2).use { PageText.words(it, 0) }
+        val text = words.map { it.text }
+        assertTrue(text.indexOf("first") < text.indexOf("second"))
+        assertTrue("rows stay as drawn", text.indexOf("second") < text.lastIndexOf("first"))
     }
 
     @Test

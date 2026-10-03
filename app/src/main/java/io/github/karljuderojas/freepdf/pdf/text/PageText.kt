@@ -31,6 +31,9 @@ data class PageWord(
  * boxed too, turned along with the page; text at any other angle is skipped. Text in a part of
  * the page a crop has taken away is skipped as well, and a word crossing the edge is cut to it,
  * so nothing off the page can be selected.
+ *
+ * On a page set in columns the words come column by column (see [Columns]), not line by line
+ * across the whole page.
  */
 object PageText {
 
@@ -103,7 +106,7 @@ object PageText {
         stripper.startPage = pageIndex + 1
         stripper.endPage = pageIndex + 1
         stripper.getText(document)
-        return words.mapNotNull { it.onPage() }
+        return Columns.order(words.mapNotNull { it.onPage() })
     }
 
     private fun PageWord.onPage(): PageWord? = DisplayRect(left, top, right, bottom).onPage()?.let {

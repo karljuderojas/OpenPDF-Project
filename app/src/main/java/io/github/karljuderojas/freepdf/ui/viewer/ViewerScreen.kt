@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -102,6 +103,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.karljuderojas.freepdf.FreePdfApp
@@ -268,6 +271,11 @@ fun ViewerScreen(
     viewModel: ViewerViewModel = viewModel(),
 ) {
     LaunchedEffect(uri) { viewModel.open(uri) }
+    // Leaving the app (Home, a call, the screen going off) pauses reading aloud; a rotation does not.
+    val activity = LocalActivity.current
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        if (activity?.isChangingConfigurations != true) viewModel.pauseReadAloud()
+    }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val savedSignatures by viewModel.savedSignatures.collectAsStateWithLifecycle()
     val signerName by viewModel.signerName.collectAsStateWithLifecycle()
@@ -409,6 +417,7 @@ fun ViewerScreen(
                         ReadAloudCommand.Next -> it.next()
                         ReadAloudCommand.Previous -> it.previous()
                         ReadAloudCommand.Stop -> it.stop()
+                        ReadAloudCommand.Acknowledge -> it.acknowledgeUnavailable()
                     }
                 }
                 is ViewerAction.Rotate -> viewModel.rotatePages(action.pages)
@@ -833,7 +842,11 @@ fun ViewerContent(
     }
     val readAloudUnavailable = stringResource(R.string.read_aloud_unavailable)
     LaunchedEffect(readAloud.unavailable) {
-        if (readAloud.unavailable) snackbarHostState.showSnackbar(readAloudUnavailable)
+        if (readAloud.unavailable) {
+            // Cleared at once so a rotation does not show it again; the message outlives this effect.
+            onAction(ViewerAction.ControlReadAloud(ReadAloudCommand.Acknowledge))
+            scope.launch { snackbarHostState.showSnackbar(readAloudUnavailable) }
+        }
     }
 
     // Leaving reading mode puts the page list where the reader had got to.
