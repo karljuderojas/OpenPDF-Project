@@ -1642,6 +1642,15 @@ class ScreenshotTest {
                     )
                 }
             },
+            loadEditableLines = { page ->
+                if (pages !== samplePages) emptyList()
+                else sampleWords[page % sampleWords.size].groupBy { it.line }.values.map { line ->
+                    EditableLine(
+                        line.joinToString(" ") { it.text },
+                        DisplayRect(line.minOf { it.left }, line.minOf { it.top }, line.maxOf { it.right }, line.maxOf { it.bottom }),
+                    )
+                }
+            },
             loadRegion = { index, fullWidth, region ->
                 largePages[index]?.takeIf { pages === samplePages }?.let { cropped(it, fullWidth, region) }
             },
