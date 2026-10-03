@@ -64,6 +64,7 @@ import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
 import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
 import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
+import io.github.karljuderojas.freepdf.speech.ReadAloudState
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
 import io.github.karljuderojas.freepdf.ui.files.UnsavedCloseDialog
 import io.github.karljuderojas.freepdf.ui.sign.CertificatePasswordDialog
@@ -325,6 +326,23 @@ class ScreenshotTest {
     @Test
     fun viewerReflowNightLarge() = capture("viewer_reflow_night_large") {
         viewer(ViewerMode.Read, reflow = true, pageColors = PageColors.Night, readingTextSize = 26)
+    }
+
+    @Test
+    fun viewerReadAloud() = capture("viewer_read_aloud") {
+        viewer(
+            ViewerMode.Read,
+            readAloud = ReadAloudState(active = true, speaking = true, page = 0, sentence = 2, text = "The Provider agrees to perform the services described in Schedule A."),
+        )
+    }
+
+    @Test
+    fun viewerReflowReadAloud() = capture("viewer_reflow_read_aloud") {
+        viewer(
+            ViewerMode.Read,
+            reflow = true,
+            readAloud = ReadAloudState(active = true, speaking = false, page = 0, sentence = 1, text = "Paused on this sentence."),
+        )
     }
 
     @Test
@@ -1319,6 +1337,7 @@ class ScreenshotTest {
         pageColors: PageColors = PageColors.Normal,
         reflow: Boolean = false,
         readingTextSize: Int = 18,
+        readAloud: ReadAloudState = ReadAloudState(),
         tip: Int? = null,
         stamps: List<PlacedStamp> = emptyList(),
         selectedStamp: Long? = null,
@@ -1367,6 +1386,7 @@ class ScreenshotTest {
             currentUri = openDocuments.firstOrNull()?.uri,
             pageColors = pageColors,
             initialReflow = reflow,
+            readAloud = readAloud,
             readingTextSize = readingTextSize,
             tip = tip,
             stamps = stamps,

@@ -24,6 +24,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,6 +34,7 @@ import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.text.Reflow
 import io.github.karljuderojas.freepdf.settings.PageColors
+import io.github.karljuderojas.freepdf.speech.ReadAloudState
 
 /**
  * Reading mode: the text of every page as wrapping paragraphs at a size the reader picks, in the
@@ -46,6 +50,7 @@ internal fun ReflowView(
     pageColors: PageColors,
     listState: LazyListState,
     modifier: Modifier = Modifier,
+    spoken: ReadAloudState? = null,
 ) {
     Box(modifier.fillMaxSize().background(pageColors.paper), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
@@ -58,14 +63,14 @@ internal fun ReflowView(
                 val paragraphs by produceState<List<String>?>(null, page, revision) {
                     value = Reflow.paragraphs(loadWords(page))
                 }
-                ReflowPage(page, paragraphs, textSize, pageColors)
+                ReflowPage(page, paragraphs, textSize, pageColors, spoken?.takeIf { it.page == page }?.sentence)
             }
         }
     }
 }
 
 @Composable
-private fun ReflowPage(page: Int, paragraphs: List<String>?, textSize: Int, pageColors: PageColors) {
+private fun ReflowPage(page: Int, paragraphs: List<String>?, textSize: Int, pageColors: PageColors, spokenSentence: Int?) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy((textSize * 0.7f).dp)) {
         Text(
             stringResource(R.string.page_label, page + 1),
@@ -80,8 +85,23 @@ private fun ReflowPage(page: Int, paragraphs: List<String>?, textSize: Int, page
                 fontSize = textSize.sp,
                 color = pageColors.ink.copy(alpha = 0.6f),
             )
-            else -> paragraphs.forEach { paragraph ->
-                Text(paragraph, fontSize = textSize.sp, lineHeight = (textSize * 1.5f).sp, color = pageColors.ink)
+            else -> {
+                // The sentence being read aloud is marked; sentences count on through the paragraphs.
+                var before = 0
+                paragraphs.forEach { paragraph ->
+                    val ranges = Reflow.sentenceRanges(paragraph)
+                    val marked = spokenSentence?.minus(before)?.let { ranges.getOrNull(it) }
+                    before += ranges.size
+                    Text(
+                        buildAnnotatedString {
+                            append(paragraph)
+                            if (marked != null) addStyle(SpanStyle(background = SPOKEN), marked.first, marked.last + 1)
+                        },
+                        fontSize = textSize.sp,
+                        lineHeight = (textSize * 1.5f).sp,
+                        color = pageColors.ink,
+                    )
+                }
             }
         }
     }
@@ -114,3 +134,4 @@ internal fun ReadingModeButton(onClick: () -> Unit) {
 }
 
 private val READING_WIDTH = 640.dp
+private val SPOKEN = Color(0x66FFD600)
