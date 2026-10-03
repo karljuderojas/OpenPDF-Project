@@ -82,6 +82,7 @@ import kotlinx.coroutines.launch
 /** What the viewer asks its view model to do. Page numbers are zero-based. */
 sealed interface ViewerAction {
     data object Undo : ViewerAction
+    data object Redo : ViewerAction
     data object Save : ViewerAction
     data object SaveAndClose : ViewerAction
     data class Rotate(val page: Int) : ViewerAction
@@ -92,9 +93,10 @@ sealed interface ViewerAction {
     data object Share : ViewerAction
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
-    data class Stroke(val page: Int, val tool: AnnotateTool, val points: List<Offset>) : ViewerAction
-    data class Box(val page: Int, val tool: AnnotateTool, val start: Offset, val end: Offset) : ViewerAction
-    data class Note(val page: Int, val at: Offset, val text: String) : ViewerAction
+    data class Stroke(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val points: List<Offset>) : ViewerAction
+    data class Box(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val start: Offset, val end: Offset) : ViewerAction
+    data class Note(val page: Int, val style: ToolStyle, val at: Offset, val text: String) : ViewerAction
+    data class SetToolStyle(val tool: AnnotateTool, val style: ToolStyle) : ViewerAction
     data class Erase(val page: Int, val at: Offset) : ViewerAction
 
     /** Sign actions. */
@@ -112,6 +114,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
     val state by viewModel.state.collectAsStateWithLifecycle()
     val savedSignatures by viewModel.savedSignatures.collectAsStateWithLifecycle()
     val signerName by viewModel.signerName.collectAsStateWithLifecycle()
+    val toolStyles by viewModel.toolStyles.collectAsStateWithLifecycle()
     val resources = LocalResources.current
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -144,10 +147,12 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
         loadPage = viewModel::page,
         savedSignatures = savedSignatures,
         signerName = signerName,
+        toolStyles = toolStyles,
         snackbarHostState = snackbarHostState,
         onAction = { action ->
             when (action) {
                 ViewerAction.Undo -> viewModel.undo()
+                ViewerAction.Redo -> viewModel.redo()
                 ViewerAction.Save -> viewModel.save()
                 ViewerAction.SaveAndClose -> viewModel.save(thenClose = true)
                 is ViewerAction.Rotate -> viewModel.rotatePage(action.page)
@@ -156,7 +161,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
                 ViewerAction.Merge -> mergePicker.launch(arrayOf("application/pdf"))
                 ViewerAction.Share -> viewModel.share()
-                is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.tool.rgb)
+                is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.style)
                 is ViewerAction.Box -> when (action.tool) {
                     AnnotateTool.Highlight -> Annotator.TextMarkup.Highlight
                     AnnotateTool.Underline -> Annotator.TextMarkup.Underline
@@ -164,12 +169,13 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                     else -> null
                 }.let { kind ->
                     if (kind != null) {
-                        viewModel.markText(action.page, action.start, action.end, kind, action.tool.rgb)
+                        viewModel.markText(action.page, action.start, action.end, kind, action.style)
                     } else {
-                        viewModel.shape(action.page, action.start, action.end, action.tool.rgb)
+                        viewModel.shape(action.page, action.start, action.end, action.style)
                     }
                 }
-                is ViewerAction.Note -> viewModel.note(action.page, action.at, action.text)
+                is ViewerAction.Note -> viewModel.note(action.page, action.at, action.text, action.style)
+                is ViewerAction.SetToolStyle -> viewModel.setToolStyle(action.tool, action.style)
                 is ViewerAction.Erase -> viewModel.erase(action.page, action.at)
                 is ViewerAction.SaveSignature -> viewModel.saveSignature(action.kind, action.image)
                 is ViewerAction.PlaceSignature -> viewModel.placeSignature(action.page, action.at, action.kind)
@@ -194,6 +200,7 @@ fun ViewerContent(
     initialTool: Int? = null,
     savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
     signerName: String = "",
+    toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onAction: (ViewerAction) -> Unit = {},
 ) {
@@ -208,6 +215,10 @@ fun ViewerContent(
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
+    // Chosen here so the page preview follows at once; the view model remembers them for next time.
+    var styles by remember { mutableStateOf(toolStyles) }
+    LaunchedEffect(toolStyles) { styles = styles + toolStyles }
+    fun styleOf(tool: AnnotateTool) = styles[tool] ?: tool.defaultStyle
 
     val ready = state as? ViewerState.Ready
     val pageCount = ready?.pageSizes?.size ?: 0
@@ -282,8 +293,11 @@ fun ViewerContent(
                             TextButton(onClick = { onAction(ViewerAction.Save) }) { Text(stringResource(R.string.save)) }
                         }
                     } else {
-                        if (ready?.canUndo == true) {
-                            TextButton(onClick = { onAction(ViewerAction.Undo) }) { Text(stringResource(R.string.undo)) }
+                        IconButton(onClick = { onAction(ViewerAction.Undo) }, enabled = ready?.canUndo == true) {
+                            Icon(EditIcons.Undo, contentDescription = stringResource(R.string.undo))
+                        }
+                        IconButton(onClick = { onAction(ViewerAction.Redo) }, enabled = ready?.canRedo == true) {
+                            Icon(EditIcons.Redo, contentDescription = stringResource(R.string.redo))
                         }
                         TextButton(onClick = { backToReading() }) {
                             Text(stringResource(R.string.done))
@@ -308,12 +322,20 @@ fun ViewerContent(
                 // Page tools act once on the selected page, so none stays highlighted.
                 mode == ViewerMode.Pages -> ToolStrip(mode, selectedTool = null, onToolSelected = { onPagesTool(it) })
                 // Choosing the active Annotate tool again puts it down, so one finger scrolls again.
-                mode == ViewerMode.Annotate -> ToolStrip(mode, selectedTool, onToolSelected = {
-                    when {
-                        selectedTool == it -> selectedTool = null
-                        else -> selectedTool = it
+                mode == ViewerMode.Annotate -> Column {
+                    AnnotateTool.forLabel(selectedTool)?.takeIf { it.hasStyle }?.let { tool ->
+                        StyleBar(tool, styleOf(tool), onStyleChange = {
+                            styles = styles + (tool to it)
+                            onAction(ViewerAction.SetToolStyle(tool, it))
+                        })
                     }
-                })
+                    ToolStrip(mode, selectedTool, onToolSelected = {
+                        when {
+                            selectedTool == it -> selectedTool = null
+                            else -> selectedTool = it
+                        }
+                    })
+                }
                 mode == ViewerMode.Sign -> Column {
                     SignTool.forLabel(selectedTool)?.let { tool ->
                         SignHint(
@@ -372,11 +394,14 @@ fun ViewerContent(
                             }
                         }
                         if (tool != null) {
+                            val style = styleOf(tool)
                             AnnotationLayer(
                                 page = page,
                                 tool = tool,
-                                onStroke = { onAction(ViewerAction.Stroke(page, tool, it)) },
-                                onBox = { start, end -> onAction(ViewerAction.Box(page, tool, start, end)) },
+                                style = style,
+                                pageWidthPt = ready.pageSizes[page].widthPt,
+                                onStroke = { onAction(ViewerAction.Stroke(page, tool, style, it)) },
+                                onBox = { start, end -> onAction(ViewerAction.Box(page, tool, style, start, end)) },
                                 onTap = { at ->
                                     if (tool == AnnotateTool.Note) pendingNote = page to at
                                     else onAction(ViewerAction.Erase(page, at))
@@ -448,7 +473,7 @@ fun ViewerContent(
             onDismiss = { pendingNote = null },
             onAdd = { text ->
                 pendingNote = null
-                onAction(ViewerAction.Note(page, at, text))
+                onAction(ViewerAction.Note(page, styleOf(AnnotateTool.Note), at, text))
             },
         )
     }
@@ -577,5 +602,3 @@ private fun TextEntryDialog(@StringRes title: Int, @StringRes hint: Int, onDismi
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
-
-private val AnnotateTool.rgb get() = Annotator.Rgb(color.red, color.green, color.blue)

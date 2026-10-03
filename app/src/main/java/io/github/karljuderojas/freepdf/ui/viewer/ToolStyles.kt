@@ -1,0 +1,122 @@
+package io.github.karljuderojas.freepdf.ui.viewer
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.addPathNodes
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import io.github.karljuderojas.freepdf.R
+import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
+
+/** A tool's colour and line thickness in PDF points (0 for tools without a thickness). */
+data class ToolStyle(val color: Color, val width: Float) {
+    val rgb: Annotator.Rgb get() = Annotator.Rgb(color.red, color.green, color.blue)
+}
+
+/** Light colours that leave text readable underneath: yellow, green, blue, pink, orange. */
+internal val HighlightColors = listOf(
+    Color(0xFFFFEB3B), Color(0xFF8BE37A), Color(0xFF7FD4FF), Color(0xFFFF99D6), Color(0xFFFFB74D),
+)
+
+/** Strong colours for pen, lines and shapes: black, blue, red, green, purple, orange. */
+internal val InkColors = listOf(
+    Color(0xFF212121), Color(0xFF2166E5), Color(0xFFE52929), Color(0xFF2E9E44), Color(0xFF8E24AA), Color(0xFFF57C00),
+)
+
+internal val PenWidths = listOf(1f, 2f, 4f, 8f)
+internal val LineWidths = listOf(1f, 2f, 3f)
+
+/**
+ * Above the Annotate tool strip while a tool is chosen: its colours, then its sizes. The choice
+ * is kept per tool, so the pen can stay thin and black while highlights stay yellow.
+ */
+@Composable
+fun StyleBar(tool: AnnotateTool, style: ToolStyle, onStyleChange: (ToolStyle) -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("style-bar")
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            tool.palette.forEachIndexed { index, color ->
+                val label = stringResource(R.string.style_colour, index + 1)
+                Swatch(selected = color == style.color, label = label, onClick = { onStyleChange(style.copy(color = color)) }) {
+                    Box(Modifier.size(24.dp).background(color, CircleShape).border(1.dp, Color.Black.copy(alpha = 0.15f), CircleShape))
+                }
+            }
+            if (tool.widths.isNotEmpty()) {
+                VerticalDivider(Modifier.height(28.dp).padding(horizontal = 4.dp))
+                tool.widths.forEachIndexed { index, width ->
+                    val label = stringResource(R.string.style_size, index + 1)
+                    Swatch(selected = width == style.width, label = label, onClick = { onStyleChange(style.copy(width = width)) }) {
+                        // Dots grow with the line they draw, from 6dp for the thinnest to 22dp.
+                        val dot = 6.dp + 16.dp * index / (tool.widths.size - 1).coerceAtLeast(1)
+                        Box(Modifier.size(dot).background(style.color, CircleShape))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A 36dp round target with a ring when selected. */
+@Composable
+private fun Swatch(selected: Boolean, label: String, onClick: () -> Unit, content: @Composable () -> Unit) {
+    val ring = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
+    Box(
+        Modifier
+            .size(36.dp)
+            .border(2.dp, ring, CircleShape)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
+    }
+}
+
+/** Material's undo and redo arrows. The core icon set the app uses does not include them. */
+internal object EditIcons {
+    val Undo: ImageVector = icon(
+        "Undo",
+        "M12.5,8c-2.65,0 -5.05,0.99 -6.9,2.6L2,7v9h9l-3.62,-3.62c1.39,-1.16 3.16,-1.88 5.12,-1.88 " +
+            "3.54,0 6.55,2.31 7.6,5.5l2.37,-0.78C21.08,11.03 17.15,8 12.5,8z",
+    )
+    val Redo: ImageVector = icon(
+        "Redo",
+        "M18.4,10.6C16.55,8.99 14.15,8 11.5,8c-4.65,0 -8.58,3.03 -9.96,7.22L3.9,16c1.05,-3.19 " +
+            "4.05,-5.5 7.6,-5.5 1.95,0 3.73,0.72 5.12,1.88L13,16h9V7l-3.6,3.6z",
+    )
+
+    private fun icon(name: String, path: String) = ImageVector.Builder(
+        name = name, defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f, autoMirror = true,
+    ).addPath(pathData = addPathNodes(path), fill = SolidColor(Color.Black)).build()
+}

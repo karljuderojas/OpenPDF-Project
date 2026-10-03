@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -25,6 +26,8 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
+import io.github.karljuderojas.freepdf.ui.viewer.AnnotateTool
+import io.github.karljuderojas.freepdf.ui.viewer.ToolStyle
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerContent
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerMode
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerState
@@ -120,6 +123,24 @@ class ScreenshotTest {
         captureRoot("viewer_annotate_pen")
     }
 
+    @Test
+    fun viewerAnnotatePenStyled() {
+        // A thick red pen picked from the style bar, with an undone stroke that Redo can bring back.
+        show {
+            viewer(
+                ViewerMode.Annotate,
+                sample.copy(canUndo = true, canRedo = true, hasUnsavedChanges = true),
+                tool = R.string.tool_pen,
+                toolStyles = mapOf(AnnotateTool.Pen to ToolStyle(Color(0xFFE52929), 8f)),
+            )
+        }
+        composeRule.onNodeWithTag("annotation-layer-0").performTouchInput {
+            down(Offset(200f, 900f))
+            for (i in 1..40) moveTo(Offset(200f + i * 12f, 900f + 40f * kotlin.math.sin(i / 6f)))
+        }
+        captureRoot("viewer_annotate_pen_styled")
+    }
+
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerAnnotateNote() {
@@ -207,6 +228,7 @@ class ScreenshotTest {
         tool: Int? = null,
         savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
         signerName: String = "",
+        toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
     ) {
         ViewerContent(
             state = state,
@@ -217,6 +239,7 @@ class ScreenshotTest {
             initialTool = tool,
             savedSignatures = savedSignatures,
             signerName = signerName,
+            toolStyles = toolStyles,
         )
     }
 

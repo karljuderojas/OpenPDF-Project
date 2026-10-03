@@ -24,7 +24,7 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ✅ Sticky tools: one finger draws while a tool is chosen; choose it again to scroll
 - ✅ Undo (shared with page edits)
 - ⬜ Text box (FreeText), stamps, ellipses
-- ⬜ Per-tool colours and sizes, redo
+- ✅ Per-tool colours and sizes (remembered per tool), redo
 - ⬜ Comments list
 
 ## Signing (Sign mode), see [signing-design.md](signing-design.md)
