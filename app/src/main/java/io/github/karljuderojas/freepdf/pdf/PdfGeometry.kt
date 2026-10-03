@@ -23,3 +23,19 @@ fun bitmapToPdf(
     x = x / bitmapWidth * pageWidthPt,
     y = pageHeightPt - y / bitmapHeight * pageHeightPt,
 )
+
+/**
+ * Converts a point on a page as displayed (0..1 across and down, origin top-left) to PDF user
+ * space. Viewers show a page turned by its /Rotate value (clockwise), while annotations are
+ * stored in the page's unrotated space, so the point is turned back first.
+ */
+fun displayToPdf(nx: Float, ny: Float, rotation: Int, cropBox: PdfRect): PdfPoint {
+    // (u, v): fractions across and down the unrotated page.
+    val (u, v) = when (((rotation % 360) + 360) % 360) {
+        90 -> ny to 1f - nx
+        180 -> 1f - nx to 1f - ny
+        270 -> 1f - ny to nx
+        else -> nx to ny
+    }
+    return PdfPoint(cropBox.left + u * cropBox.width, cropBox.top - v * cropBox.height)
+}

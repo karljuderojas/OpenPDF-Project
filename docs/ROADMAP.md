@@ -17,12 +17,12 @@ Goal: the features people use in PDFGear and Xodo, free, offline and open source
 - ⬜ Password-protected PDFs
 
 ## Annotating (Annotate mode)
-- 🧱 Highlight, underline, strikeout (`Annotator.markText`)
-- 🧱 Pen / ink (`Annotator.ink`)
-- 🧱 Sticky notes (`Annotator.note`)
-- 🧱 Rectangles and ellipses (`Annotator.shape`)
-- ⬜ Text box (FreeText), stamps, eraser
-- ⬜ Tool strip with sticky tools, per-tool colours and sizes, undo/redo
+- ✅ Highlight, underline, strikeout by dragging over the text (an area, until text selection lands)
+- ✅ Pen, rectangles, sticky notes, eraser (tap a mark to remove it)
+- ✅ Sticky tools: one finger draws while a tool is chosen; choose it again to scroll
+- ✅ Undo (shared with page edits)
+- ⬜ Text box (FreeText), stamps, ellipses
+- ⬜ Per-tool colours and sizes, redo
 - ⬜ Comments list
 
 ## Signing (Sign mode), see [signing-design.md](signing-design.md)

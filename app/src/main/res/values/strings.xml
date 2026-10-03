@@ -59,4 +59,8 @@
     <string name="delete_page_body">You can undo this until you leave the PDF.</string>
     <string name="unsaved_title">Save changes?</string>
     <string name="unsaved_body">This PDF has changes that are not saved yet.</string>
+    <string name="add">Add</string>
+    <string name="note_title">Add a note</string>
+    <string name="note_hint">Type your note</string>
+    <string name="nothing_to_erase">Nothing to erase here. Tap on a mark to remove it.</string>
 </resources>

@@ -9,7 +9,14 @@ import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import androidx.compose.ui.geometry.Offset
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget
 import io.github.karljuderojas.freepdf.R
+import io.github.karljuderojas.freepdf.pdf.PdfPoint
+import io.github.karljuderojas.freepdf.pdf.PdfRect
+import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
+import io.github.karljuderojas.freepdf.pdf.displayToPdf
 import io.github.karljuderojas.freepdf.pdf.edit.EditSession
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
@@ -127,6 +134,38 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         PdfDocuments.load(context, other).use { PageEditor.append(document, it) }
     }
 
+    fun ink(page: Int, strokes: List<List<Offset>>, color: Annotator.Rgb) = edit { document ->
+        val toPdf = displayMapper(document, page)
+        Annotator.ink(document, page, strokes.map { stroke -> stroke.map(toPdf) }, color)
+    }
+
+    fun markText(page: Int, start: Offset, end: Offset, kind: Annotator.TextMarkup, color: Annotator.Rgb) =
+        edit { document ->
+            Annotator.markText(document, page, listOf(boxOf(document, page, start, end)), kind, color)
+        }
+
+    fun shape(page: Int, start: Offset, end: Offset, color: Annotator.Rgb) = edit { document ->
+        Annotator.shape(document, page, boxOf(document, page, start, end), color = color)
+    }
+
+    fun note(page: Int, at: Offset, text: String) = edit { document ->
+        Annotator.note(document, page, displayMapper(document, page)(at), text)
+    }
+
+    /** Removes the topmost mark under [at]. Links and form fields are left alone. */
+    fun erase(page: Int, at: Offset) {
+        edit(onNoChange = R.string.nothing_to_erase) { document ->
+            val point = displayMapper(document, page)(at)
+            val pdfPage = document.getPage(page)
+            val annotations = pdfPage.annotations
+            val target = annotations.lastOrNull { annotation ->
+                annotation !is PDAnnotationLink && annotation !is PDAnnotationWidget &&
+                    annotation.rectangle?.contains(point.x, point.y) == true
+            } ?: throw NothingChanged()
+            pdfPage.annotations = annotations.filter { it !== target }
+        }
+    }
+
     fun undo() {
         viewModelScope.launch {
             lock.withLock {
@@ -178,14 +217,34 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         output.use { current.writeTo(it) }
     }
 
-    private fun edit(change: (PDDocument) -> Unit) {
+    /** Thrown from an edit that turns out to have nothing to do, so no undo step is recorded. */
+    private class NothingChanged : Exception()
+
+    private fun edit(@StringRes onNoChange: Int? = null, change: (PDDocument) -> Unit) {
         viewModelScope.launch {
             lock.withLock {
                 val result = runCatching { withContext(Dispatchers.IO) { session?.edit(change) } }
-                if (result.isFailure) _effects.send(ViewerEffect.Message(R.string.edit_failed))
-                _state.value = reloadLocked()
+                when (val error = result.exceptionOrNull()) {
+                    null -> _state.value = reloadLocked()
+                    is NothingChanged -> onNoChange?.let { _effects.send(ViewerEffect.Message(it)) }
+                    else -> _effects.send(ViewerEffect.Message(R.string.edit_failed))
+                }
             }
         }
+    }
+
+    /** Maps display fractions on [page] (see [AnnotationLayer]) to PDF space. */
+    private fun displayMapper(document: PDDocument, page: Int): (Offset) -> PdfPoint {
+        val pdfPage = document.getPage(page)
+        val crop = pdfPage.cropBox.let { PdfRect(it.lowerLeftX, it.lowerLeftY, it.upperRightX, it.upperRightY) }
+        return { displayToPdf(it.x, it.y, pdfPage.rotation, crop) }
+    }
+
+    private fun boxOf(document: PDDocument, page: Int, start: Offset, end: Offset): PdfRect {
+        val toPdf = displayMapper(document, page)
+        val a = toPdf(start)
+        val b = toPdf(end)
+        return PdfRect(minOf(a.x, b.x), minOf(a.y, b.y), maxOf(a.x, b.x), maxOf(a.y, b.y))
     }
 
     /** Re-opens the working copy in PDFium. Call with [lock] held. */
