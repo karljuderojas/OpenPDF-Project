@@ -4,10 +4,13 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
+import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -36,6 +39,18 @@ class DocumentInfoTest {
         assertEquals(0, info.signatureCount)
         assertEquals("1.7", info.pdfVersion)
         assertEquals(file.length(), info.fileSizeBytes)
+    }
+
+    @Test
+    fun readsAPdfLockedWithAnOpenPassword() {
+        val file = temp.newFile("locked.pdf")
+        PDDocument.load(sampleCopy()).use { document ->
+            document.protect(StandardProtectionPolicy("owner-secret", "open sesame", AccessPermission()).apply { encryptionKeyLength = 128 })
+            document.save(file)
+        }
+        val info = DocumentInfo.read(file, "open sesame")
+        assertTrue(info.encrypted)
+        assertEquals(2, info.pageCount)
     }
 
     @Test

@@ -36,8 +36,9 @@ data class DocumentInfo(
 ) {
     companion object {
 
-        /** Reads [file] with PdfBox. Throws if it is not a PDF PdfBox can open. */
-        fun read(file: File): DocumentInfo = PDDocument.load(file).use { read(it, file.length()) }
+        /** Reads [file] with PdfBox, unlocking it with [password]. Throws if PdfBox cannot open it. */
+        fun read(file: File, password: String = ""): DocumentInfo =
+            PDDocument.load(file, password).use { read(it, file.length()) }
 
         fun read(document: PDDocument, fileSizeBytes: Long): DocumentInfo {
             val info = document.documentInformation
