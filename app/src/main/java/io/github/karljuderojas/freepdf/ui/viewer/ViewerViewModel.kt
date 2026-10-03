@@ -1691,7 +1691,9 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
     private suspend fun remember(uri: Uri) {
         val name = withContext(Dispatchers.IO) { displayName(uri) }
         val lasting = Documents.lasting(uri, context.filesDir) {
-            context.contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
+            context.contentResolver.persistedUriPermissions.any {
+                it.isReadPermission && (it.uri == uri || uri.toString().startsWith(it.uri.toString() + "/document/"))
+            }
         }
         val app = getApplication<FreePdfApp>()
         app.documents.opened(uri.toString(), name, remember = lasting && app.settings.rememberHistory.value)

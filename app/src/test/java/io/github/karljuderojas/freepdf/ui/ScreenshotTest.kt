@@ -24,6 +24,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Scaffold
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.background
@@ -85,7 +86,13 @@ import io.github.karljuderojas.freepdf.settings.SpeechRate
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
 import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
 import io.github.karljuderojas.freepdf.speech.ReadAloudState
+import io.github.karljuderojas.freepdf.files.FolderFile
+import io.github.karljuderojas.freepdf.files.FolderSort
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
+import io.github.karljuderojas.freepdf.ui.files.FilesTopBar
+import io.github.karljuderojas.freepdf.ui.files.FilesView
+import io.github.karljuderojas.freepdf.ui.files.FilesViewChips
+import io.github.karljuderojas.freepdf.ui.files.FolderContent
 import io.github.karljuderojas.freepdf.ui.files.UnsavedCloseDialog
 import io.github.karljuderojas.freepdf.ui.sign.CertificatePasswordDialog
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
@@ -474,6 +481,24 @@ class ScreenshotTest {
 
     @Test
     fun filesEmpty() = capture("files_empty") { files(open = emptyList(), recent = emptyList()) }
+
+    @Test
+    fun filesFolderEmpty() = capture("files_folder_empty") { folder(name = null, files = null) }
+
+    @Test
+    fun filesFolder() = capture("files_folder") {
+        folder(
+            name = "Download",
+            files = listOf(
+                FolderFile("content://d/1", "Bank statement September.pdf", now - 2 * HOUR, 182_000),
+                FolderFile("content://d/2", "Lease renewal 2027.pdf", now - 3 * 24 * HOUR, 1_450_000),
+                FolderFile("content://d/3", "Boarding pass.pdf", now - 12 * 24 * HOUR, 64_000),
+                FolderFile("content://d/4", "Invoice 1042.pdf", now - 40 * 24 * HOUR, 310_000),
+                FolderFile("content://d/5", "Tax return 2025.pdf", now - 200 * 24 * HOUR, 5_200_000),
+            ),
+            sort = FolderSort.Date,
+        )
+    }
 
     @Test
     fun files() = capture("files") {
@@ -2037,6 +2062,16 @@ class ScreenshotTest {
     ) = shell(MainTab.Files) {
         FilesContent(open, recent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {}, modifier = it, unsaved = unsaved, now = now)
         if (closing) UnsavedCloseDialog(onSave = {}, onDiscard = {}, onCancel = {}, stamps = stamps)
+    }
+
+    @Composable
+    private fun folder(name: String?, files: List<FolderFile>?, sort: FolderSort = FolderSort.Name) = shell(MainTab.Files) {
+        Scaffold(modifier = it, topBar = { FilesTopBar { FilesViewChips(FilesView.Folder, {}) } }) { padding ->
+            FolderContent(
+                folderName = name, files = files, unreadable = false, refreshing = false, sort = sort,
+                onSort = {}, onRefresh = {}, onChoose = {}, onForget = {}, onOpen = {}, modifier = Modifier.padding(padding),
+            )
+        }
     }
 
     /** A tab's screen inside the bottom tab bar, as the app shows it. */

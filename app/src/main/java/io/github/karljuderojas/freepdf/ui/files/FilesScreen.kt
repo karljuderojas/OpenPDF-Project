@@ -32,6 +32,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -67,9 +68,43 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Calendar
 
-/** The Files tab: PDFs open now, recent history grouped by day, and Open file. */
+/** The Files tab: a Recent view (PDFs open now, history by day, Open file) and a Folder view of one chosen folder. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
+    var view by rememberSaveable { mutableStateOf(FilesView.Recent) }
+    val switch: @Composable () -> Unit = { FilesViewChips(view, { view = it }) }
+    when (view) {
+        FilesView.Recent -> RecentFilesScreen(onOpenPdf, switch, modifier)
+        FilesView.Folder -> Scaffold(
+            modifier = modifier,
+            topBar = { FilesTopBar(switch) },
+        ) { padding -> FolderScreen(onOpenPdf, Modifier.padding(padding)) }
+    }
+}
+
+enum class FilesView { Recent, Folder }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun FilesTopBar(viewSwitch: @Composable () -> Unit) {
+    Column {
+        TopAppBar(title = { Text(stringResource(R.string.files_title)) })
+        viewSwitch()
+    }
+}
+
+/** The switch between the Recent and Folder views, under the tab's title. */
+@Composable
+fun FilesViewChips(view: FilesView, onView: (FilesView) -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(view == FilesView.Recent, { onView(FilesView.Recent) }, { Text(stringResource(R.string.files_view_recent)) })
+        FilterChip(view == FilesView.Folder, { onView(FilesView.Folder) }, { Text(stringResource(R.string.files_view_folder)) })
+    }
+}
+
+@Composable
+private fun RecentFilesScreen(onOpenPdf: (Uri) -> Unit, viewSwitch: @Composable () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val documents = (context.applicationContext as FreePdfApp).documents
     val open by documents.open.collectAsStateWithLifecycle()
@@ -107,6 +142,7 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
                 .onFailure { Toast.makeText(context, R.string.share_failed, Toast.LENGTH_SHORT).show() }
         },
         onForget = { documents.forget(it.uri) },
+        viewSwitch = viewSwitch,
         modifier = modifier,
     )
 
@@ -189,10 +225,11 @@ fun FilesContent(
     modifier: Modifier = Modifier,
     unsaved: Set<String> = emptySet(),
     now: Long = System.currentTimeMillis(),
+    viewSwitch: @Composable () -> Unit = {},
 ) {
     Scaffold(
         modifier = modifier,
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.files_title)) }) },
+        topBar = { FilesTopBar(viewSwitch) },
         floatingActionButton = {
             if (open.isNotEmpty() || recent.isNotEmpty()) {
                 ExtendedFloatingActionButton(
