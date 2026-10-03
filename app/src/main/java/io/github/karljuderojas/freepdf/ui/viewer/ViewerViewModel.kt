@@ -573,6 +573,11 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
         }
     }
 
+    /** Trims each page in [margins] by its own margins. */
+    fun trimMargins(margins: Map<Int, CropMargins>) = edit(movesPages = true) { document ->
+        margins.forEach { (page, trim) -> PageCrop.crop(document, listOf(page), trim) }
+    }
+
     /** Adds a link over [box] on [page] (fractions of the page as shown) that leads to [target]. */
     fun addLink(page: Int, box: DisplayRect, target: LinkTarget) = edit { PageLinks.add(it, page, box, target) }
 
