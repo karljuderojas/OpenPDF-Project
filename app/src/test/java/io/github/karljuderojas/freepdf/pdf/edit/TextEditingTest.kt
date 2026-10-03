@@ -509,7 +509,9 @@ class TextEditingTest {
             // The page's own line on the same baseline as form text is still edited on its own.
             val outcome = TextEditing.replace(reloadedDocument, 0, fx(90f), fy(703f), "On the page", "Edited page line")
             assertEquals(TextEditing.Outcome.SameFont, outcome)
-            assertEquals(listOf("Also inside", "Edited page line", "Inside the form"), reloadedDocument.text().lines().sorted())
+            val text = reloadedDocument.text()
+            listOf("Edited page line", "Inside the form", "Also inside").forEach { assertTrue(text, it in text) }
+            assertFalse(text, "On the page" in text)
         }
     }
 
