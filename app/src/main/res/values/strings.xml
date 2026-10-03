@@ -60,6 +60,8 @@
     <string name="tool_insert">Insert blank</string>
     <string name="tool_extract">Extract</string>
     <string name="tool_merge">Merge</string>
+    <string name="tool_select_all">Select all</string>
+    <string name="tool_share_selected">Share selected</string>
     <string name="tool_split">Split</string>
     <string name="tool_password">Password</string>
     <string name="tool_print">Print</string>
@@ -102,6 +104,16 @@
     <string name="edit_failed">That change could not be made to this PDF.</string>
     <string name="cannot_delete_last_page">A PDF needs at least one page.</string>
     <string name="delete_page_title">Delete page %1$d?</string>
+    <plurals name="delete_pages_title">
+        <item quantity="one">Delete %1$d page?</item>
+        <item quantity="other">Delete %1$d pages?</item>
+    </plurals>
+    <plurals name="pages_selected">
+        <item quantity="one">%1$d page selected</item>
+        <item quantity="other">%1$d pages selected</item>
+    </plurals>
+    <string name="clear_selection">Clear selection</string>
+    <string name="select_page">Select page %1$d</string>
     <string name="delete_page_body">You can undo this until you leave the PDF.</string>
     <string name="unsaved_title">Save changes?</string>
     <string name="unsaved_body">This PDF has changes that are not saved yet.</string>
@@ -332,7 +344,7 @@
     <string name="tip_read_zoom">Pinch to zoom. Double-tap to go back to the full page.</string>
     <string name="tip_annotate">Pick a tool, then mark the page. Pick it again to scroll with one finger.</string>
     <string name="tip_sign">Pick Signature, then tap where you want to sign. You draw it once; it is saved on this phone.</string>
-    <string name="tip_pages">Tap a page to select it, then pick what to do with it.</string>
+    <string name="tip_pages">Tap a page to select it, or tap the circles to pick several. Hold a page and drag it to move it.</string>
     <string name="tip_edit">Add text or a picture, then drag it into place. Done writes it into the PDF.</string>
     <string name="tip_got_it">Got it</string>
     <string name="settings_tips">Tips</string>

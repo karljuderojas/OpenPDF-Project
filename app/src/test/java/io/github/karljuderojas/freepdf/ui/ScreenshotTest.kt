@@ -24,6 +24,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
 import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.dp
 import androidx.core.content.res.ResourcesCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
@@ -98,6 +99,8 @@ class ScreenshotTest {
     // Page 1 at 2.5x, standing in for PDFium's sharp rendering of a zoomed page.
     private val largePages by lazy { mapOf(0 to loadSample("page-1-large.png")) }
     private val sample = ViewerState.Ready(List(samplePages.size) { PageSize(612f, 792f) })
+    // The two sample pages repeated, for the selection and drag screens.
+    private val sixPages = ViewerState.Ready(List(6) { PageSize(612f, 792f) })
 
     // The sign-up form (sample/form.pdf), with its fields read by the app's own code.
     private val formPages = listOf(loadSample("form-page.png"))
@@ -623,6 +626,39 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerPagesMultiSelect() = capture("viewer_pages_multi_select") {
+        viewer(ViewerMode.Pages, sixPages, selectedPages = setOf(0, 2, 3))
+    }
+
+    @Test
+    fun viewerPagesDeleteSeveral() {
+        show { viewer(ViewerMode.Pages, sixPages, selectedPages = setOf(0, 2, 3)) }
+        composeRule.onNodeWithText("Delete").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_delete_several.png")
+    }
+
+    @Test
+    fun viewerPagesTip() = capture("viewer_pages_tip") { viewer(ViewerMode.Pages, sixPages, tip = R.string.tip_pages) }
+
+    /** Page 3 held and dragged up over page 2, before it is let go. */
+    @Test
+    fun viewerPagesDragging() {
+        show { viewer(ViewerMode.Pages, sixPages) }
+        val page3 = composeRule.onNodeWithText("Page 3")
+        page3.performTouchInput { down(center) }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        page3.performTouchInput {
+            repeat(10) {
+                moveBy(Offset(19.dp.toPx(), -20.dp.toPx()))
+                advanceEventTime(16)
+            }
+        }
+        composeRule.waitForIdle()
+        captureRoot("viewer_pages_dragging")
+    }
+
+    @Test
     fun viewerMore() = capture("viewer_more") { viewer(ViewerMode.More) }
 
     @OptIn(ExperimentalRoborazziApi::class)
@@ -778,6 +814,7 @@ class ScreenshotTest {
         mode: ViewerMode,
         state: ViewerState = sample,
         selectedPage: Int = 0,
+        selectedPages: Set<Int> = setOf(selectedPage),
         tool: Int? = null,
         savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
         signerName: String = "",
@@ -796,14 +833,15 @@ class ScreenshotTest {
         ViewerContent(
             state = state,
             onBack = {},
-            loadPage = { index, width -> scaled(withMarks(pages[index], index, marks), width) },
+            loadPage = { index, width -> scaled(withMarks(pages[index % pages.size], index, marks), width) },
             // The agreement's words and sharp, zoomed-in renders; the form has neither.
-            loadWords = { if (pages === samplePages) sampleWords[it] else emptyList() },
+            loadWords = { if (pages === samplePages) sampleWords[it % sampleWords.size] else emptyList() },
             loadRegion = { index, fullWidth, region ->
                 largePages[index]?.takeIf { pages === samplePages }?.let { cropped(it, fullWidth, region) }
             },
             initialMode = mode,
             initialSelectedPage = selectedPage,
+            initialSelectedPages = selectedPages,
             initialTool = tool,
             savedSignatures = savedSignatures,
             signerName = signerName,
