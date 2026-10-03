@@ -36,13 +36,19 @@ object Annotator {
         StrikeOut(PDAnnotationTextMarkup.SUB_TYPE_STRIKEOUT),
     }
 
-    /** Highlights, underlines or strikes out one or more line rectangles (one per text line). */
+    /**
+     * Highlights, underlines or strikes out one or more line rectangles (one per text line).
+     * [lineWidth] is the thickness of an underline or strikeout; highlights ignore it. [comment]
+     * is shown as the mark's note in other viewers.
+     */
     fun markText(
         document: PDDocument,
         pageIndex: Int,
         lines: List<PdfRect>,
         kind: TextMarkup = TextMarkup.Highlight,
         color: Rgb = Rgb.Yellow,
+        lineWidth: Float = 1f,
+        comment: String? = null,
         author: String? = null,
     ) {
         require(lines.isNotEmpty())
@@ -52,6 +58,8 @@ object Annotator {
             quadPoints = lines.flatMap {
                 listOf(it.left, it.top, it.right, it.top, it.left, it.bottom, it.right, it.bottom)
             }.toFloatArray()
+            if (kind != TextMarkup.Highlight) borderStyle = PDBorderStyleDictionary().apply { width = lineWidth }
+            if (comment != null) contents = comment
             this.color = color.toPdColor()
             stamp(author)
         }
@@ -86,12 +94,19 @@ object Annotator {
     }
 
     /** A sticky note icon that opens to show [text]. */
-    fun note(document: PDDocument, pageIndex: Int, at: PdfPoint, text: String, author: String? = null) {
+    fun note(
+        document: PDDocument,
+        pageIndex: Int,
+        at: PdfPoint,
+        text: String,
+        color: Rgb = Rgb.Yellow,
+        author: String? = null,
+    ) {
         val annotation = PDAnnotationText().apply {
             rectangle = PdfRect(at.x, at.y - 20f, at.x + 20f, at.y).toPdRectangle()
             contents = text
             name = PDAnnotationText.NAME_COMMENT
-            color = Rgb.Yellow.toPdColor()
+            this.color = color.toPdColor()
             stamp(author)
         }
         document.getPage(pageIndex).annotations.add(annotation)

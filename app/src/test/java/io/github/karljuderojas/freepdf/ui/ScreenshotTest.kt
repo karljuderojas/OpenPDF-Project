@@ -2,17 +2,29 @@ package io.github.karljuderojas.freepdf.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.Looper
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
+import androidx.compose.ui.unit.IntRect
+import androidx.core.content.res.ResourcesCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
@@ -22,21 +34,48 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.form.FormFiller
 import io.github.karljuderojas.freepdf.files.DocumentEntry
+import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
+import io.github.karljuderojas.freepdf.pdf.annotate.Mark
+import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
+import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
+import io.github.karljuderojas.freepdf.pdf.render.PageBox
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureFields
+import io.github.karljuderojas.freepdf.pdf.text.PageText
+import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
+import io.github.karljuderojas.freepdf.settings.PageColors
+import io.github.karljuderojas.freepdf.settings.ThemeChoice
+import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
+import io.github.karljuderojas.freepdf.ui.home.HomeContent
+import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
+import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
+import io.github.karljuderojas.freepdf.ui.viewer.DocumentInfoDialog
+import io.github.karljuderojas.freepdf.ui.viewer.AnnotateTool
+import io.github.karljuderojas.freepdf.ui.viewer.ToolStyle
+import io.github.karljuderojas.freepdf.ui.viewer.GoToPageDialog
+import io.github.karljuderojas.freepdf.ui.viewer.SearchResults
+import io.github.karljuderojas.freepdf.ui.viewer.TextMatch
+import io.github.karljuderojas.freepdf.ui.viewer.PlacedStamp
+import io.github.karljuderojas.freepdf.ui.viewer.StampContent
+import io.github.karljuderojas.freepdf.ui.viewer.StampGeometry
+import io.github.karljuderojas.freepdf.ui.viewer.ViewerAction
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerContent
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerMode
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerState
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.util.Calendar
+
+private const val HOUR = 60 * 60 * 1000L
 
 /**
  * Renders each screen to a PNG. CI runs `recordRoborazziDebug` on every pull request and posts
@@ -55,6 +94,9 @@ class ScreenshotTest {
     val composeRule = createComposeRule()
 
     private val samplePages = listOf(loadSample("page-1.png"), loadSample("page-2.png"))
+
+    // Page 1 at 2.5x, standing in for PDFium's sharp rendering of a zoomed page.
+    private val largePages by lazy { mapOf(0 to loadSample("page-1-large.png")) }
     private val sample = ViewerState.Ready(List(samplePages.size) { PageSize(612f, 792f) })
 
     // The sign-up form (sample/form.pdf), with its fields read by the app's own code.
@@ -72,25 +114,54 @@ class ScreenshotTest {
     }
 
     @Test
+    fun home() = capture("home") { shell(MainTab.Home) { HomeContent(sampleRecent, {}, {}, {}, {}, {}, {}, modifier = it) } }
+
+    @Test
+    fun homeEmpty() = capture("home_empty") { shell(MainTab.Home) { HomeContent(emptyList(), {}, {}, {}, {}, {}, {}, modifier = it) } }
+
+    @Test
+    fun tools() = capture("tools") { shell(MainTab.Tools) { ToolsContent(onToolPicked = {}, modifier = it) } }
+
+    @Test
+    fun toolsSearch() = capture("tools_search_tick") {
+        shell(MainTab.Tools) { ToolsContent(onToolPicked = {}, modifier = it, initialQuery = "tick") }
+    }
+
+    @Test
+    fun toolsSearchNothing() = capture("tools_search_none") {
+        shell(MainTab.Tools) { ToolsContent(onToolPicked = {}, modifier = it, initialQuery = "spreadsheet") }
+    }
+
+    @Test
+    fun settings() = capture("settings") {
+        shell(MainTab.Settings) {
+            SettingsContent(
+                theme = ThemeChoice.System,
+                onTheme = {},
+                rememberHistory = true,
+                onRememberHistory = {},
+                onClearHistory = {},
+                version = "0.1.0",
+                onSourceCode = {},
+                showTips = true,
+                onShowTips = {},
+                onResetTips = {},
+                modifier = it,
+                pageColors = PageColors.Normal,
+                onPageColors = {},
+            )
+        }
+    }
+
+    @Test
     fun filesEmpty() = capture("files_empty") { files(open = emptyList(), recent = emptyList()) }
 
     @Test
-    fun files() {
-        val hour = 60 * 60 * 1000L
-        val agreement = DocumentEntry("content://a", "Service Agreement.pdf", now - 1 * hour)
-        capture("files") {
-            files(
-                open = listOf(agreement, DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * hour)),
-                recent = listOf(
-                    agreement,
-                    DocumentEntry("content://c", "W-9 form.pdf", now - 5 * hour),
-                    DocumentEntry("content://d", "Bakery menu draft.pdf", now - 20 * hour),
-                    DocumentEntry("content://e", "Invoice 1042.pdf", now - 30 * hour),
-                    DocumentEntry("content://f", "Lease renewal 2027.pdf", now - 4 * 24 * hour),
-                    DocumentEntry("content://g", "Insurance claim.pdf", now - 9 * 24 * hour),
-                ),
-            )
-        }
+    fun files() = capture("files") {
+        files(
+            open = listOf(sampleRecent[0], DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * HOUR)),
+            recent = sampleRecent,
+        )
     }
 
     @Test
@@ -99,11 +170,49 @@ class ScreenshotTest {
     @Test
     fun viewerReadZoomed() {
         show { viewer(ViewerMode.Read) }
+        composeRule.waitForIdle()
         // Pinch out to about 2.5x while dragging both fingers down, which pans to the page's title.
+        // The clock is held, so the first capture is the scaled page before it is sharpened.
+        composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithTag("page-list").performTouchInput {
             pinch(Offset(440f, 250f), Offset(340f, 1300f), Offset(640f, 450f), Offset(740f, 1900f))
         }
+        composeRule.mainClock.advanceTimeByFrame()
+        captureRoot("viewer_read_zoomed_mid_pinch")
+        // Once the view has been still for a moment, the visible part is rendered at 2.5x.
+        composeRule.mainClock.advanceTimeBy(1_000)
+        composeRule.waitForIdle()
         captureRoot("viewer_read_zoomed")
+    }
+
+    @Test
+    fun viewerReadOpenDocs() = capture("viewer_read_open_docs") {
+        viewer(ViewerMode.Read, openDocuments = sampleRecent.take(3))
+    }
+
+    @Test
+    fun viewerSwitcher() {
+        show { viewer(ViewerMode.Read, openDocuments = sampleRecent.take(3)) }
+        composeRule.onNodeWithTag("open-documents").performClick()
+        composeRule.waitForIdle()
+        // The sheet is its own window, so capture the whole screen rather than the root node.
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_switcher.png")
+    }
+
+    @Test
+    fun viewerReadNight() = capture("viewer_read_night") { viewer(ViewerMode.Read, pageColors = PageColors.Night) }
+
+    @Test
+    fun viewerReadSepia() = capture("viewer_read_sepia") { viewer(ViewerMode.Read, pageColors = PageColors.Sepia) }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPageColorsMenu() {
+        show { viewer(ViewerMode.Read, pageColors = PageColors.Night) }
+        composeRule.onNodeWithContentDescription("Page colors").performClick()
+        composeRule.waitForIdle()
+        // The menu is a popup, so capture the whole screen rather than the root node.
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_page_colors_menu.png")
     }
 
     @Test
@@ -112,17 +221,105 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerSearch() = capture("viewer_search") {
+        // Where "Client" sits in the sample, from pdftotext -bbox, in points from the top left.
+        fun match(page: Int, left: Float, top: Float, right: Float, bottom: Float) =
+            TextMatch(page, listOf(PageBox(left / 612f, top / 792f, right / 612f, bottom / 792f)))
+        val results = SearchResults(
+            query = "Client",
+            matches = listOf(
+                match(0, 93.0f, 165.5f, 118.0f, 175.2f),
+                match(0, 202.7f, 293.5f, 229.6f, 303.2f),
+                match(0, 424.5f, 350.5f, 451.4f, 360.2f),
+                match(0, 170.6f, 407.5f, 197.5f, 417.2f),
+                match(1, 396.5f, 138.5f, 423.3f, 148.2f),
+                match(1, 72.0f, 343.2f, 96.3f, 352.0f),
+            ),
+        )
+        viewer(ViewerMode.Read, search = results, searchQuery = "Client")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerGoToPage() {
+        // Shown over the viewer directly; tapping "Page 1 of 2" opens the same dialog. Its page
+        // field takes focus, and the blinking cursor never lets Compose go idle, so the dialog
+        // opens only after the clock is being driven by hand.
+        val open = mutableStateOf(false)
+        show {
+            viewer(ViewerMode.Read)
+            if (open.value) GoToPageDialog(pageCount = 2, onDismiss = {}, onGo = {})
+        }
+        composeRule.mainClock.autoAdvance = false
+        open.value = true
+        composeRule.mainClock.advanceTimeBy(500)
+        // The dialog is its own window, which is attached and laid out by the main looper.
+        shadowOf(Looper.getMainLooper()).idle()
+        composeRule.mainClock.advanceTimeBy(500)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_go_to_page.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerOutline() {
+        val outline = listOf(OutlineItem("Service Agreement", 0, 0)) +
+            listOf("1. Services", "2. Timeline", "3. Fees and payment", "4. Changes", "5. Ownership")
+                .map { OutlineItem(it, 0, 1) } +
+            listOf("6. Confidentiality", "7. Termination", "Signatures").map { OutlineItem(it, 1, 1) }
+        show { viewer(ViewerMode.Read, sample.copy(outline = outline)) }
+        composeRule.onNodeWithContentDescription("Contents").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_outline.png")
+    }
+
+    @Test
+    fun viewerPassword() = capture("viewer_password") { viewer(ViewerMode.Read, ViewerState.Locked()) }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPasswordWrong() {
+        show { viewer(ViewerMode.Read, ViewerState.Locked(wrongPassword = true)) }
+        // Typing focuses the field, whose blinking cursor never lets Compose go idle.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("password-field").performTextInput("lease2026")
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_password_wrong.png")
+    }
+
+    @Test
     fun viewerAnnotate() = capture("viewer_annotate") { viewer(ViewerMode.Annotate) }
 
     @Test
     fun viewerAnnotateHighlight() {
         show { viewer(ViewerMode.Annotate, tool = R.string.tool_highlight) }
-        // Mid-drag across the "1. Services" paragraph, so the preview shows.
-        composeRule.onNodeWithTag("annotation-layer-0").performTouchInput {
-            down(Offset(118f, 258f))
-            listOf(200f, 420f, 640f, 836f).forEachIndexed { i, x -> moveTo(Offset(x, 262f + i * 20f)) }
+        // Mid-drag from "Northwind" into the paragraph's second line: the preview snaps to whole words.
+        val from = wordIndex(0, "Northwind")
+        val layer = "annotation-layer-0"
+        composeRule.onNodeWithTag(layer).performTouchInput {
+            down(wordCentre(layer, 0, from))
+            moveTo(wordCentre(layer, 0, from + 3))
+            moveTo(wordCentre(layer, 0, from + 17))
         }
         captureRoot("viewer_annotate_highlight")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerSelectText() {
+        show { viewer(ViewerMode.Read) }
+        // Press and hold on "Northwind", then drag to the end of the next line.
+        val from = wordIndex(0, "Northwind")
+        val layer = "text-layer-0"
+        composeRule.onNodeWithTag(layer).performTouchInput { down(wordCentre(layer, 0, from)) }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        composeRule.onNodeWithTag(layer).performTouchInput {
+            moveTo(wordCentre(layer, 0, from + 6))
+            moveTo(wordCentre(layer, 0, from + 20))
+            up()
+        }
+        composeRule.waitForIdle()
+        // The popup is its own window, so capture the whole screen.
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_select_text.png")
     }
 
     @Test
@@ -138,6 +335,24 @@ class ScreenshotTest {
         captureRoot("viewer_annotate_pen")
     }
 
+    @Test
+    fun viewerAnnotatePenStyled() {
+        // A thick red pen picked from the style bar, with an undone stroke that Redo can bring back.
+        show {
+            viewer(
+                ViewerMode.Annotate,
+                sample.copy(canUndo = true, canRedo = true, hasUnsavedChanges = true),
+                tool = R.string.tool_pen,
+                toolStyles = mapOf(AnnotateTool.Pen to ToolStyle(Color(0xFFE52929), 8f)),
+            )
+        }
+        composeRule.onNodeWithTag("annotation-layer-0").performTouchInput {
+            down(Offset(200f, 900f))
+            for (i in 1..40) moveTo(Offset(200f + i * 12f, 900f + 40f * kotlin.math.sin(i / 6f)))
+        }
+        captureRoot("viewer_annotate_pen_styled")
+    }
+
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerAnnotateNote() {
@@ -151,7 +366,49 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerAnnotateTip() = capture("viewer_annotate_tip") { viewer(ViewerMode.Annotate, tip = R.string.tip_annotate) }
+
+    @Test
+    fun viewerMarkSelected() {
+        show { viewer(ViewerMode.Read, marks = sampleMarks) }
+        // Tap the highlight over "Northwind Studio": it gets an outline and the edit bar replaces the mode bar.
+        val highlight = sampleMarks.first()
+        composeRule.onNodeWithTag("mark-layer-0").performTouchInput {
+            click(Offset((highlight.left + highlight.right) / 2 * width, (highlight.top + highlight.bottom) / 2 * height))
+        }
+        composeRule.waitForIdle()
+        captureRoot("viewer_mark_selected")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerComments() {
+        show { viewer(ViewerMode.Annotate, marks = sampleMarks) }
+        composeRule.onNodeWithText("Comments").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        // The sheet is its own window, so capture the whole screen.
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_comments.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerAnnotateTextBox() {
+        show { viewer(ViewerMode.Annotate, tool = R.string.tool_text_box) }
+        // The dialog's text field keeps Compose from going idle, as in viewerAnnotateNote.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("annotation-layer-0").performTouchInput { click(Offset(300f, 1000f)) }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_annotate_text_box.png")
+    }
+
+    @Test
+    fun viewerAnnotateStamp() = capture("viewer_annotate_stamp") { viewer(ViewerMode.Annotate, tool = R.string.tool_stamp) }
+
+    @Test
     fun viewerSign() = capture("viewer_sign") { viewer(ViewerMode.Sign) }
+
+    @Test
+    fun viewerSignTip() = capture("viewer_sign_tip") { viewer(ViewerMode.Sign, tip = R.string.tip_sign) }
 
     @Test
     fun viewerSignPlacing() = capture("viewer_sign_placing") {
@@ -160,6 +417,42 @@ class ScreenshotTest {
             tool = R.string.tool_signature,
             savedSignatures = mapOf(SignatureStore.Kind.Signature to SignatureInk.render(sampleSignature(), 0xFF1A3FA8.toInt(), 6f)),
         )
+    }
+
+    @Test
+    fun viewerSignAdjust() {
+        // A signature just placed on the Provider line, selected, and a date beside it.
+        show { viewer(ViewerMode.Sign, stamps = placedStamps(), selectedStamp = 1L) }
+        composeRule.onNodeWithTag("page-list").performScrollToIndex(1)
+        captureRoot("viewer_sign_adjust")
+    }
+
+    @Test
+    fun viewerSignMoveResize() {
+        show {
+            var stamps by remember { mutableStateOf(placedStamps()) }
+            viewer(ViewerMode.Sign, stamps = stamps, selectedStamp = 1L, onAction = { action ->
+                stamps = when (action) {
+                    is ViewerAction.MoveStamp -> stamps.map { if (it.id == action.id) it.copy(box = it.box.moved(action.delta.x, action.delta.y)) else it }
+                    is ViewerAction.ResizeStamp -> stamps.map { if (it.id == action.id) it.copy(box = it.box.scaled(action.factor, letter)) else it }
+                    else -> stamps
+                }
+            })
+        }
+        composeRule.onNodeWithTag("page-list").performScrollToIndex(1)
+        // Drag the signature down to the Client line, then pull its corner to make it bigger.
+        composeRule.onNodeWithTag("stamp-1").performTouchInput {
+            down(center)
+            for (i in 1..10) moveBy(Offset(0f, 13.5f))
+            up()
+        }
+        composeRule.onNodeWithTag("stamp-resize-1").performTouchInput {
+            down(center)
+            for (i in 1..10) moveBy(Offset(10f, 3f))
+            up()
+        }
+        composeRule.waitForIdle()
+        captureRoot("viewer_sign_move_resize")
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
@@ -181,6 +474,30 @@ class ScreenshotTest {
 
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
+    fun viewerSignPadTyped() {
+        show { viewer(ViewerMode.Sign, signerName = "Dana Whitfield") }
+        composeRule.onNodeWithText("Signature").performClick()
+        composeRule.onNodeWithTag("pad-tab-type").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_pad_typed.png")
+    }
+
+    @Test
+    fun viewerSignPlacingTyped() {
+        val typeface = ResourcesCompat.getFont(RuntimeEnvironment.getApplication(), R.font.dancing_script)!!
+        capture("viewer_sign_placing_typed") {
+            viewer(
+                ViewerMode.Sign,
+                tool = R.string.tool_signature,
+                savedSignatures = mapOf(
+                    SignatureStore.Kind.Signature to TypedSignature.render("Dana Whitfield", typeface, 0xFF1A3FA8.toInt()),
+                ),
+            )
+        }
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
     fun viewerSignFinish() {
         show { viewer(ViewerMode.Sign, sample.copy(canUndo = true, hasUnsavedChanges = true, hasSignature = true), signerName = "Dana Whitfield") }
         // The dialog's name field takes focus, and its blinking cursor never lets Compose go idle,
@@ -195,10 +512,15 @@ class ScreenshotTest {
     @Test
     fun viewerSignFields() = capture("viewer_sign_fields") { viewer(ViewerMode.Sign, signing, signField = 0) }
 
+    // Both places tapped: each holds the signature, fitted to it and still movable; the last one is selected.
     @Test
     fun viewerSignFieldsDone() = capture("viewer_sign_fields_done") {
-        val done = signing.copy(signedFields = signing.signFields.indices.toSet(), canUndo = true, hasUnsavedChanges = true, hasSignature = true)
-        viewer(ViewerMode.Sign, done, signField = 1)
+        val signature = SignatureInk.render(sampleSignature(), 0xFF1A3FA8.toInt(), 6f)
+        val stamps = signing.signFields.mapIndexed { i, field ->
+            val box = StampGeometry.fieldBox(field.box, signature.width, signature.height, signing.pageSizes[field.page])
+            PlacedStamp(i + 1L, field.page, StampContent.Signature(SignatureStore.Kind.Signature, signature), box)
+        }
+        viewer(ViewerMode.Sign, signing, signField = 1, stamps = stamps, selectedStamp = stamps.size.toLong())
     }
 
     @Test
@@ -239,6 +561,67 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerFillForm() {
+        show { viewer(ViewerMode.Sign, form, tool = R.string.tool_fill_form, pages = formPages) }
+        // Bring the selected Fill form chip into view at the end of the tool strip.
+        composeRule.onNodeWithText("Fill form").performScrollTo()
+        captureRoot("viewer_fill_form")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerFillFormText() {
+        // Editing a name typed earlier.
+        val filled = form.copy(formFields = form.formFields.map { if (it.name == "name") it.copy(value = "Dana Whitfield") else it })
+        show { viewer(ViewerMode.Sign, filled, tool = R.string.tool_fill_form, pages = formPages) }
+        // A dialog with a text field never lets Compose go idle here (see viewerAnnotateNote),
+        // so drive the clock by hand from here.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("form-field-name-0").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_fill_form_text.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerFillFormChoice() {
+        show { viewer(ViewerMode.Sign, form, tool = R.string.tool_fill_form, pages = formPages) }
+        composeRule.onNodeWithTag("form-field-team-10").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_fill_form_choice.png")
+    }
+
+    @Test
+    fun viewerFillFormNoFields() = capture("viewer_fill_form_no_fields") {
+        viewer(ViewerMode.Sign, tool = R.string.tool_fill_form)
+    }
+
+    @Test
+    fun viewerEdit() = capture("viewer_edit") { viewer(ViewerMode.Edit) }
+
+    @Test
+    fun viewerEditAddText() = capture("viewer_edit_add_text") { viewer(ViewerMode.Edit, tool = R.string.tool_add_text) }
+
+    @Test
+    fun viewerEditPlaced() {
+        // A heading typed with Add text, and a picture from Add image, selected so its handles show.
+        val heading = "Draft - for review"
+        val picture = sampleLogo()
+        val stamps = listOf(
+            PlacedStamp(
+                1L, 0, StampContent.Text(heading, null),
+                StampGeometry.textBox(Offset(0.1f, 0.06f), listOf(heading), letter, StampGeometry.EDIT_TEXT_SIZE) { it.length * 0.5f },
+            ),
+            PlacedStamp(
+                2L, 0, StampContent.Image(picture),
+                StampGeometry.imageBox(Offset(0.72f, 0.2f), picture.width, picture.height, letter).scaled(0.6f, letter),
+            ),
+        )
+        show { viewer(ViewerMode.Edit, sample.copy(canUndo = true), stamps = stamps, selectedStamp = 2L) }
+        captureRoot("viewer_edit_placed")
+    }
+
+    @Test
     fun viewerPages() = capture("viewer_pages") {
         viewer(ViewerMode.Pages, sample.copy(canUndo = true, hasUnsavedChanges = true), selectedPage = 1)
     }
@@ -253,15 +636,180 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_delete.png")
     }
 
+    // The dialogs' page fields keep Compose from going idle, so drive the clock by hand.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesExtract() {
+        show { viewer(ViewerMode.Pages, selectedPage = 1) }
+        composeRule.onNodeWithText("Extract").performScrollTo()
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Extract").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_extract.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesSplit() {
+        show { viewer(ViewerMode.Pages, selectedPage = 0) }
+        composeRule.onNodeWithText("Split").performScrollTo()
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Split").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_split.png")
+    }
+
     @Test
     fun viewerMore() = capture("viewer_more") { viewer(ViewerMode.More) }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerShare() {
+        show { viewer(ViewerMode.Read) }
+        composeRule.onNodeWithContentDescription("Share").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_share.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPasswordAdd() {
+        show { viewer(ViewerMode.More) }
+        // The dialog's fields never let Compose go idle, so drive the clock by hand and capture
+        // without further input, like the Extract and Split dialogs.
+        composeRule.onNodeWithText("Password").performScrollTo()
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Password").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_password_add.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerShareSomePages() {
+        show { viewer(ViewerMode.Read) }
+        composeRule.onNodeWithContentDescription("Share").performClick()
+        composeRule.onNodeWithText("Some pages only").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_share_some_pages.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPasswordLocked() {
+        show { viewer(ViewerMode.More, sample.copy(isProtected = true)) }
+        composeRule.onNodeWithText("Password").performScrollTo()
+        composeRule.onNodeWithText("Password").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_password_locked.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerDocumentInfo() {
+        fun at(day: Int, hour: Int, minute: Int) =
+            Calendar.getInstance().apply { set(2026, Calendar.SEPTEMBER, day, hour, minute, 0) }.toInstant()
+        val info = DocumentInfo(
+            title = "Service Agreement",
+            author = "Dana Whitfield",
+            creator = "Microsoft Word",
+            producer = "Microsoft Word for Microsoft 365",
+            created = at(28, 9, 30),
+            modified = at(30, 16, 5),
+            pageCount = 2,
+            pageSize = PageSize(612f, 792f),
+            pdfVersion = "1.7",
+            fileSizeBytes = 84_000,
+        )
+        show {
+            viewer(ViewerMode.More)
+            DocumentInfoDialog("Service Agreement.pdf", info, onDismiss = {})
+        }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_document_info.png")
+    }
+
+    /** Words of the sample's pages, found by the app's own PageText from the sample PDF. */
+    private val sampleWords: List<List<PageWord>> by lazy {
+        val stream = javaClass.classLoader!!.getResourceAsStream("sample/agreement.pdf") ?: error("Missing sample/agreement.pdf")
+        PDDocument.load(stream).use { document -> List(document.numberOfPages) { PageText.words(document, it) } }
+    }
+
+    /** A highlight with a comment, a pen drawing and a note, as Marks.list would report them. */
+    private val sampleMarks: List<Mark> by lazy {
+        val words = sampleWords[0]
+        val from = wordIndex(0, "Northwind")
+        val highlighted = words.subList(from, from + 2)
+        val modified = Calendar.getInstance().apply { set(2026, Calendar.OCTOBER, 3, 14, 20, 0) }.timeInMillis
+        listOf(
+            Mark(
+                page = 0, index = 0, kind = Mark.Kind.Highlight,
+                left = highlighted.first().left, top = highlighted.first().top,
+                right = highlighted.last().right, bottom = highlighted.last().bottom,
+                color = Annotator.Rgb.Yellow, width = 1f, comment = "Should this be Northwind Studio Ltd?",
+                markedText = "Northwind Studio", author = "Dana", modified = modified,
+            ),
+            Mark(
+                page = 0, index = 1, kind = Mark.Kind.Ink, left = 0.55f, top = 0.47f, right = 0.8f, bottom = 0.52f,
+                color = Annotator.Rgb.Blue, width = 2f, comment = "", markedText = "", author = null, modified = modified,
+            ),
+            Mark(
+                page = 1, index = 0, kind = Mark.Kind.Note, left = 0.7f, top = 0.2f, right = 0.733f, bottom = 0.225f,
+                color = Annotator.Rgb.Yellow, width = 1f, comment = "Both parties sign here.", markedText = "",
+                author = "Dana", modified = modified,
+            ),
+        )
+    }
+
+    /** [page] with the sample marks painted on, as PDFium would show them. */
+    private fun withMarks(page: Bitmap, index: Int, marks: List<Mark>): Bitmap {
+        val copy = page.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = android.graphics.Canvas(copy)
+        marks.filter { it.page == index }.forEach { mark ->
+            val c = mark.color ?: return@forEach
+            val paint = android.graphics.Paint().apply {
+                color = android.graphics.Color.argb(if (mark.kind == Mark.Kind.Highlight) 110 else 255, (c.r * 255).toInt(), (c.g * 255).toInt(), (c.b * 255).toInt())
+                style = if (mark.kind == Mark.Kind.Ink) android.graphics.Paint.Style.STROKE else android.graphics.Paint.Style.FILL
+                strokeWidth = 4f
+            }
+            canvas.drawRect(mark.left * copy.width, mark.top * copy.height, mark.right * copy.width, mark.bottom * copy.height, paint)
+        }
+        return copy
+    }
+
+    private fun wordIndex(page: Int, text: String) = sampleWords[page].indexOfFirst { it.text == text }.also { check(it >= 0) { "No $text" } }
+
+    /** The middle of a word, in pixels of the node tagged [tag], which covers the page. */
+    private fun wordCentre(tag: String, page: Int, index: Int): Offset {
+        val size = composeRule.onNodeWithTag(tag).fetchSemanticsNode().size
+        val word = sampleWords[page][index]
+        return Offset((word.left + word.right) / 2 * size.width, (word.top + word.bottom) / 2 * size.height)
+    }
 
     // 3 Oct 2026, 15:00 on the test machine's clock, so Today and Yesterday group the same way everywhere.
     private val now = Calendar.getInstance().apply { set(2026, Calendar.OCTOBER, 3, 15, 0, 0) }.timeInMillis
 
+    private val sampleRecent = listOf(
+        DocumentEntry("content://a", "Service Agreement.pdf", now - 1 * HOUR),
+        DocumentEntry("content://c", "W-9 form.pdf", now - 5 * HOUR),
+        DocumentEntry("content://d", "Bakery menu draft.pdf", now - 20 * HOUR),
+        DocumentEntry("content://e", "Invoice 1042.pdf", now - 30 * HOUR),
+        DocumentEntry("content://f", "Lease renewal 2027.pdf", now - 4 * 24 * HOUR),
+        DocumentEntry("content://g", "Insurance claim.pdf", now - 9 * 24 * HOUR),
+    )
+
     @Composable
-    private fun files(open: List<DocumentEntry>, recent: List<DocumentEntry>) {
-        FilesContent(open, recent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {}, now = now)
+    private fun files(open: List<DocumentEntry>, recent: List<DocumentEntry>) = shell(MainTab.Files) {
+        FilesContent(open, recent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {}, modifier = it, now = now)
+    }
+
+    /** A tab's screen inside the bottom tab bar, as the app shows it. */
+    @Composable
+    private fun shell(tab: MainTab, content: @Composable (Modifier) -> Unit) {
+        AppShell(selected = tab, onSelect = {}) { _, modifier -> content(modifier) }
     }
 
     @Composable
@@ -272,19 +820,63 @@ class ScreenshotTest {
         tool: Int? = null,
         savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
         signerName: String = "",
+        toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
+        marks: List<Mark> = emptyList(),
+        search: SearchResults = SearchResults(),
+        searchQuery: String? = null,
+        openDocuments: List<DocumentEntry> = emptyList(),
+        pageColors: PageColors = PageColors.Normal,
+        tip: Int? = null,
+        stamps: List<PlacedStamp> = emptyList(),
+        selectedStamp: Long? = null,
+        onAction: (ViewerAction) -> Unit = {},
         pages: List<Bitmap> = samplePages,
         signField: Int? = null,
     ) {
         ViewerContent(
             state = state,
             onBack = {},
-            loadPage = { index, width -> scaled(pages[index], width) },
+            loadPage = { index, width -> scaled(withMarks(pages[index], index, marks), width) },
+            // The agreement's words and sharp, zoomed-in renders; the form has neither.
+            loadWords = { if (pages === samplePages) sampleWords[it] else emptyList() },
+            loadRegion = { index, fullWidth, region ->
+                largePages[index]?.takeIf { pages === samplePages }?.let { cropped(it, fullWidth, region) }
+            },
             initialMode = mode,
             initialSelectedPage = selectedPage,
             initialTool = tool,
             initialSignField = signField,
             savedSignatures = savedSignatures,
             signerName = signerName,
+            toolStyles = toolStyles,
+            marks = marks,
+            search = search,
+            initialSearchQuery = searchQuery,
+            openDocuments = openDocuments,
+            currentUri = openDocuments.firstOrNull()?.uri,
+            pageColors = pageColors,
+            tip = tip,
+            stamps = stamps,
+            initialSelectedStamp = selectedStamp,
+            onAction = onAction,
+        )
+    }
+
+    private val letter = PageSize(612f, 792f)
+
+    /** On page 2 of the sample: a signature on the Provider line and a date on its Date line. */
+    private fun placedStamps(): List<PlacedStamp> {
+        val signature = SignatureInk.render(sampleSignature(), 0xFF1A3FA8.toInt(), 6f)
+        val date = "Oct 3, 2026"
+        return listOf(
+            PlacedStamp(
+                1L, 1, StampContent.Signature(SignatureStore.Kind.Signature, signature),
+                StampGeometry.signatureBox(Offset(0.3f, 0.322f), signature.width, signature.height, SignatureStore.Kind.Signature, letter),
+            ),
+            PlacedStamp(
+                2L, 1, StampContent.Text(date, "date"),
+                StampGeometry.textBox(Offset(0.565f, 0.316f), listOf(date), letter) { it.length * 0.5f },
+            ),
         )
     }
 
@@ -311,8 +903,38 @@ class ScreenshotTest {
         return listOf(loops, underline)
     }
 
+    /** A made-up company logo: a blue rounded badge with a white check, on a see-through background. */
+    private fun sampleLogo(): Bitmap {
+        val bitmap = Bitmap.createBitmap(400, 400, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        paint.color = 0xFF1A3FA8.toInt()
+        canvas.drawRoundRect(20f, 20f, 380f, 380f, 80f, 80f, paint)
+        paint.color = android.graphics.Color.WHITE
+        paint.style = android.graphics.Paint.Style.STROKE
+        paint.strokeWidth = 40f
+        paint.strokeCap = android.graphics.Paint.Cap.ROUND
+        canvas.drawLines(floatArrayOf(110f, 210f, 175f, 275f, 175f, 275f, 295f, 130f), paint)
+        return bitmap
+    }
+
     private fun scaled(page: Bitmap, width: Int): Bitmap =
         Bitmap.createScaledBitmap(page, width, width * page.height / page.width, true)
+
+    /** [region] of [page] as it would look with the whole page scaled to [fullWidth]. */
+    private fun cropped(page: Bitmap, fullWidth: Int, region: IntRect): Bitmap {
+        val ratio = page.width.toFloat() / fullWidth
+        val source = android.graphics.Rect(
+            (region.left * ratio).toInt(), (region.top * ratio).toInt(),
+            (region.right * ratio).toInt(), (region.bottom * ratio).toInt(),
+        )
+        val out = Bitmap.createBitmap(region.width, region.height, Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(out).apply {
+            drawColor(android.graphics.Color.WHITE)
+            drawBitmap(page, source, android.graphics.Rect(0, 0, region.width, region.height), android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+        }
+        return out
+    }
 
     private fun loadSample(name: String): Bitmap {
         val stream = javaClass.classLoader!!.getResourceAsStream("sample/$name") ?: error("Missing sample/$name")

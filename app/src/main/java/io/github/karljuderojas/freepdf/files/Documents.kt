@@ -22,7 +22,7 @@ class Documents(private val prefs: SharedPreferences, private val clock: () -> L
 
     private val _open = MutableStateFlow<List<DocumentEntry>>(emptyList())
 
-    /** Opened since the app started and not closed from the Files tab, newest first. */
+    /** Opened since the app started and not closed since, newest first, at most [MAX_OPEN]. */
     val open: StateFlow<List<DocumentEntry>> = _open.asStateFlow()
 
     /**
@@ -31,7 +31,7 @@ class Documents(private val prefs: SharedPreferences, private val clock: () -> L
      */
     fun opened(uri: String, name: String, remember: Boolean) {
         val entry = DocumentEntry(uri, name, clock())
-        _open.update { list -> listOf(entry) + list.filter { it.uri != uri } }
+        _open.update { list -> (listOf(entry) + list.filter { it.uri != uri }).take(MAX_OPEN) }
         if (remember) {
             _recent.update { list -> (listOf(entry) + list.filter { it.uri != uri }).take(MAX_RECENT) }
             writeRecent()
@@ -42,8 +42,18 @@ class Documents(private val prefs: SharedPreferences, private val clock: () -> L
         _open.update { list -> list.filter { it.uri != uri } }
     }
 
+    fun closeAll() {
+        _open.value = emptyList()
+    }
+
     fun forget(uri: String) {
         _recent.update { list -> list.filter { it.uri != uri } }
+        writeRecent()
+    }
+
+    /** Empties the history. Files open right now stay open. */
+    fun clearHistory() {
+        _recent.value = emptyList()
         writeRecent()
     }
 
@@ -65,5 +75,8 @@ class Documents(private val prefs: SharedPreferences, private val clock: () -> L
     private companion object {
         const val KEY = "recent"
         const val MAX_RECENT = 50
+
+        // The viewer's switcher lists every open file, so the oldest drop off past this.
+        const val MAX_OPEN = 8
     }
 }

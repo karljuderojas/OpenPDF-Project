@@ -1,10 +1,13 @@
 package io.github.karljuderojas.freepdf.pdf.edit
 
+import android.graphics.Bitmap
 import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
+import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
 import com.tom_roush.pdfbox.util.Matrix
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
 
@@ -19,6 +22,18 @@ object PageEditor {
 
     fun delete(document: PDDocument, pageIndex: Int) {
         document.removePage(pageIndex)
+    }
+
+    /**
+     * Removes every page not in [pages], so the rest keep their document order. Used to make a
+     * new PDF from some of the pages; [pages] must name at least one page that exists.
+     */
+    fun keepOnly(document: PDDocument, pages: List<Int>) {
+        val keep = pages.toSet()
+        require(keep.isNotEmpty() && keep.all { it in 0 until document.numberOfPages }) { "No such pages: $pages" }
+        for (index in document.numberOfPages - 1 downTo 0) {
+            if (index !in keep) document.removePage(index)
+        }
     }
 
     fun move(document: PDDocument, fromIndex: Int, toIndex: Int) {
@@ -84,6 +99,25 @@ object PageEditor {
             }
         }
     }
+
+    /**
+     * Draws [image] [width] by [height] points with its bottom-left corner at [at], upright as the
+     * page is shown. Photos are stored as JPEG to keep the file small; pictures with transparency
+     * (logos, screenshots with cut-outs) are stored losslessly so the page shows through.
+     */
+    fun addImage(document: PDDocument, pageIndex: Int, image: Bitmap, at: PdfPoint, width: Float, height: Float) {
+        val page = document.getPage(pageIndex)
+        val xObject = if (image.hasAlpha()) {
+            LosslessFactory.createFromImage(document, image)
+        } else {
+            JPEGFactory.createFromImage(document, image, JPEG_QUALITY)
+        }
+        PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true, true).use { stream ->
+            stream.uprightAt(page, at) { drawImage(xObject, 0f, 0f, width, height) }
+        }
+    }
+
+    private const val JPEG_QUALITY = 0.85f
 
     /**
      * Runs [draw] with the origin at [at] and the axes turned so that what it draws is upright

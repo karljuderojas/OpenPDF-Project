@@ -30,6 +30,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.sign.SignField
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
+
+/** The places to sign in [ready] with a signature in them, counting [stamps] still being placed or moved. */
+fun signedPlaces(ready: ViewerState.Ready, stamps: List<PlacedStamp>): Set<Int> {
+    val placed = stamps.filter { (it.content as? StampContent.Signature)?.kind == SignatureStore.Kind.Signature }
+    return ready.signedFields + ready.signFields.indices.filter { i ->
+        placed.any { ready.signFields[i].covers(it.page, it.box.left + it.box.width / 2, it.box.top + it.box.height / 2) }
+    }
+}
 
 /**
  * Marks the places to sign on one page. [fields] pairs each place with its index in

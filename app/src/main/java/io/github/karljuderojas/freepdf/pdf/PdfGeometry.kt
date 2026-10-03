@@ -40,22 +40,28 @@ fun displayToPdf(nx: Float, ny: Float, rotation: Int, cropBox: PdfRect): PdfPoin
     return PdfPoint(cropBox.left + u * cropBox.width, cropBox.top - v * cropBox.height)
 }
 
+/**
+ * The reverse of [displayToPdf]: where a point in PDF user space appears on the page as
+ * displayed, as fractions across and down (origin top-left).
+ */
+fun pdfToDisplay(x: Float, y: Float, rotation: Int, cropBox: PdfRect): Pair<Float, Float> {
+    // (u, v): fractions across and down the unrotated page.
+    val u = (x - cropBox.left) / cropBox.width
+    val v = (cropBox.top - y) / cropBox.height
+    return when (((rotation % 360) + 360) % 360) {
+        90 -> 1f - v to u
+        180 -> 1f - u to 1f - v
+        270 -> v to 1f - u
+        else -> u to v
+    }
+}
+
 /** A box on a page as displayed, in fractions (0..1 across and down, origin top-left). */
 data class DisplayRect(val left: Float, val top: Float, val right: Float, val bottom: Float)
 
-/** Where [rect], in the page's unrotated PDF space, appears on the page as displayed. The inverse of [displayToPdf]. */
+/** Where [rect], in the page's unrotated PDF space, appears on the page as displayed. */
 fun pdfToDisplay(rect: PdfRect, rotation: Int, cropBox: PdfRect): DisplayRect {
-    fun corner(x: Float, y: Float): Pair<Float, Float> {
-        val u = (x - cropBox.left) / cropBox.width
-        val v = (cropBox.top - y) / cropBox.height
-        return when (((rotation % 360) + 360) % 360) {
-            90 -> 1f - v to u
-            180 -> 1f - u to 1f - v
-            270 -> v to 1f - u
-            else -> u to v
-        }
-    }
-    val a = corner(rect.left, rect.bottom)
-    val b = corner(rect.right, rect.top)
+    val a = pdfToDisplay(rect.left, rect.bottom, rotation, cropBox)
+    val b = pdfToDisplay(rect.right, rect.top, rotation, cropBox)
     return DisplayRect(minOf(a.first, b.first), minOf(a.second, b.second), maxOf(a.first, b.first), maxOf(a.second, b.second))
 }
