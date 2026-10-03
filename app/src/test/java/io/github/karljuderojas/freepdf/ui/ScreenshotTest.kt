@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -43,6 +44,8 @@ import io.github.karljuderojas.freepdf.ui.home.HomeContent
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
 import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
+import io.github.karljuderojas.freepdf.ui.viewer.AnnotateTool
+import io.github.karljuderojas.freepdf.ui.viewer.ToolStyle
 import io.github.karljuderojas.freepdf.ui.viewer.GoToPageDialog
 import io.github.karljuderojas.freepdf.ui.viewer.SearchResults
 import io.github.karljuderojas.freepdf.ui.viewer.TextMatch
@@ -250,6 +253,24 @@ class ScreenshotTest {
         captureRoot("viewer_annotate_pen")
     }
 
+    @Test
+    fun viewerAnnotatePenStyled() {
+        // A thick red pen picked from the style bar, with an undone stroke that Redo can bring back.
+        show {
+            viewer(
+                ViewerMode.Annotate,
+                sample.copy(canUndo = true, canRedo = true, hasUnsavedChanges = true),
+                tool = R.string.tool_pen,
+                toolStyles = mapOf(AnnotateTool.Pen to ToolStyle(Color(0xFFE52929), 8f)),
+            )
+        }
+        composeRule.onNodeWithTag("annotation-layer-0").performTouchInput {
+            down(Offset(200f, 900f))
+            for (i in 1..40) moveTo(Offset(200f + i * 12f, 900f + 40f * kotlin.math.sin(i / 6f)))
+        }
+        captureRoot("viewer_annotate_pen_styled")
+    }
+
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerAnnotateNote() {
@@ -412,6 +433,7 @@ class ScreenshotTest {
         tool: Int? = null,
         savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
         signerName: String = "",
+        toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
         search: SearchResults = SearchResults(),
         searchQuery: String? = null,
         stamps: List<PlacedStamp> = emptyList(),
@@ -428,6 +450,7 @@ class ScreenshotTest {
             initialTool = tool,
             savedSignatures = savedSignatures,
             signerName = signerName,
+            toolStyles = toolStyles,
             search = search,
             initialSearchQuery = searchQuery,
             stamps = stamps,
