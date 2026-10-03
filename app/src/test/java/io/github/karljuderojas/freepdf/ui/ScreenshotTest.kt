@@ -81,9 +81,9 @@ class ScreenshotTest {
     @Test
     fun viewerReadZoomed() {
         show { viewer(ViewerMode.Read) }
-        // Pinch out to about 2.5x on the first page while drifting both fingers up, which pans.
+        // Pinch out to about 2.5x while dragging both fingers down, which pans to the page's title.
         composeRule.onNodeWithTag("page-list").performTouchInput {
-            pinch(Offset(440f, 1050f), Offset(340f, 700f), Offset(640f, 1250f), Offset(740f, 1300f))
+            pinch(Offset(440f, 250f), Offset(340f, 1300f), Offset(640f, 450f), Offset(740f, 1900f))
         }
         captureRoot("viewer_read_zoomed")
     }
