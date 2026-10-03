@@ -21,6 +21,10 @@ object PdfText {
         return PDType0Font.load(document, PDFBoxResourceLoader.getStream(LIBERATION_SANS))
     }
 
+    /** [fontFor] in bold where the standard bold Helvetica can show [text]; other scripts stay regular. */
+    fun boldFontFor(document: PDDocument, text: String): PDFont =
+        PDType1Font.HELVETICA_BOLD.takeIf { it.canShow(text.replace("\n", "").replace('\t', ' ')) } ?: fontFor(document, text)
+
     /**
      * [text] with tabs turned into spaces and any character [font] has no glyph for replaced by
      * "?", so showText never throws. Line breaks are kept: callers draw one line at a time.

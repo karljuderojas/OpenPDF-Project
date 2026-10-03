@@ -60,6 +60,13 @@ jobs:
             pdftoppm -png -f 1 -l 1 -scale-to 1080 -singlefile \
               app/build/outputs/qa/textbox-and-stamps.pdf app/build/outputs/roborazzi/pdf_textbox_and_stamps
           fi
+      # WatermarksTest stamps a diagonal CONFIDENTIAL across the sample's first page.
+      - name: Render the watermarked page
+        run: |
+          if [ -f app/build/outputs/qa/watermarks.pdf ]; then
+            pdftoppm -png -f 1 -l 1 -scale-to 1080 -singlefile \
+              app/build/outputs/qa/watermarks.pdf app/build/outputs/roborazzi/pdf_watermarked_page
+          fi
       # FlattenerTest flattens a highlight, a drawing, a note and a box into the sample's first page.
       - name: Render the locked copy
         run: |
