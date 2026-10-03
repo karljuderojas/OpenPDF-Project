@@ -1149,7 +1149,6 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 runCatching {
                     withContext(Dispatchers.IO) { current.undo() }
                     if (editLog.isNotEmpty()) editLog.removeAt(editLog.lastIndex)
-                    if (signedLog.isNotEmpty()) signedLog.removeAt(signedLog.lastIndex)
                     _effects.send(ViewerEffect.Message(R.string.edit_failed))
                     reloadLocked()
                 }.getOrElse { ViewerState.Failed(first.message) }
