@@ -93,6 +93,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -1192,8 +1193,15 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
         }
         pendingRedaction = null
         val marked = boxes.distinctBy { it.page }.size
-        _redacting.value = RedactProgress(1, marked)
         viewModelScope.launch {
+            // After process death the picker's answer can arrive before open() has the PDF back
+            // (or before the user has typed its password again): the copy waits for that.
+            _state.first { it is ViewerState.Ready || it is ViewerState.Failed }
+            if (session == null) {
+                discard(target, R.string.redact_failed)
+                return@launch
+            }
+            _redacting.value = RedactProgress(1, marked)
             val result = try {
                 runCatching {
                     lock.withLock {
