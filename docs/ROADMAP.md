@@ -39,7 +39,7 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ✅ Type a signature or initials instead of drawing them, in one of two bundled script fonts
 - ⬜ Photograph a signature on paper
 - ⬜ Field detection and the guided next-field walk
-- ⬜ Fill AcroForm fields
+- ✅ Fill form: tap a highlighted field of the PDF's own form to type into it, tick it or pick from its list; values are saved in the form, so other apps see them
 - ⬜ Verify banner for signed PDFs
 - ⬜ RFC 3161 timestamps, LTV
 

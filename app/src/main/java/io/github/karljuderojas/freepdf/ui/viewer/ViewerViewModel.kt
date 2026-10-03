@@ -38,6 +38,8 @@ import io.github.karljuderojas.freepdf.pdf.edit.Flattener
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import io.github.karljuderojas.freepdf.pdf.edit.PdfText
+import io.github.karljuderojas.freepdf.pdf.form.FormField
+import io.github.karljuderojas.freepdf.pdf.form.FormFiller
 import io.github.karljuderojas.freepdf.pdf.edit.Splitting
 import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
 import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
@@ -84,6 +86,7 @@ sealed interface ViewerState {
     /**
      * [revision] changes after every edit, so pages already on screen are rendered again.
      * [hasSignature] is true once a signature or initials are placed, which offers Finish.
+     * [formFields] are the PDF's own fillable fields, for Fill form.
      * [isProtected] is true while the PDF needs a password to open.
      * [outline] is the PDF's table of contents, empty if it has none.
      */
@@ -96,6 +99,7 @@ sealed interface ViewerState {
         val hasSignature: Boolean = false,
         val outline: List<OutlineItem> = emptyList(),
         val isProtected: Boolean = false,
+        val formFields: List<FormField> = emptyList(),
     ) : ViewerState
 
     /** The PDF is password protected; [wrongPassword] after a password that did not open it. */
@@ -484,6 +488,12 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     fun addCheckmark(page: Int, at: Offset) {
         val size = pageSize(page) ?: return
         addStamp(page, StampContent.Checkmark, StampGeometry.checkmarkBox(at, size))
+    }
+
+    /** Sets one of the PDF's own form fields; see [FormFiller.fill] for what [value] means. */
+    fun fillField(field: FormField, value: String?) {
+        val event = AuditEvent(AuditEvent.Type.FieldFilled, SIGNER, detail = "form field \"${field.label}\" on page ${field.page + 1}")
+        edit(event = event) { document -> FormFiller.fill(document, field.name, value) }
     }
 
     fun moveStamp(id: Long, dx: Float, dy: Float) = updateStamp(id) { it.copy(box = it.box.moved(dx, dy)) }
@@ -1021,10 +1031,14 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         }
         renderer = next
         val hasSignature = editLog.any { it?.type == AuditEvent.Type.Signed }
+        // A form that PdfBox cannot read just offers nothing to fill.
+        val formFields = withContext(Dispatchers.IO) {
+            runCatching { PDDocument.load(current.workingFile, current.password).use { FormFiller.fields(it) } }.getOrDefault(emptyList())
+        }
         val outline = runCatching { next.outline() }.getOrDefault(emptyList())
         return ViewerState.Ready(
             next.pageSizes, revision, current.canUndo, current.canRedo, current.hasUnsavedChanges, hasSignature, outline,
-            isProtected = current.password.isNotEmpty(),
+            isProtected = current.password.isNotEmpty(), formFields = formFields,
         )
     }
 

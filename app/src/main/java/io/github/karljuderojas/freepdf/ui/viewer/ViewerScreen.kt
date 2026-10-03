@@ -103,6 +103,7 @@ import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
+import io.github.karljuderojas.freepdf.pdf.form.FormField
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
 import io.github.karljuderojas.freepdf.pdf.annotate.Stamps
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
@@ -182,6 +183,7 @@ sealed interface ViewerAction {
     data class AddDate(val page: Int, val at: Offset) : ViewerAction
     data class AddText(val page: Int, val at: Offset, val text: String) : ViewerAction
     data class AddCheckmark(val page: Int, val at: Offset) : ViewerAction
+    data class FillField(val field: FormField, val value: String?) : ViewerAction
     data class FinishSigning(val name: String, val consentText: String, val seal: Boolean) : ViewerAction
 
     /** Placed stamps; see [StampLayer]. Moves are fractions of the page. */
@@ -362,6 +364,7 @@ fun ViewerScreen(
                 is ViewerAction.AddDate -> viewModel.addDate(action.page, action.at)
                 is ViewerAction.AddText -> viewModel.addText(action.page, action.at, action.text)
                 is ViewerAction.AddCheckmark -> viewModel.addCheckmark(action.page, action.at)
+                is ViewerAction.FillField -> viewModel.fillField(action.field, action.value)
                 is ViewerAction.FinishSigning -> viewModel.finishSigning(action.name, action.consentText, action.seal)
                 is ViewerAction.MoveStamp -> viewModel.moveStamp(action.id, action.delta.x, action.delta.y)
                 is ViewerAction.ResizeStamp -> viewModel.resizeStamp(action.id, action.factor)
@@ -431,6 +434,7 @@ fun ViewerContent(
     var pendingTextBox by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var stampKind by rememberSaveable { mutableStateOf(Stamps.Kind.Approved) }
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
+    var editingField by remember { mutableStateOf<FormField?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
@@ -723,6 +727,7 @@ fun ViewerContent(
                             tool = tool,
                             savedImage = tool.signatureKind?.let { savedSignatures[it] },
                             onRedraw = { padFor = tool.signatureKind },
+                            hint = if (tool == SignTool.FillForm && ready.formFields.isEmpty()) R.string.sign_hint_no_fields else tool.hint,
                         )
                     }
                     ToolStrip(mode, selectedTool, onToolSelected = { label ->
@@ -816,7 +821,15 @@ fun ViewerContent(
                             )
                             }
                         }
-                        if (signTool != null || addsText || (selectedStamp != null && pageStamps.isNotEmpty())) {
+                        if (signTool == SignTool.FillForm) {
+                            FormFieldLayer(ready.formFields.filter { it.page == page }) { field ->
+                                when (val tap = formTap(field)) {
+                                    is FormTap.Set -> onAction(ViewerAction.FillField(field, tap.value))
+                                    FormTap.Ask -> editingField = field
+                                    FormTap.Nothing -> Unit
+                                }
+                            }
+                        } else if (signTool != null || addsText || (selectedStamp != null && pageStamps.isNotEmpty())) {
                             TapLayer(page) { at ->
                                 val kind = signTool?.signatureKind
                                 when {
@@ -999,6 +1012,17 @@ fun ViewerContent(
             onAdd = { text ->
                 pendingText = null
                 onAction(if (mode == ViewerMode.Edit) ViewerAction.AddEditText(page, at, text) else ViewerAction.AddText(page, at, text))
+            },
+        )
+    }
+
+    editingField?.let { field ->
+        FormFieldDialog(
+            field = field,
+            onDismiss = { editingField = null },
+            onSet = { value ->
+                editingField = null
+                if (value != field.value) onAction(ViewerAction.FillField(field, value))
             },
         )
     }
