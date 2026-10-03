@@ -44,6 +44,7 @@ fun ToolsContent(
     onToolPicked: (ToolEntry) -> Unit,
     modifier: Modifier = Modifier,
     initialQuery: String = "",
+    onCreateToolPicked: (CreateTool) -> Unit = {},
 ) {
     var query by rememberSaveable { mutableStateOf(initialQuery) }
     val resources = LocalResources.current
@@ -56,6 +57,13 @@ fun ToolsContent(
             }
         }
     }
+    val searchableCreate = remember(resources) {
+        CreateTool.entries.map { tool ->
+            tool to (listOf(resources.getString(tool.label), resources.getString(R.string.tools_create)) +
+                resources.getString(tool.synonyms).split(','))
+        }
+    }
+    val shownCreate = searchableCreate.filter { (_, names) -> matchesToolQuery(query, names) }.map { it.first }
     val shown = searchable.filter { (_, names) -> matchesToolQuery(query, names) }.map { it.first }
 
     Scaffold(modifier = modifier, topBar = { TopAppBar(title = { Text(stringResource(R.string.tab_tools)) }) }) { padding ->
@@ -78,13 +86,30 @@ fun ToolsContent(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("tools-search"),
                 )
             }
-            if (shown.isEmpty()) {
+            if (shown.isEmpty() && shownCreate.isEmpty()) {
                 item {
                     Text(
                         stringResource(R.string.tools_none, query.trim()),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(24.dp),
+                    )
+                }
+            }
+            if (shownCreate.isNotEmpty()) {
+                item(key = "header-create") {
+                    Text(
+                        stringResource(R.string.tools_create),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+                    )
+                }
+                items(shownCreate, key = { "create-${it.name}" }) { tool ->
+                    ListItem(
+                        headlineContent = { Text(stringResource(tool.label)) },
+                        supportingContent = { Text(stringResource(tool.description)) },
+                        modifier = Modifier.clickable { onCreateToolPicked(tool) },
                     )
                 }
             }

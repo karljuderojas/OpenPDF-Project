@@ -29,12 +29,15 @@ import io.github.karljuderojas.freepdf.ui.home.HomeContent
 import io.github.karljuderojas.freepdf.ui.home.QuickAction
 import io.github.karljuderojas.freepdf.ui.settings.SOURCE_URL
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
+import io.github.karljuderojas.freepdf.ui.create.ImagesToPdfScreen
+import io.github.karljuderojas.freepdf.ui.tools.CreateTool
 import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerMode
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerScreen
 
 private const val MAIN = "main"
 private const val VIEWER = "viewer?uri={uri}&mode={mode}&tool={tool}"
+private const val IMAGES_TO_PDF = "images-to-pdf"
 private const val NO_TOOL = 0
 
 @Composable
@@ -53,7 +56,22 @@ fun FreePdfNavHost(incomingPdf: Uri?, onIncomingPdfHandled: () -> Unit) {
 
     NavHost(navController = navController, startDestination = MAIN) {
         composable(MAIN) {
-            MainScreen(openPdf)
+            MainScreen(openPdf, onCreateTool = { tool ->
+                when (tool) {
+                    CreateTool.ImagesToPdf -> navController.navigate(IMAGES_TO_PDF)
+                }
+            })
+        }
+        composable(IMAGES_TO_PDF) {
+            ImagesToPdfScreen(
+                onBack = { navController.popBackStack() },
+                // The new PDF takes this screen's place, so Back from it returns to the tabs.
+                onCreated = { uri ->
+                    navController.navigate(viewerRoute(uri, ViewerMode.Read, null)) {
+                        popUpTo(IMAGES_TO_PDF) { inclusive = true }
+                    }
+                },
+            )
         }
         composable(
             route = VIEWER,
@@ -88,7 +106,7 @@ private fun viewerRoute(uri: Uri, mode: ViewerMode, tool: Int?): String =
 
 /** The four tabs. Home's shortcuts and the Tools tab ask for a PDF, then open it in a mode. */
 @Composable
-private fun MainScreen(openPdf: (Uri, ViewerMode, Int?) -> Unit) {
+private fun MainScreen(openPdf: (Uri, ViewerMode, Int?) -> Unit, onCreateTool: (CreateTool) -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as FreePdfApp
     var tab by rememberSaveable { mutableStateOf(MainTab.Home) }
@@ -130,6 +148,7 @@ private fun MainScreen(openPdf: (Uri, ViewerMode, Int?) -> Unit) {
             MainTab.Files -> FilesScreen(onOpenPdf = { openPdf(it, ViewerMode.Read, null) }, modifier = modifier)
             MainTab.Tools -> ToolsContent(
                 onToolPicked = { tool -> pickFor(tool.mode, tool.label.takeIf { tool.preselects }) },
+                onCreateToolPicked = onCreateTool,
                 modifier = modifier,
             )
             MainTab.Settings -> {
