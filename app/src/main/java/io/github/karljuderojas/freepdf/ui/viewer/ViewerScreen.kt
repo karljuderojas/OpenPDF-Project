@@ -120,6 +120,7 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
 import io.github.karljuderojas.freepdf.settings.Tip
 import io.github.karljuderojas.freepdf.print.Printing
 import io.github.karljuderojas.freepdf.settings.AppSettings
+import io.github.karljuderojas.freepdf.speech.ReadAloudState
 import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.pdf.sign.CertificateInfo
@@ -149,6 +150,10 @@ sealed interface ViewerAction {
      * names another open document to save, from the switcher; null saves the one on screen.
      */
     data class SaveAndLeave(val then: () -> Unit, val document: String? = null) : ViewerAction
+
+    /** Reads the document aloud from [page]; see [ReadAloudBar] for the controls. */
+    data class StartReadAloud(val page: Int) : ViewerAction
+    data class ControlReadAloud(val command: ReadAloudCommand) : ViewerAction
 
     /** Lets the unsaved changes of the document on screen go, on the way out. */
     data object DiscardChanges : ViewerAction
@@ -267,6 +272,7 @@ fun ViewerScreen(
     val settings = (context.applicationContext as FreePdfApp).settings
     val pageColors by settings.pageColors.collectAsStateWithLifecycle()
     val readingTextSize by settings.readingTextSize.collectAsStateWithLifecycle()
+    val readAloud by viewModel.readAloud.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var shownInfo by remember { mutableStateOf<ViewerEffect.ShowInfo?>(null) }
     val scope = rememberCoroutineScope()
@@ -364,6 +370,7 @@ fun ViewerScreen(
         onViewPosition = viewModel::viewPositionChanged,
         pageColors = pageColors,
         onPageColors = settings::setPageColors,
+        readAloud = readAloud,
         readingTextSize = readingTextSize,
         onReadingTextSize = settings::setReadingTextSize,
         tip = tip?.text,
@@ -382,6 +389,16 @@ fun ViewerScreen(
                     viewModel.save(thenClose = true, document = action.document)
                 }
                 ViewerAction.DiscardChanges -> viewModel.discardChanges()
+                is ViewerAction.StartReadAloud -> viewModel.readAloud.start(action.page)
+                is ViewerAction.ControlReadAloud -> viewModel.readAloud.let {
+                    when (action.command) {
+                        ReadAloudCommand.Pause -> it.pause()
+                        ReadAloudCommand.Resume -> it.resume()
+                        ReadAloudCommand.Next -> it.next()
+                        ReadAloudCommand.Previous -> it.previous()
+                        ReadAloudCommand.Stop -> it.stop()
+                    }
+                }
                 is ViewerAction.Rotate -> viewModel.rotatePages(action.pages)
                 is ViewerAction.Watermark -> viewModel.watermark(action.pages, action.text, action.image, action.style)
                 is ViewerAction.Crop -> viewModel.cropPages(action.pages, action.margins)
@@ -506,6 +523,7 @@ fun ViewerContent(
     onViewPosition: (ViewPosition) -> Unit = {},
     pageColors: PageColors = PageColors.Normal,
     onPageColors: (PageColors) -> Unit = {},
+    readAloud: ReadAloudState = ReadAloudState(),
     readingTextSize: Int = AppSettings.DEFAULT_TEXT_SIZE,
     onReadingTextSize: (Int) -> Unit = {},
     initialReflow: Boolean = false,
@@ -774,6 +792,16 @@ fun ViewerContent(
         listState.animateScrollToItem(match.page, (top * pageHeight - viewport.height / 3f).toInt().coerceAtLeast(0))
     }
 
+    // The page being read aloud stays on screen, in whichever view is showing.
+    LaunchedEffect(readAloud.active, readAloud.page, reflowing) {
+        if (!readAloud.active) return@LaunchedEffect
+        if (reflowing) reflowState.animateScrollToItem(readAloud.page) else listState.animateScrollToItem(readAloud.page)
+    }
+    val readAloudUnavailable = stringResource(R.string.read_aloud_unavailable)
+    LaunchedEffect(readAloud.unavailable) {
+        if (readAloud.unavailable) snackbarHostState.showSnackbar(readAloudUnavailable)
+    }
+
     // Leaving reading mode puts the page list where the reader had got to.
     fun exitReflow() {
         reflowing = false
@@ -836,6 +864,11 @@ fun ViewerContent(
                             readingTextSize, onReadingTextSize,
                             AppSettings.MIN_TEXT_SIZE, AppSettings.MAX_TEXT_SIZE, AppSettings.TEXT_SIZE_STEP,
                         )
+                        if (!readAloud.active) {
+                            TextButton(onClick = { onAction(ViewerAction.StartReadAloud(reflowState.firstVisibleItemIndex)) }) {
+                                Text(stringResource(R.string.tool_read_aloud))
+                            }
+                        }
                         PageColorsButton(pageColors, onPageColors)
                     } else if (mode == ViewerMode.Read && searching) {
                         SearchStepper(search, currentMatch) { step ->
@@ -892,7 +925,9 @@ fun ViewerContent(
         },
         bottomBar = {
             when {
-                ready == null || reflowing -> Unit
+                ready == null -> Unit
+                readAloud.active && mode == ViewerMode.Read -> ReadAloudBar(readAloud) { onAction(ViewerAction.ControlReadAloud(it)) }
+                reflowing -> Unit
                 selectedMark != null -> MarkEditBar(
                     mark = selectedMark,
                     onStyle = { style ->
@@ -984,6 +1019,10 @@ fun ViewerContent(
                 }
                 else -> ToolStrip(mode, selectedTool = null, onToolSelected = {
                     when (it) {
+                        R.string.tool_read_aloud -> {
+                            onAction(ViewerAction.StartReadAloud(currentPage))
+                            backToReading()
+                        }
                         R.string.tool_share -> sharing = true
                         R.string.tool_password -> choosingPassword = true
                         R.string.tool_info -> onAction(ViewerAction.ShowInfo)
@@ -1013,6 +1052,7 @@ fun ViewerContent(
                     textSize = readingTextSize,
                     pageColors = pageColors,
                     listState = reflowState,
+                    spoken = readAloud.takeIf { it.active },
                 )
                 mode == ViewerMode.Pages -> PageGrid(
                     pageSizes = ready.pageSizes,
