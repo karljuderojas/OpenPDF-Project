@@ -140,6 +140,7 @@ import io.github.karljuderojas.freepdf.ui.rememberPdfPicker
 import io.github.karljuderojas.freepdf.ui.sign.FinishOptions
 import io.github.karljuderojas.freepdf.ui.sign.FinishProgressDialog
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
+import io.github.karljuderojas.freepdf.ui.sign.ProgressDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignatureBanner
 import io.github.karljuderojas.freepdf.ui.sign.SignatureDetailsDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
@@ -190,6 +191,9 @@ sealed interface ViewerAction {
 
     /** Saves a copy with everything under [boxes] removed and painted black; the open PDF is left as it is. */
     data class Redact(val boxes: List<RedactBox>) : ViewerAction
+
+    /** Looks over what [boxes] mark before the user confirms a redaction; see [RedactCheck]. */
+    data class CheckRedaction(val boxes: List<RedactBox>) : ViewerAction
     data object ShowInfo : ViewerAction
     data object Print : ViewerAction
     data class Search(val query: String) : ViewerAction
@@ -282,6 +286,8 @@ fun ViewerScreen(
     val certificate by viewModel.certificate.collectAsStateWithLifecycle()
     val timestampsOn by viewModel.timestampsOn.collectAsStateWithLifecycle()
     val finishStep by viewModel.finishing.collectAsStateWithLifecycle()
+    val redactProgress by viewModel.redacting.collectAsStateWithLifecycle()
+    val redactCheck by viewModel.redactCheck.collectAsStateWithLifecycle()
     var certificateFile by remember { mutableStateOf<Uri?>(null) }
     val toolStyles by viewModel.toolStyles.collectAsStateWithLifecycle()
     val marks by viewModel.marks.collectAsStateWithLifecycle()
@@ -343,6 +349,7 @@ fun ViewerScreen(
         viewModel.effects.collect { effect ->
             when (effect) {
                 is ViewerEffect.Message -> launch { snackbarHostState.showSnackbar(resources.getString(effect.text)) }
+                is ViewerEffect.Text -> launch { snackbarHostState.showSnackbar(effect.text) }
                 is ViewerEffect.CountMessage -> launch {
                     snackbarHostState.showSnackbar(resources.getQuantityString(effect.text, effect.count, effect.count))
                 }
@@ -375,6 +382,8 @@ fun ViewerScreen(
         certificate = certificate,
         timestampsOn = timestampsOn,
         finishStep = finishStep,
+        redactCheck = redactCheck,
+        redactProgress = redactProgress,
         toolStyles = toolStyles,
         marks = marks,
         search = search,
@@ -436,6 +445,7 @@ fun ViewerScreen(
                 is ViewerAction.Extract -> viewModel.extract(action.pages)
                 is ViewerAction.Split -> viewModel.split(action.parts)
                 is ViewerAction.Redact -> viewModel.redact(action.boxes)
+                is ViewerAction.CheckRedaction -> viewModel.checkRedaction(action.boxes)
                 ViewerAction.ShowInfo -> viewModel.documentInfo()
                 ViewerAction.Print -> viewModel.print()
                 is ViewerAction.Search -> viewModel.search(action.query)
@@ -529,6 +539,8 @@ fun ViewerContent(
     certificate: CertificateInfo? = null,
     timestampsOn: Boolean = false,
     finishStep: SignedCopy.Step? = null,
+    redactCheck: RedactCheck? = null,
+    redactProgress: RedactProgress? = null,
     initialShowCertificate: Boolean = false,
     initialShowSignatures: Boolean = false,
     toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
@@ -1361,9 +1373,15 @@ fun ViewerContent(
         )
     }
 
+    // The confirmation needs a look at the marked pages first, made once per set of marks (and
+    // again after the process was killed, when the view model has forgotten it).
+    LaunchedEffect(confirmRedact, redactions, redactCheck) {
+        if (confirmRedact && redactions.isNotEmpty() && redactCheck?.boxes != redactions) onAction(ViewerAction.CheckRedaction(redactions))
+    }
     if (confirmRedact) {
         RedactConfirmDialog(
             count = redactions.size,
+            check = redactCheck?.takeIf { it.boxes == redactions },
             onDismiss = { confirmRedact = false },
             onConfirm = {
                 confirmRedact = false
@@ -1507,6 +1525,13 @@ fun ViewerContent(
     }
 
     finishStep?.let { FinishProgressDialog(it) }
+    redactProgress?.let {
+        ProgressDialog(
+            title = stringResource(R.string.redact_progress_title),
+            text = stringResource(R.string.redact_progress_page, it.page, it.of),
+            tag = "redact-progress",
+        )
+    }
 
     if (sharing && ready != null) {
         ShareSheet(

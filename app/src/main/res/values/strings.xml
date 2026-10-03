@@ -506,10 +506,23 @@
         <item quantity="other">Permanently remove what is under %d areas?</item>
     </plurals>
     <string name="redact_confirm_body">FreePDF saves a new copy with the text, pictures and drawings under each marked area removed from the file, not just covered, and paints the area black. This cannot be undone in the copy. The PDF you have open stays as it is.</string>
+    <string name="redact_confirm_limits">Drawings that touch a mark are removed whole, and any files attached to the PDF are left out of the copy. Everything outside the marks stays as it is.</string>
+    <string name="redact_confirm_checking">Checking the marked pages…</string>
+    <plurals name="redact_confirm_whole_pictures">
+        <item quantity="one">A picture under a mark on page %1$s cannot be partly cleared and will be removed whole.</item>
+        <item quantity="other">Pictures under marks on pages %1$s cannot be partly cleared and will be removed whole.</item>
+    </plurals>
     <string name="redact_confirm_action">Save redacted copy</string>
+    <string name="redact_progress_title">Redacting</string>
+    <string name="redact_progress_page">Redacting page %1$d of %2$d…</string>
     <string name="redact_saved">Saved the redacted copy.</string>
     <string name="redact_saved_blank">Saved the redacted copy. No text, pictures or drawings were found under the marked areas, so they were painted black.</string>
-    <string name="redact_saved_whole_pictures">Saved the redacted copy. A picture under a marked area could not be edited, so it was removed whole.</string>
+    <string name="redact_saved_whole_pictures">Saved the redacted copy. A picture under a marked area could not be partly cleared, so it was removed whole.</string>
+    <plurals name="redact_saved_attachments">
+        <item quantity="one">The file attached to the PDF was left out of the copy.</item>
+        <item quantity="other">The %1$d files attached to the PDF were left out of the copy.</item>
+    </plurals>
+    <string name="redact_saved_metadata_cleared">Some removed text could not be read as words, so the title, author, bookmarks and metadata were cleared too.</string>
     <string name="redact_failed">Could not save the redacted copy.</string>
     <string name="tool_about_redact">Permanently remove text, pictures and drawings from a copy, and paint over them.</string>
     <string name="tool_synonyms_redact">black out, blackout, censor, remove, hide, erase, private, sensitive, confidential</string>
