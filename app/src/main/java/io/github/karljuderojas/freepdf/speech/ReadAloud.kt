@@ -14,7 +14,7 @@ data class ReadAloudState(
     val page: Int = 0,
     val sentence: Int = 0,
     val text: String = "",
-    /** The speech engine failed or is not set up; shown once, and cleared by the next start. */
+    /** The speech engine failed or is not set up; shown once, then cleared by [ReadAloud.acknowledgeUnavailable]. */
     val unavailable: Boolean = false,
 )
 
@@ -65,7 +65,8 @@ class ReadAloud(
         val now = _state.value
         if (!now.active || now.speaking) return
         _state.value = now.copy(speaking = true)
-        speakCurrent()
+        // Paused while the page was still loading: nothing is loaded yet, so load it again.
+        if (sentences.isEmpty()) go(now.page, now.sentence, onNothing = ::finish) else speakCurrent()
     }
 
     fun next() {
@@ -93,6 +94,11 @@ class ReadAloud(
         speaker.shutdown()
     }
 
+    /** The "not available" message has been shown, so it is not shown again after a rotation. */
+    fun acknowledgeUnavailable() {
+        if (_state.value.unavailable) _state.value = _state.value.copy(unavailable = false)
+    }
+
     override fun onDone(id: String) {
         scope.launch { if (id == generation.toString() && _state.value.speaking) next() }
     }
@@ -104,6 +110,10 @@ class ReadAloud(
                 _state.value = ReadAloudState(unavailable = true)
             }
         }
+    }
+
+    override fun onInterrupted() {
+        scope.launch { pause() }
     }
 
     private fun halt() {

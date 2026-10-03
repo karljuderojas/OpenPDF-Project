@@ -211,12 +211,17 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
     // Reading aloud carries on through a rotation; the speech engine starts at the first sentence.
     private val readAloudDelegate = lazy {
         ReadAloud(
-            AndroidSpeaker(application),
+            AndroidSpeaker(application) { getApplication<FreePdfApp>().settings.speechRate.value.factor },
             viewModelScope,
             pageCount = { (_state.value as? ViewerState.Ready)?.pageSizes?.size ?: 0 },
         ) { page -> Reflow.sentences(Reflow.paragraphs(words(page))) }
     }
     val readAloud: ReadAloud by readAloudDelegate
+
+    /** Pauses reading aloud if it is going, without starting the speech engine when it is not. */
+    fun pauseReadAloud() {
+        if (readAloudDelegate.isInitialized()) readAloud.pause()
+    }
 
     /** The session this view model shows and edits; null until [open] has attached one. */
     private var doc: DocumentSession? = null
