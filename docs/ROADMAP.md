@@ -32,7 +32,7 @@ Goal: the features people use in PDFGear and Xodo, free, offline and open source
 - 🧱 Digital signature with an on-device or imported certificate (`DigitalSigner`, `SigningIdentity`)
 - 🧱 Audit trail, SHA-256 fingerprints and audit page
 - ⬜ Type or photograph a signature instead of drawing it
-- ⬜ Field detection and the guided next-field walk
+- ✅ Places to sign: empty signature fields and "Signature" or "Sign here" labels are found and outlined, with a "2 places to sign" banner and Next field; tap one to sign it
 - ✅ Fill form: tap a highlighted field of the PDF's own form to type into it, tick it or pick from its list; values are saved in the form, so other apps see them
 - ⬜ Verify banner for signed PDFs
 - ⬜ RFC 3161 timestamps, LTV

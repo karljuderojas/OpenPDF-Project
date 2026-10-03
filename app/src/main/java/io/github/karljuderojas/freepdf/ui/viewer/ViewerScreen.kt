@@ -56,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -79,7 +80,9 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /** What the viewer asks its view model to do. Page numbers are zero-based. */
 sealed interface ViewerAction {
@@ -106,6 +109,9 @@ sealed interface ViewerAction {
     data class AddText(val page: Int, val at: Offset, val text: String) : ViewerAction
     data class AddCheckmark(val page: Int, val at: Offset) : ViewerAction
     data class FillField(val field: FormField, val value: String?) : ViewerAction
+
+    /** Signs the place to sign at [index] in [ViewerState.Ready.signFields] with the saved signature. */
+    data class SignField(val index: Int) : ViewerAction
     data class FinishSigning(val name: String, val consentText: String, val seal: Boolean) : ViewerAction
 }
 
@@ -180,6 +186,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.AddText -> viewModel.addText(action.page, action.at, action.text)
                 is ViewerAction.AddCheckmark -> viewModel.addCheckmark(action.page, action.at)
                 is ViewerAction.FillField -> viewModel.fillField(action.field, action.value)
+                is ViewerAction.SignField -> viewModel.signField(action.index)
                 is ViewerAction.FinishSigning -> viewModel.finishSigning(action.name, action.consentText, action.seal)
             }
         },
@@ -196,6 +203,7 @@ fun ViewerContent(
     initialMode: ViewerMode = ViewerMode.Read,
     initialSelectedPage: Int = 0,
     initialTool: Int? = null,
+    initialSignField: Int? = null,
     savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
     signerName: String = "",
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
@@ -214,6 +222,10 @@ fun ViewerContent(
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    // The place to sign Next field last went to, and the one waiting for the signature to be drawn.
+    var currentField by rememberSaveable { mutableStateOf(initialSignField) }
+    var pendingField by remember { mutableStateOf<Int?>(null) }
     val resources = LocalResources.current
 
     val ready = state as? ViewerState.Ready
@@ -224,6 +236,44 @@ fun ViewerContent(
 
     fun comingSoon() {
         scope.launch { snackbarHostState.showSnackbar(resources.getString(R.string.coming_soon)) }
+    }
+
+    /** Scrolls so the place to sign at [index] is about a third of the way down the screen. */
+    fun goToField(index: Int, animate: Boolean = true) {
+        val current = ready ?: return
+        val field = current.signFields.getOrNull(index) ?: return
+        val size = current.pageSizes.getOrNull(field.page) ?: return
+        currentField = index
+        scope.launch {
+            val viewport = snapshotFlow { listState.layoutInfo.viewportSize }.first { it.height > 0 }
+            // Pages fill the list's width, less its 8 dp padding on each side.
+            val pageHeight = (viewport.width - with(density) { 16.dp.toPx() }) / size.aspectRatio
+            val offset = (field.box.top * pageHeight - viewport.height / 3f).roundToInt().coerceAtLeast(0)
+            if (animate) listState.animateScrollToItem(field.page, offset) else listState.scrollToItem(field.page, offset)
+        }
+    }
+
+    /** Next field: the first place not signed yet after the current one, going round to the start. */
+    fun nextField() {
+        val current = ready ?: return
+        val remaining = current.signFields.indices.filter { it !in current.signedFields }
+        val next = remaining.firstOrNull { it > (currentField ?: -1) } ?: remaining.firstOrNull() ?: return
+        goToField(next)
+    }
+
+    /** A tap on a place to sign: sign it, or draw the signature first if there is none yet. */
+    fun signPlace(index: Int) {
+        currentField = index
+        if (savedSignatures[SignatureStore.Kind.Signature] == null) {
+            pendingField = index
+            padFor = SignatureStore.Kind.Signature
+        } else {
+            onAction(ViewerAction.SignField(index))
+        }
+    }
+
+    LaunchedEffect(ready == null) {
+        if (ready != null) initialSignField?.let { goToField(it, animate = false) }
     }
 
     fun leave() {
@@ -328,6 +378,9 @@ fun ViewerContent(
                     }
                 })
                 mode == ViewerMode.Sign -> Column {
+                    ready?.takeIf { it.signFields.isNotEmpty() }?.let {
+                        SignFieldsBanner(remaining = it.signFields.size - it.signedFields.size, onNext = { nextField() })
+                    }
                     SignTool.forLabel(selectedTool)?.let { tool ->
                         SignHint(
                             tool = tool,
@@ -393,6 +446,12 @@ fun ViewerContent(
                                 }
                             }
                         }
+                        if (mode == ViewerMode.Sign) {
+                            val places = ready.signFields.withIndex()
+                                .filter { (i, field) -> field.page == page && i !in ready.signedFields }
+                                .map { it.index to it.value }
+                            if (places.isNotEmpty()) SignFieldLayer(places, currentField, onTap = { signPlace(it) })
+                        }
                         if (tool != null) {
                             AnnotationLayer(
                                 page = page,
@@ -431,10 +490,16 @@ fun ViewerContent(
     padFor?.let { kind ->
         SignaturePadDialog(
             kind = kind,
-            onDismiss = { padFor = null },
+            onDismiss = {
+                padFor = null
+                pendingField = null
+            },
             onSave = {
                 padFor = null
                 onAction(ViewerAction.SaveSignature(kind, it))
+                // Drawn after tapping a place to sign: sign it straight away.
+                if (kind == SignatureStore.Kind.Signature) pendingField?.let { index -> onAction(ViewerAction.SignField(index)) }
+                pendingField = null
             },
         )
     }

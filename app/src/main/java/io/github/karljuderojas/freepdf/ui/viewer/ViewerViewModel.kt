@@ -32,6 +32,8 @@ import io.github.karljuderojas.freepdf.pdf.render.PdfRenderer
 import io.github.karljuderojas.freepdf.pdf.sign.AuditEvent
 import io.github.karljuderojas.freepdf.pdf.sign.AuditTrail
 import io.github.karljuderojas.freepdf.pdf.sign.DocumentHash
+import io.github.karljuderojas.freepdf.pdf.sign.SignField
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureFields
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStamper
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
@@ -64,6 +66,8 @@ sealed interface ViewerState {
      * [revision] changes after every edit, so pages already on screen are rendered again.
      * [hasSignature] is true once a signature or initials are placed, which offers Finish.
      * [formFields] are the PDF's own fillable fields, for Fill form.
+     * [signFields] are the places the document asks to be signed, and [signedFields] the
+     * indexes of those already signed.
      */
     data class Ready(
         val pageSizes: List<PageSize>,
@@ -72,6 +76,8 @@ sealed interface ViewerState {
         val hasUnsavedChanges: Boolean = false,
         val hasSignature: Boolean = false,
         val formFields: List<FormField> = emptyList(),
+        val signFields: List<SignField> = emptyList(),
+        val signedFields: Set<Int> = emptySet(),
     ) : ViewerState
 
     data class Failed(val message: String?) : ViewerState
@@ -107,6 +113,13 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     private var originalSha256 = ""
     private var openedAt = Instant.now()
     private val editLog = ArrayList<AuditEvent?>()
+
+    // Alongside editLog: where each edit put a signature (page and display point), if it did,
+    // so a place to sign counts as done once one is in it, and again as not done after undo.
+    private val signedAt = ArrayList<Pair<Int, Offset>?>()
+
+    // Finding the places to sign reads all the text, so it is done again only when pages change.
+    private var signFields: List<SignField>? = null
 
     /** The finished signed copy, in the cache, waiting for the user to pick where it goes. */
     private var pendingSignedCopy: File? = null
@@ -158,6 +171,8 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         originalSha256 = newSession.workingFile.inputStream().use { DocumentHash.sha256(it) }
                         openedAt = Instant.now()
                         editLog.clear()
+                        signedAt.clear()
+                        signFields = null
                     }
                     reloadLocked()
                 }
@@ -175,27 +190,27 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun rotatePage(index: Int) = edit { PageEditor.rotate(it, index, 90) }
+    fun rotatePage(index: Int) = edit(movesPages = true) { PageEditor.rotate(it, index, 90) }
 
     fun deletePage(index: Int) {
         if ((_state.value as? ViewerState.Ready)?.pageSizes?.size == 1) {
             _effects.trySend(ViewerEffect.Message(R.string.cannot_delete_last_page))
             return
         }
-        edit { PageEditor.delete(it, index) }
+        edit(movesPages = true) { PageEditor.delete(it, index) }
     }
 
-    fun insertBlankPage(afterIndex: Int) = edit { document ->
+    fun insertBlankPage(afterIndex: Int) = edit(movesPages = true) { document ->
         val neighbour = document.getPage(afterIndex)
         PageEditor.insertBlank(document, afterIndex + 1, neighbour.mediaBox)
         // A blank next to a rotated scan should face the same way as its neighbour.
         document.getPage(afterIndex + 1).rotation = neighbour.rotation
     }
 
-    fun movePage(from: Int, to: Int) = edit { PageEditor.move(it, from, to) }
+    fun movePage(from: Int, to: Int) = edit(movesPages = true) { PageEditor.move(it, from, to) }
 
     /** Appends every page of [other] to the end of the open document. */
-    fun merge(other: Uri) = edit { document ->
+    fun merge(other: Uri) = edit(movesPages = true) { document ->
         PdfDocuments.load(context, other).use { PageEditor.append(document, it) }
     }
 
@@ -243,11 +258,31 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     fun placeSignature(page: Int, at: Offset, kind: SignatureStore.Kind) {
         val image = _savedSignatures.value[kind] ?: return
         val what = if (kind == SignatureStore.Kind.Initials) "initials" else "signature"
-        edit(event = AuditEvent(AuditEvent.Type.Signed, SIGNER, detail = "$what on page ${page + 1}")) { document ->
+        val signed = (page to at).takeIf { kind == SignatureStore.Kind.Signature }
+        edit(event = AuditEvent(AuditEvent.Type.Signed, SIGNER, detail = "$what on page ${page + 1}"), signed = signed) { document ->
             val point = displayMapper(document, page)(at)
             val maxWidth = if (kind == SignatureStore.Kind.Initials) 60f else 160f
             val maxHeight = if (kind == SignatureStore.Kind.Initials) 32f else 56f
             SignatureStamper.stamp(document, page, image, point, maxWidth, maxHeight)
+        }
+    }
+
+    /** Signs the place to sign at [index] in [ViewerState.Ready.signFields], fitting the saved signature into it. */
+    fun signField(index: Int) {
+        val field = (_state.value as? ViewerState.Ready)?.signFields?.getOrNull(index) ?: return
+        val image = _savedSignatures.value[SignatureStore.Kind.Signature] ?: return
+        val box = field.box
+        val centre = (box.left + box.right) / 2
+        val signed = field.page to Offset(centre, (box.top + box.bottom) / 2)
+        edit(event = AuditEvent(AuditEvent.Type.Signed, SIGNER, detail = "signature on page ${field.page + 1}"), signed = signed) { document ->
+            val page = document.getPage(field.page)
+            // The box is as displayed, so on a page turned sideways its width runs along the page's height.
+            val turned = ((page.rotation % 360) + 360) % 360 in setOf(90, 270)
+            val crop = page.cropBox
+            val shownWidth = if (turned) crop.height else crop.width
+            val shownHeight = if (turned) crop.width else crop.height
+            val at = displayMapper(document, field.page)(Offset(centre, box.bottom))
+            SignatureStamper.stamp(document, field.page, image, at, (box.right - box.left) * shownWidth, (box.bottom - box.top) * shownHeight)
         }
     }
 
@@ -392,8 +427,11 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                     session?.takeIf { it.canUndo }?.let {
                         it.undo()
                         editLog.removeLastOrNull()
+                        signedAt.removeLastOrNull()
                     }
                 }
+                // The undone edit may have moved pages around.
+                signFields = null
                 _state.value = reloadLocked()
             }
         }
@@ -448,14 +486,25 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     /** Thrown from an edit that turns out to have nothing to do, so no undo step is recorded. */
     private class NothingChanged : Exception()
 
-    /** Applies [change] as one undo step. [event] goes on the audit page if the user finishes signing. */
-    private fun edit(@StringRes onNoChange: Int? = null, event: AuditEvent? = null, change: (PDDocument) -> Unit) {
+    /**
+     * Applies [change] as one undo step. [event] goes on the audit page if the user finishes signing.
+     * [signed] is where a signature was placed, if one was; [movesPages] says the places to sign must be found again.
+     */
+    private fun edit(
+        @StringRes onNoChange: Int? = null,
+        event: AuditEvent? = null,
+        signed: Pair<Int, Offset>? = null,
+        movesPages: Boolean = false,
+        change: (PDDocument) -> Unit,
+    ) {
         viewModelScope.launch {
             lock.withLock {
                 val result = runCatching { withContext(Dispatchers.IO) { session?.edit(change) } }
                 when (val error = result.exceptionOrNull()) {
                     null -> {
                         editLog += event?.copy(at = Instant.now())
+                        signedAt += signed
+                        if (movesPages) signFields = null
                         _state.value = reloadLocked()
                     }
                     is NothingChanged -> onNoChange?.let { _effects.send(ViewerEffect.Message(it)) }
@@ -493,7 +542,16 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         val formFields = withContext(Dispatchers.IO) {
             runCatching { PDDocument.load(current.workingFile).use { FormFiller.fields(it) } }.getOrDefault(emptyList())
         }
-        return ViewerState.Ready(next.pageSizes, revision, current.canUndo, current.hasUnsavedChanges, hasSignature, formFields)
+        // Likewise, a document whose text cannot be read just has no places to sign.
+        val places = signFields ?: withContext(Dispatchers.IO) {
+            runCatching { PDDocument.load(current.workingFile).use { SignatureFields.find(it) } }.getOrDefault(emptyList())
+        }.also { signFields = it }
+        val signed = places.indices.filter { i ->
+            signedAt.any { it != null && places[i].covers(it.first, it.second.x, it.second.y) }
+        }.toSet()
+        return ViewerState.Ready(
+            next.pageSizes, revision, current.canUndo, current.hasUnsavedChanges, hasSignature, formFields, places, signed,
+        )
     }
 
     /** Lists [uri] in the Files tab; in the history too if the app can reopen it later. */

@@ -23,6 +23,7 @@ import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.form.FormFiller
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureFields
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
@@ -63,6 +64,11 @@ class ScreenshotTest {
             listOf(PageSize(612f, 792f)),
             formFields = javaClass.classLoader!!.getResourceAsStream("sample/form.pdf").use { PDDocument.load(it).use(FormFiller::fields) },
         )
+    }
+
+    // The agreement's two places to sign (both on page 2), found by the app's own code.
+    private val signing by lazy {
+        sample.copy(signFields = javaClass.classLoader!!.getResourceAsStream("sample/agreement.pdf").use { PDDocument.load(it).use(SignatureFields::find) })
     }
 
     @Test
@@ -185,6 +191,16 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_finish.png")
     }
 
+    // Next field has gone to the first place to sign, on page 2.
+    @Test
+    fun viewerSignFields() = capture("viewer_sign_fields") { viewer(ViewerMode.Sign, signing, signField = 0) }
+
+    @Test
+    fun viewerSignFieldsDone() = capture("viewer_sign_fields_done") {
+        val done = signing.copy(signedFields = signing.signFields.indices.toSet(), canUndo = true, hasUnsavedChanges = true, hasSignature = true)
+        viewer(ViewerMode.Sign, done, signField = 1)
+    }
+
     @Test
     fun viewerFillForm() = capture("viewer_fill_form") {
         viewer(ViewerMode.Sign, form, tool = R.string.tool_fill_form, pages = formPages)
@@ -253,6 +269,7 @@ class ScreenshotTest {
         savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
         signerName: String = "",
         pages: List<Bitmap> = samplePages,
+        signField: Int? = null,
     ) {
         ViewerContent(
             state = state,
@@ -261,6 +278,7 @@ class ScreenshotTest {
             initialMode = mode,
             initialSelectedPage = selectedPage,
             initialTool = tool,
+            initialSignField = signField,
             savedSignatures = savedSignatures,
             signerName = signerName,
         )
