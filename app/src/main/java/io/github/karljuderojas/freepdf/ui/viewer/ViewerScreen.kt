@@ -105,6 +105,7 @@ import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.DisplayRect
+import io.github.karljuderojas.freepdf.pdf.edit.WatermarkStyle
 import io.github.karljuderojas.freepdf.pdf.edit.CropMargins
 import io.github.karljuderojas.freepdf.pdf.links.LinkTarget
 import io.github.karljuderojas.freepdf.pdf.form.FormField
@@ -154,6 +155,8 @@ sealed interface ViewerAction {
     data object DiscardChanges : ViewerAction
 
     data class Rotate(val pages: Set<Int>) : ViewerAction
+    /** Stamps [pages] with [text], or with the picture at [image] when that is given. */
+    data class Watermark(val pages: Set<Int>, val text: String, val image: Uri?, val style: WatermarkStyle) : ViewerAction
     /** Trims [pages] by [margins], or shows them in full again when [margins] is null. */
     data class Crop(val pages: Set<Int>, val margins: CropMargins?) : ViewerAction
     /** Adds a link over [box], an area of [page] as shown, leading to [target]. */
@@ -372,6 +375,7 @@ fun ViewerScreen(
                 }
                 ViewerAction.DiscardChanges -> viewModel.discardChanges()
                 is ViewerAction.Rotate -> viewModel.rotatePages(action.pages)
+                is ViewerAction.Watermark -> viewModel.watermark(action.pages, action.text, action.image, action.style)
                 is ViewerAction.Crop -> viewModel.cropPages(action.pages, action.margins)
                 is ViewerAction.AddLink -> viewModel.addLink(action.page, action.box, action.target)
                 is ViewerAction.Delete -> viewModel.deletePages(action.pages)
@@ -513,6 +517,11 @@ fun ViewerContent(
     var newLinkBox by remember { mutableStateOf<Pair<Int, DisplayRect>?>(null) }
     val linkContext = LocalContext.current
     val linkResources = LocalResources.current
+    var watermarking by rememberSaveable { mutableStateOf(false) }
+    var watermarkImage by rememberSaveable { mutableStateOf<Uri?>(null) }
+    val watermarkPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) {
+        if (it != null) watermarkImage = it
+    }
     var cropping by rememberSaveable { mutableStateOf(false) }
     // What to do once the reader settles unsaved changes; non-null while the dialog shows.
     var leavePrompt by remember { mutableStateOf<LeavePrompt?>(null) }
@@ -684,6 +693,7 @@ fun ViewerContent(
                 val after = selectedPages.max()
                 editPages(ViewerAction.InsertBlank(after), then = setOf(after + 1))
             }
+            R.string.tool_watermark -> watermarking = true
             R.string.tool_crop -> cropping = true
             R.string.tool_delete -> confirmDelete = true
             R.string.tool_extract -> extracting = true
@@ -1214,6 +1224,21 @@ fun ViewerContent(
             onAdd = { target ->
                 newLinkBox = null
                 onAction(ViewerAction.AddLink(page, box, target))
+            },
+        )
+    }
+
+    if (watermarking) {
+        WatermarkDialog(
+            pageCount = pageCount,
+            selectedPages = selectedPages.sorted(),
+            pageAspect = ready?.pageSizes?.getOrNull(selectedPage)?.aspectRatio ?: 0.77f,
+            image = watermarkImage,
+            onChooseImage = { watermarkPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            onDismiss = { watermarking = false },
+            onWatermark = { pages, text, image, style ->
+                watermarking = false
+                onAction(ViewerAction.Watermark(pages, text, image, style))
             },
         )
     }
