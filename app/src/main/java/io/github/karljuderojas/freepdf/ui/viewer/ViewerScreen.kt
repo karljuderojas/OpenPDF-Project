@@ -108,6 +108,9 @@ import io.github.karljuderojas.freepdf.pdf.annotate.Mark
 import io.github.karljuderojas.freepdf.pdf.annotate.Stamps
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
+import io.github.karljuderojas.freepdf.pdf.DisplayRect
+import io.github.karljuderojas.freepdf.pdf.sign.SignField
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureFields
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
@@ -201,8 +204,8 @@ sealed interface ViewerAction {
     data class AddCheckmark(val page: Int, val at: Offset) : ViewerAction
     data class FillField(val field: FormField, val value: String?) : ViewerAction
 
-    /** Signs the place to sign at [index] in [ViewerState.Ready.signFields] with the saved signature. */
-    data class SignField(val index: Int) : ViewerAction
+    /** Signs [field], one of [ViewerState.Ready.signFields], with the saved signature. */
+    data class SignField(val field: io.github.karljuderojas.freepdf.pdf.sign.SignField) : ViewerAction
     data class FinishSigning(val name: String, val consentText: String, val options: FinishOptions) : ViewerAction
 
     /** Certificate actions. */
@@ -404,7 +407,7 @@ fun ViewerScreen(
                 is ViewerAction.AddText -> viewModel.addText(action.page, action.at, action.text)
                 is ViewerAction.AddCheckmark -> viewModel.addCheckmark(action.page, action.at)
                 is ViewerAction.FillField -> viewModel.fillField(action.field, action.value)
-                is ViewerAction.SignField -> viewModel.signField(action.index)
+                is ViewerAction.SignField -> viewModel.signField(action.field)
                 is ViewerAction.FinishSigning -> viewModel.finishSigning(action.name, action.consentText, action.options)
                 // Some file managers label .p12 files as octet-stream, so allow any file.
                 ViewerAction.ImportCertificate -> certificatePicker.launch(arrayOf("application/x-pkcs12", "application/octet-stream", "*/*"))
@@ -504,8 +507,10 @@ fun ViewerContent(
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     // The place to sign Next field last went to, and the one waiting for the signature to be drawn.
-    var currentField by rememberSaveable { mutableStateOf(initialSignField) }
-    var pendingField by remember { mutableStateOf<Int?>(null) }
+    // Held as the fields themselves: they are found again after pages move, when their order and
+    // number can change, so an index into the list would point at the wrong place.
+    var currentField by rememberSaveable(stateSaver = SignFieldSaver) { mutableStateOf<SignField?>(null) }
+    var pendingField by remember { mutableStateOf<SignField?>(null) }
     var sharing by rememberSaveable { mutableStateOf(false) }
     var choosingPassword by rememberSaveable { mutableStateOf(false) }
     // Chosen here so the page preview follows at once; the view model remembers them for next time.
@@ -548,18 +553,33 @@ fun ViewerContent(
     val canUndo = ready?.canUndo == true || stamps.isNotEmpty()
     val hasSignature = ready?.hasSignature == true || stamps.any { it.content is StampContent.Signature }
     LaunchedEffect(mode, selectedTool, ready?.revision) { selection = null }
-    LaunchedEffect(pageCount) {
-        if (pageCount > 0 && selectedPages.any { it >= pageCount }) {
-            selectedPages = selectedPages.filter { it < pageCount }.toSet().ifEmpty { setOf(pageCount - 1) }
-        }
+
+    // The selection before each page edit still in flight, oldest first. The selection moves as
+    // soon as an edit is asked for; once the edit settles it is put back if the edit failed, and
+    // kept within the pages there are either way. A landed edit shows as a new revision, a failed
+    // one as another failed page edit, so every settled edit is seen here exactly once.
+    val selectionsBeforeEdits = remember { ArrayDeque<Set<Int>>() }
+    var seenFailedPageEdits by rememberSaveable { mutableStateOf<Int?>(null) }
+    LaunchedEffect(ready?.revision, ready?.failedPageEdits) {
+        val current = ready ?: return@LaunchedEffect
+        val failed = seenFailedPageEdits.let { it != null && it != current.failedPageEdits }
+        seenFailedPageEdits = current.failedPageEdits
+        val before = selectionsBeforeEdits.removeFirstOrNull()
+        selectedPages = settleSelection(selectedPages, before, failed, current.pageSizes.size)
     }
 
-    /** Scrolls so the place to sign at [index] is about a third of the way down the screen. */
-    fun goToField(index: Int, animate: Boolean = true) {
+    /** Asks for a page edit, showing [then] as the selection meanwhile; see [selectionsBeforeEdits]. */
+    fun editPages(action: ViewerAction, then: Set<Int>) {
+        selectionsBeforeEdits.addLast(selectedPages)
+        onAction(action)
+        selectedPages = then
+    }
+
+    /** Scrolls so [field], a place to sign, is about a third of the way down the screen. */
+    fun goToField(field: SignField, animate: Boolean = true) {
         val current = ready ?: return
-        val field = current.signFields.getOrNull(index) ?: return
         val size = current.pageSizes.getOrNull(field.page) ?: return
-        currentField = index
+        currentField = field
         scope.launch {
             val viewport = snapshotFlow { listState.layoutInfo.viewportSize }.first { it.height > 0 }
             // Pages fill the list's width, less its 8 dp padding on each side.
@@ -572,24 +592,23 @@ fun ViewerContent(
     /** Next field: the first place not signed yet after the current one, going round to the start. */
     fun nextField() {
         val current = ready ?: return
-        val remaining = current.signFields.indices.filter { it !in signedFields }
-        val next = remaining.firstOrNull { it > (currentField ?: -1) } ?: remaining.firstOrNull() ?: return
-        goToField(next)
+        goToField(SignatureFields.nextUnsigned(current.signFields, signedFields, currentField) ?: return)
     }
 
-    /** A tap on a place to sign: sign it, or draw the signature first if there is none yet. */
+    /** A tap on the place to sign at [index] in the fields as shown: sign it, or draw the signature first if there is none yet. */
     fun signPlace(index: Int) {
-        currentField = index
+        val field = ready?.signFields?.getOrNull(index) ?: return
+        currentField = field
         if (savedSignatures[SignatureStore.Kind.Signature] == null) {
-            pendingField = index
+            pendingField = field
             padFor = SignatureStore.Kind.Signature
         } else {
-            onAction(ViewerAction.SignField(index))
+            onAction(ViewerAction.SignField(field))
         }
     }
 
     LaunchedEffect(ready == null) {
-        if (ready != null) initialSignField?.let { goToField(it, animate = false) }
+        if (ready != null) initialSignField?.let { index -> ready.signFields.getOrNull(index)?.let { goToField(it, animate = false) } }
     }
 
     // Tells the caller which mode is on screen, so it can pick a tip for it.
@@ -628,20 +647,17 @@ fun ViewerContent(
 
     fun onPagesTool(tool: Int) {
         when (tool) {
-            R.string.tool_rotate -> onAction(ViewerAction.Rotate(selectedPages))
+            R.string.tool_rotate -> editPages(ViewerAction.Rotate(selectedPages), then = selectedPages)
             // Several selected pages move together, keeping the gaps between them.
             R.string.tool_move_earlier -> if (selectedPage > 0) {
-                onAction(ViewerAction.Shift(selectedPages, -1))
-                selectedPages = selectedPages.map { it - 1 }.toSet()
+                editPages(ViewerAction.Shift(selectedPages, -1), then = selectedPages.map { it - 1 }.toSet())
             }
             R.string.tool_move_later -> if (selectedPages.max() < pageCount - 1) {
-                onAction(ViewerAction.Shift(selectedPages, 1))
-                selectedPages = selectedPages.map { it + 1 }.toSet()
+                editPages(ViewerAction.Shift(selectedPages, 1), then = selectedPages.map { it + 1 }.toSet())
             }
             R.string.tool_insert -> {
                 val after = selectedPages.max()
-                onAction(ViewerAction.InsertBlank(after))
-                selectedPages = setOf(after + 1)
+                editPages(ViewerAction.InsertBlank(after), then = setOf(after + 1))
             }
             R.string.tool_delete -> confirmDelete = true
             R.string.tool_extract -> extracting = true
@@ -905,6 +921,7 @@ fun ViewerContent(
                 mode == ViewerMode.Pages -> PageGrid(
                     pageSizes = ready.pageSizes,
                     revision = ready.revision,
+                    failedEdits = ready.failedPageEdits,
                     selectedPages = selectedPages,
                     // With several pages picked, a tap adds or removes one; otherwise it picks just that page.
                     onPageTapped = { page ->
@@ -914,10 +931,7 @@ fun ViewerContent(
                         }
                     },
                     onSelectionToggled = { page -> selectedPages = selectedPages.toggle(page) },
-                    onPageMoved = { from, to ->
-                        onAction(ViewerAction.Move(from, to))
-                        selectedPages = setOf(to)
-                    },
+                    onPageMoved = { from, to -> editPages(ViewerAction.Move(from, to), then = setOf(to)) },
                     loadPage = loadPage,
                     pageColors = pageColors,
                 )
@@ -985,7 +999,9 @@ fun ViewerContent(
                             val places = ready.signFields.withIndex()
                                 .filter { (i, field) -> field.page == page && i !in signedFields }
                                 .map { it.index to it.value }
-                            if (places.isNotEmpty()) SignFieldLayer(places, currentField, onTap = { signPlace(it) })
+                            if (places.isNotEmpty()) {
+                                SignFieldLayer(places, current = SignatureFields.indexOf(ready.signFields, currentField), onTap = { signPlace(it) })
+                            }
                         }
                         if (pageStamps.isNotEmpty()) {
                             StampLayer(
@@ -1084,8 +1100,7 @@ fun ViewerContent(
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false
-                    onAction(ViewerAction.Delete(selectedPages))
-                    selectedPages = setOf(selectedPage)
+                    editPages(ViewerAction.Delete(selectedPages), then = setOf(selectedPage))
                 }) { Text(stringResource(R.string.tool_delete)) }
             },
             dismissButton = {
@@ -1130,7 +1145,7 @@ fun ViewerContent(
                 padFor = null
                 onAction(ViewerAction.SaveSignature(kind, image, method))
                 // Drawn after tapping a place to sign: sign it straight away.
-                if (kind == SignatureStore.Kind.Signature) pendingField?.let { index -> onAction(ViewerAction.SignField(index)) }
+                if (kind == SignatureStore.Kind.Signature) pendingField?.let { field -> onAction(ViewerAction.SignField(field)) }
                 pendingField = null
             },
         )
@@ -1543,6 +1558,21 @@ private fun Set<Int>.toggle(page: Int): Set<Int> = when {
 }
 
 private val PageSetSaver = listSaver<Set<Int>, Int>(save = { it.toList() }, restore = { it.toSet() })
+
+/** Keeps the current place to sign across configuration changes; nothing is saved for null. */
+private val SignFieldSaver = listSaver<SignField?, Any>(
+    save = { field ->
+        if (field == null) emptyList()
+        else listOf(field.page, field.box.left, field.box.top, field.box.right, field.box.bottom, field.source.name)
+    },
+    restore = { saved ->
+        SignField(
+            saved[0] as Int,
+            DisplayRect(saved[1] as Float, saved[2] as Float, saved[3] as Float, saved[4] as Float),
+            SignField.Source.valueOf(saved[5] as String),
+        )
+    },
+)
 
 /** The tip shown the first time [this] mode is entered, if any. */
 private val ViewerMode.tip: Tip?
