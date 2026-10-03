@@ -97,6 +97,7 @@ import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
+import io.github.karljuderojas.freepdf.pdf.annotate.Stamps
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
@@ -136,6 +137,7 @@ sealed interface ViewerAction {
     data class Stroke(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val points: List<Offset>) : ViewerAction
     data class Box(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val start: Offset, val end: Offset) : ViewerAction
     data class Note(val page: Int, val style: ToolStyle, val at: Offset, val text: String) : ViewerAction
+    data class AddStamp(val page: Int, val at: Offset, val kind: Stamps.Kind) : ViewerAction
     data class AddTextBox(val page: Int, val style: ToolStyle, val at: Offset, val text: String) : ViewerAction
     data class SetToolStyle(val tool: AnnotateTool, val style: ToolStyle) : ViewerAction
 
@@ -290,6 +292,7 @@ fun ViewerScreen(
                     }
                 }
                 is ViewerAction.Note -> viewModel.note(action.page, action.at, action.text, action.style)
+                is ViewerAction.AddStamp -> viewModel.stamp(action.page, action.at, action.kind)
                 is ViewerAction.AddTextBox -> viewModel.textBox(action.page, action.at, action.text, action.style)
                 is ViewerAction.SetToolStyle -> viewModel.setToolStyle(action.tool, action.style)
                 is ViewerAction.MarkLines -> action.tool.markup?.let {
@@ -361,6 +364,7 @@ fun ViewerContent(
     var confirmLeave by remember { mutableStateOf(false) }
     var pendingNote by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var pendingTextBox by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
+    var stampKind by rememberSaveable { mutableStateOf(Stamps.Kind.Approved) }
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
@@ -602,6 +606,7 @@ fun ViewerContent(
                 mode == ViewerMode.Pages -> ToolStrip(mode, selectedTool = null, onToolSelected = { onPagesTool(it) })
                 // Choosing the active Annotate tool again puts it down, so one finger scrolls again.
                 mode == ViewerMode.Annotate -> Column {
+                    if (AnnotateTool.forLabel(selectedTool) == AnnotateTool.Stamp) StampBar(stampKind, onSelect = { stampKind = it })
                     AnnotateTool.forLabel(selectedTool)?.takeIf { it.hasStyle }?.let { tool ->
                         StyleBar(tool, styleOf(tool), onStyleChange = {
                             styles = styles + (tool to it)
@@ -745,6 +750,7 @@ fun ViewerContent(
                                     when (tool) {
                                         AnnotateTool.Note -> pendingNote = page to at
                                         AnnotateTool.TextBox -> pendingTextBox = page to at
+                                        AnnotateTool.Stamp -> onAction(ViewerAction.AddStamp(page, at, stampKind))
                                         else -> onAction(ViewerAction.Erase(page, at))
                                     }
                                 },

@@ -352,6 +352,9 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerAnnotateStamp() = capture("viewer_annotate_stamp") { viewer(ViewerMode.Annotate, tool = R.string.tool_stamp) }
+
+    @Test
     fun viewerSign() = capture("viewer_sign") { viewer(ViewerMode.Sign) }
 
     @Test
