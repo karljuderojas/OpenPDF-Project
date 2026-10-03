@@ -44,6 +44,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
@@ -73,6 +74,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -92,6 +94,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -127,10 +130,12 @@ sealed interface ViewerAction {
     /** Saves, then runs [then] once the save lands: back out, or on to another open document. */
     data class SaveAndLeave(val then: () -> Unit) : ViewerAction
 
-    data class Rotate(val page: Int) : ViewerAction
-    data class Delete(val page: Int) : ViewerAction
+    data class Rotate(val pages: Set<Int>) : ViewerAction
+    data class Delete(val pages: Set<Int>) : ViewerAction
     data class InsertBlank(val afterPage: Int) : ViewerAction
     data class Move(val from: Int, val to: Int) : ViewerAction
+    /** Moves the pages [by] places together; negative is earlier. */
+    data class Shift(val pages: Set<Int>, val by: Int) : ViewerAction
     data object Merge : ViewerAction
     data class Share(val option: ShareOption, val pages: List<Int>) : ViewerAction
     data class Extract(val pages: List<Int>) : ViewerAction
@@ -313,10 +318,11 @@ fun ViewerScreen(
                     afterSave = action.then
                     viewModel.save(thenClose = true)
                 }
-                is ViewerAction.Rotate -> viewModel.rotatePage(action.page)
-                is ViewerAction.Delete -> viewModel.deletePage(action.page)
+                is ViewerAction.Rotate -> viewModel.rotatePages(action.pages)
+                is ViewerAction.Delete -> viewModel.deletePages(action.pages)
                 is ViewerAction.InsertBlank -> viewModel.insertBlankPage(action.afterPage)
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
+                is ViewerAction.Shift -> viewModel.shiftPages(action.pages, action.by)
                 ViewerAction.Merge -> mergePicker.launch(arrayOf("application/pdf"))
                 is ViewerAction.Share -> viewModel.share(action.option, action.pages)
                 is ViewerAction.Extract -> viewModel.extract(action.pages)
@@ -387,6 +393,7 @@ fun ViewerContent(
     loadRegion: LoadRegion = { _, _, _ -> null },
     initialMode: ViewerMode = ViewerMode.Read,
     initialSelectedPage: Int = 0,
+    initialSelectedPages: Set<Int> = setOf(initialSelectedPage),
     initialTool: Int? = null,
     savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
     signerName: String = "",
@@ -414,7 +421,9 @@ fun ViewerContent(
     val currentPage by remember { derivedStateOf { listState.firstVisibleItemIndex } }
     var mode by rememberSaveable { mutableStateOf(initialMode) }
     var selectedTool by rememberSaveable { mutableStateOf(initialTool) }
-    var selectedPage by rememberSaveable { mutableIntStateOf(initialSelectedPage) }
+    // Pages mode's selection; never empty, so the tools always have something to act on.
+    var selectedPages by rememberSaveable(stateSaver = PageSetSaver) { mutableStateOf(initialSelectedPages) }
+    val selectedPage = selectedPages.minOrNull() ?: 0
     var confirmDelete by remember { mutableStateOf(false) }
     var extracting by remember { mutableStateOf(false) }
     var splitting by remember { mutableStateOf(false) }
@@ -470,7 +479,9 @@ fun ViewerContent(
     val hasSignature = ready?.hasSignature == true || stamps.any { it.content is StampContent.Signature }
     LaunchedEffect(mode, selectedTool, ready?.revision) { selection = null }
     LaunchedEffect(pageCount) {
-        if (pageCount > 0 && selectedPage >= pageCount) selectedPage = pageCount - 1
+        if (pageCount > 0 && selectedPages.any { it >= pageCount }) {
+            selectedPages = selectedPages.filter { it < pageCount }.toSet().ifEmpty { setOf(pageCount - 1) }
+        }
     }
 
     // Tells the caller which mode is on screen, so it can pick a tip for it.
@@ -486,23 +497,28 @@ fun ViewerContent(
 
     fun onPagesTool(tool: Int) {
         when (tool) {
-            R.string.tool_rotate -> onAction(ViewerAction.Rotate(selectedPage))
+            R.string.tool_rotate -> onAction(ViewerAction.Rotate(selectedPages))
+            // Several selected pages move together, keeping the gaps between them.
             R.string.tool_move_earlier -> if (selectedPage > 0) {
-                onAction(ViewerAction.Move(selectedPage, selectedPage - 1))
-                selectedPage--
+                onAction(ViewerAction.Shift(selectedPages, -1))
+                selectedPages = selectedPages.map { it - 1 }.toSet()
             }
-            R.string.tool_move_later -> if (selectedPage < pageCount - 1) {
-                onAction(ViewerAction.Move(selectedPage, selectedPage + 1))
-                selectedPage++
+            R.string.tool_move_later -> if (selectedPages.max() < pageCount - 1) {
+                onAction(ViewerAction.Shift(selectedPages, 1))
+                selectedPages = selectedPages.map { it + 1 }.toSet()
             }
             R.string.tool_insert -> {
-                onAction(ViewerAction.InsertBlank(selectedPage))
-                selectedPage++
+                val after = selectedPages.max()
+                onAction(ViewerAction.InsertBlank(after))
+                selectedPages = setOf(after + 1)
             }
             R.string.tool_delete -> confirmDelete = true
             R.string.tool_extract -> extracting = true
             R.string.tool_merge -> onAction(ViewerAction.Merge)
             R.string.tool_split -> splitting = true
+            R.string.tool_select_all -> selectedPages = (0 until pageCount).toSet()
+            // Straight to Android's share menu with just the selected pages, as a new PDF.
+            R.string.tool_share_selected -> onAction(ViewerAction.Share(ShareOption.SomePages, selectedPages.sorted()))
         }
     }
 
@@ -571,6 +587,8 @@ fun ViewerContent(
                             onQueryChange = { query = it },
                             focusRequester = searchFocus,
                         )
+                        mode == ViewerMode.Pages && selectedPages.size > 1 ->
+                            Text(pluralStringResource(R.plurals.pages_selected, selectedPages.size, selectedPages.size))
                         mode != ViewerMode.Read -> Text(stringResource(mode.label))
                         // Tapping "Page 3 of 12" asks which page to go to.
                         ready != null -> Text(
@@ -586,6 +604,10 @@ fun ViewerContent(
                     if (mode == ViewerMode.Read) {
                         IconButton(onClick = { if (searching) closeSearch() else leave() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                        }
+                    } else if (mode == ViewerMode.Pages && selectedPages.size > 1) {
+                        IconButton(onClick = { selectedPages = setOf(selectedPage) }) {
+                            Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.clear_selection))
                         }
                     }
                 },
@@ -664,7 +686,7 @@ fun ViewerContent(
                 mode == ViewerMode.Read && searching -> Unit
                 mode == ViewerMode.Read -> ModeBar(onModeSelected = {
                     mode = it
-                    if (it == ViewerMode.Pages) selectedPage = currentPage
+                    if (it == ViewerMode.Pages) selectedPages = setOf(currentPage)
                 })
                 // Page tools act once on the selected page, so none stays highlighted.
                 mode == ViewerMode.Pages -> ToolStrip(mode, selectedTool = null, onToolSelected = { onPagesTool(it) })
@@ -748,8 +770,19 @@ fun ViewerContent(
                 mode == ViewerMode.Pages -> PageGrid(
                     pageSizes = ready.pageSizes,
                     revision = ready.revision,
-                    selectedPage = selectedPage,
-                    onPageSelected = { selectedPage = it },
+                    selectedPages = selectedPages,
+                    // With several pages picked, a tap adds or removes one; otherwise it picks just that page.
+                    onPageTapped = { page ->
+                        selectedPages = when {
+                            selectedPages.size < 2 -> setOf(page)
+                            else -> selectedPages.toggle(page)
+                        }
+                    },
+                    onSelectionToggled = { page -> selectedPages = selectedPages.toggle(page) },
+                    onPageMoved = { from, to ->
+                        onAction(ViewerAction.Move(from, to))
+                        selectedPages = setOf(to)
+                    },
                     loadPage = loadPage,
                 )
                 else -> {
@@ -880,12 +913,18 @@ fun ViewerContent(
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text(stringResource(R.string.delete_page_title, selectedPage + 1)) },
+            title = {
+                Text(
+                    if (selectedPages.size == 1) stringResource(R.string.delete_page_title, selectedPage + 1)
+                    else pluralStringResource(R.plurals.delete_pages_title, selectedPages.size, selectedPages.size),
+                )
+            },
             text = { Text(stringResource(R.string.delete_page_body)) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false
-                    onAction(ViewerAction.Delete(selectedPage))
+                    onAction(ViewerAction.Delete(selectedPages))
+                    selectedPages = setOf(selectedPage)
                 }) { Text(stringResource(R.string.tool_delete)) }
             },
             dismissButton = {
@@ -897,7 +936,7 @@ fun ViewerContent(
     if (extracting) {
         ExtractPagesDialog(
             pageCount = pageCount,
-            selectedPage = selectedPage,
+            selectedPages = selectedPages.sorted(),
             onDismiss = { extracting = false },
             onExtract = {
                 extracting = false
@@ -1298,6 +1337,15 @@ private const val SEARCH_DELAY_MS = 300L
 
 /** How long the view must be still before zoomed pages are sharpened. */
 private const val SETTLE_MILLIS = 150L
+
+/** Adds [page] to the selection, or takes it out unless it is the only one left. */
+private fun Set<Int>.toggle(page: Int): Set<Int> = when {
+    page !in this -> this + page
+    size > 1 -> this - page
+    else -> this
+}
+
+private val PageSetSaver = listSaver<Set<Int>, Int>(save = { it.toList() }, restore = { it.toSet() })
 
 /** The tip shown the first time [this] mode is entered, if any. */
 private val ViewerMode.tip: Tip?

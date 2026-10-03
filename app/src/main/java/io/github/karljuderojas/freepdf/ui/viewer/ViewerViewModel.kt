@@ -314,14 +314,15 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         current.renderRegion(index, fullWidthPx, region)
     }
 
-    fun rotatePage(index: Int) = edit { PageEditor.rotate(it, index, 90) }
+    fun rotatePages(pages: Set<Int>) = edit { PageEditor.rotate(it, pages, 90) }
 
-    fun deletePage(index: Int) {
-        if ((_state.value as? ViewerState.Ready)?.pageSizes?.size == 1) {
+    fun deletePages(pages: Set<Int>) {
+        val pageCount = (_state.value as? ViewerState.Ready)?.pageSizes?.size ?: return
+        if (pages.size >= pageCount) {
             _effects.trySend(ViewerEffect.Message(R.string.cannot_delete_last_page))
             return
         }
-        edit { PageEditor.delete(it, index) }
+        edit { PageEditor.delete(it, pages) }
     }
 
     fun insertBlankPage(afterIndex: Int) = edit { document ->
@@ -332,6 +333,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun movePage(from: Int, to: Int) = edit { PageEditor.move(it, from, to) }
+
+    /** Moves the selected pages [by] places together, as one undo step. */
+    fun shiftPages(pages: Set<Int>, by: Int) = edit { PageEditor.shift(it, pages, by) }
 
     /** Appends every page of [other] to the end of the open document. */
     fun merge(other: Uri) = edit { document ->
