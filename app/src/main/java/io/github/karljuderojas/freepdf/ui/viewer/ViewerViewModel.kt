@@ -23,6 +23,7 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
+import io.github.karljuderojas.freepdf.files.Documents
 import io.github.karljuderojas.freepdf.files.SafeWrite
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
 import io.github.karljuderojas.freepdf.pdf.PdfRect
@@ -1201,8 +1202,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
      */
     private suspend fun remember(uri: Uri) {
         val name = withContext(Dispatchers.IO) { displayName(uri) }
-        val lasting = uri.scheme == "file" ||
+        val lasting = Documents.lasting(uri, context.filesDir) {
             context.contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
+        }
         val app = getApplication<FreePdfApp>()
         app.documents.opened(uri.toString(), name, remember = lasting && app.settings.rememberHistory.value)
     }
