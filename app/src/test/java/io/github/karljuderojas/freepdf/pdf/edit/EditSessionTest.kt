@@ -2,6 +2,8 @@ package io.github.karljuderojas.freepdf.pdf.edit
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
+import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -60,6 +62,56 @@ class EditSessionTest {
         runCatching { session.edit { PageEditor.delete(it, 7) } }
         assertEquals(2, pageCount())
         assertFalse(session.canUndo)
+    }
+
+    @Test
+    fun aLockedPdfOpensWithItsPasswordAndStaysLockedAfterEdits() {
+        val locked = File(dir, "locked.pdf")
+        PDDocument.load(session.workingFile).use { document ->
+            val permissions = AccessPermission().apply { setCanPrint(false) }
+            document.protect(StandardProtectionPolicy("owner-secret", "open sesame", permissions).apply { encryptionKeyLength = 128 })
+            document.save(locked)
+        }
+        val lockedSession = EditSession(File(dir, "locked-session"), locked.inputStream())
+        try {
+            assertTrue(lockedSession.needsPassword())
+            assertFalse(lockedSession.unlock("wrong"))
+            assertTrue(lockedSession.needsPassword())
+            assertTrue(lockedSession.unlock("open sesame"))
+            assertFalse(lockedSession.needsPassword())
+
+            lockedSession.edit { PageEditor.rotate(it, 0, 90) }
+
+            // Still locked with the same password, the same permissions, and the edit applied.
+            assertFalse(PdfDocuments.opens(lockedSession.workingFile, ""))
+            PDDocument.load(lockedSession.workingFile, "open sesame").use {
+                assertTrue(it.isEncrypted)
+                assertEquals(90, it.getPage(0).rotation)
+                assertFalse(it.currentAccessPermission.canPrint())
+            }
+        } finally {
+            lockedSession.close()
+        }
+    }
+
+    @Test
+    fun anOwnerPasswordStaysTheOwnerPassword() {
+        val locked = File(dir, "owner.pdf")
+        PDDocument.load(session.workingFile).use { document ->
+            document.protect(StandardProtectionPolicy("owner-secret", "user", AccessPermission()).apply { encryptionKeyLength = 128 })
+            document.save(locked)
+        }
+        val lockedSession = EditSession(File(dir, "owner-session"), locked.inputStream())
+        try {
+            assertTrue(lockedSession.unlock("owner-secret"))
+            lockedSession.edit { PageEditor.insertBlank(it, 1) }
+            PDDocument.load(lockedSession.workingFile, "owner-secret").use {
+                assertTrue(it.currentAccessPermission.isOwnerPermission)
+                assertEquals(3, it.numberOfPages)
+            }
+        } finally {
+            lockedSession.close()
+        }
     }
 
     private fun pageCount() = PDDocument.load(session.workingFile).use { it.numberOfPages }

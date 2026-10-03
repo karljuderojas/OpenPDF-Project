@@ -25,6 +25,15 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.Surface
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -47,6 +56,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -56,6 +66,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -63,6 +74,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalDensity
@@ -74,10 +86,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /** What the viewer asks its view model to do. Page numbers are zero-based. */
@@ -91,6 +106,7 @@ sealed interface ViewerAction {
     data class Move(val from: Int, val to: Int) : ViewerAction
     data object Merge : ViewerAction
     data object Share : ViewerAction
+    data class Unlock(val password: String) : ViewerAction
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
     data class Stroke(val page: Int, val tool: AnnotateTool, val points: List<Offset>) : ViewerAction
@@ -99,7 +115,7 @@ sealed interface ViewerAction {
     data class Erase(val page: Int, val at: Offset) : ViewerAction
 
     /** Sign actions. */
-    data class SaveSignature(val kind: SignatureStore.Kind, val image: Bitmap) : ViewerAction
+    data class SaveSignature(val kind: SignatureStore.Kind, val image: Bitmap, val method: SignatureMethod) : ViewerAction
     data class PlaceSignature(val page: Int, val at: Offset, val kind: SignatureStore.Kind) : ViewerAction
     data class AddDate(val page: Int, val at: Offset) : ViewerAction
     data class AddText(val page: Int, val at: Offset, val text: String) : ViewerAction
@@ -159,6 +175,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
         state = state,
         onBack = onBack,
         loadPage = viewModel::page,
+        loadRegion = viewModel::pageRegion,
         savedSignatures = savedSignatures,
         signerName = signerName,
         stamps = stamps,
@@ -174,6 +191,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
                 ViewerAction.Merge -> mergePicker.launch(arrayOf("application/pdf"))
                 ViewerAction.Share -> viewModel.share()
+                is ViewerAction.Unlock -> viewModel.unlock(action.password)
                 is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.tool.rgb)
                 is ViewerAction.Box -> when (action.tool) {
                     AnnotateTool.Highlight -> Annotator.TextMarkup.Highlight
@@ -189,7 +207,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 }
                 is ViewerAction.Note -> viewModel.note(action.page, action.at, action.text)
                 is ViewerAction.Erase -> viewModel.erase(action.page, action.at)
-                is ViewerAction.SaveSignature -> viewModel.saveSignature(action.kind, action.image)
+                is ViewerAction.SaveSignature -> viewModel.saveSignature(action.kind, action.image, action.method)
                 is ViewerAction.PlaceSignature -> viewModel.placeSignature(action.page, action.at, action.kind)
                 is ViewerAction.AddDate -> viewModel.addDate(action.page, action.at)
                 is ViewerAction.AddText -> viewModel.addText(action.page, action.at, action.text)
@@ -216,6 +234,7 @@ fun ViewerContent(
     state: ViewerState,
     onBack: () -> Unit,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
+    loadRegion: LoadRegion = { _, _, _ -> null },
     initialMode: ViewerMode = ViewerMode.Read,
     initialSelectedPage: Int = 0,
     initialTool: Int? = null,
@@ -406,6 +425,11 @@ fun ViewerContent(
         ) {
             when {
                 state is ViewerState.Failed -> Text(stringResource(R.string.error_open))
+                state is ViewerState.Locked -> PasswordPrompt(
+                    wrongPassword = state.wrongPassword,
+                    onUnlock = { onAction(ViewerAction.Unlock(it)) },
+                    onCancel = onBack,
+                )
                 ready == null -> CircularProgressIndicator()
                 mode == ViewerMode.Pages -> PageGrid(
                     pageSizes = ready.pageSizes,
@@ -417,7 +441,7 @@ fun ViewerContent(
                 else -> {
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
                     val signTool = SignTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Sign }
-                    PageList(ready.pageSizes, ready.revision, loadPage, listState) { page ->
+                    PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState) { page ->
                         val showsStamps = mode == ViewerMode.Sign || mode == ViewerMode.Edit
                         val pageStamps = if (showsStamps) stamps.filter { it.page == page } else emptyList()
                         val addsText = mode == ViewerMode.Edit && selectedTool == R.string.tool_add_text
@@ -488,10 +512,11 @@ fun ViewerContent(
     padFor?.let { kind ->
         SignaturePadDialog(
             kind = kind,
+            typedName = signerName,
             onDismiss = { padFor = null },
-            onSave = {
+            onSave = { image, method ->
                 padFor = null
-                onAction(ViewerAction.SaveSignature(kind, it))
+                onAction(ViewerAction.SaveSignature(kind, image, method))
             },
         )
     }
@@ -561,13 +586,24 @@ private fun PageList(
     pageSizes: List<PageSize>,
     revision: Int,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
+    loadRegion: LoadRegion,
     listState: LazyListState,
     overlay: @Composable BoxScope.(page: Int) -> Unit = {},
 ) {
     var zoom by remember { mutableFloatStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
+    val detail = remember { ZoomDetail() }
+    SideEffect { detail.loadRegion = loadRegion }
+    // Sharpen once the view has stopped moving, not on every frame of a pinch or fling.
+    LaunchedEffect(detail) {
+        snapshotFlow { listOf(zoom, pan, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) }
+            .collectLatest {
+                delay(SETTLE_MILLIS)
+                detail.settled++
+            }
+    }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize().onGloballyPositioned { detail.viewport = it }) {
         val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
         LazyColumn(
             state = listState,
@@ -602,7 +638,10 @@ private fun PageList(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             itemsIndexed(pageSizes) { index, size ->
-                PageImage(index, size, revision, widthPx, loadPage, Modifier.fillMaxWidth()) { overlay(index) }
+                PageImage(index, size, revision, widthPx, loadPage, Modifier.fillMaxWidth()) {
+                    ZoomDetailLayer(index, revision, detail)
+                    overlay(index)
+                }
             }
         }
     }
@@ -633,6 +672,51 @@ internal fun PageImage(
     }
 }
 
+/** Asks for the password of a locked PDF, in place of its pages. */
+@Composable
+private fun PasswordPrompt(wrongPassword: Boolean, onUnlock: (String) -> Unit, onCancel: () -> Unit) {
+    var password by rememberSaveable { mutableStateOf("") }
+    var visible by rememberSaveable { mutableStateOf(false) }
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        tonalElevation = 3.dp,
+        modifier = Modifier.padding(24.dp).widthIn(max = 440.dp),
+    ) {
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.password_title), style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.password_body), style = MaterialTheme.typography.bodyMedium)
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text(stringResource(R.string.password_label)) },
+                singleLine = true,
+                isError = wrongPassword,
+                supportingText = if (wrongPassword) {
+                    { Text(stringResource(R.string.password_wrong)) }
+                } else {
+                    null
+                },
+                visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { if (password.isNotEmpty()) onUnlock(password) }),
+                trailingIcon = {
+                    TextButton(onClick = { visible = !visible }) {
+                        Text(stringResource(if (visible) R.string.password_hide else R.string.password_show))
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().testTag("password-field"),
+            )
+            Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
+                Button(onClick = { onUnlock(password) }, enabled = password.isNotEmpty()) {
+                    Text(stringResource(R.string.unlock))
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun TextEntryDialog(@StringRes title: Int, @StringRes hint: Int, onDismiss: () -> Unit, onAdd: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
@@ -656,5 +740,8 @@ private fun TextEntryDialog(@StringRes title: Int, @StringRes hint: Int, onDismi
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
+
+/** How long the view must be still before zoomed pages are sharpened. */
+private const val SETTLE_MILLIS = 150L
 
 private val AnnotateTool.rgb get() = Annotator.Rgb(color.red, color.green, color.blue)
