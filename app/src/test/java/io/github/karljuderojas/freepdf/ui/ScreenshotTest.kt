@@ -202,6 +202,17 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_comments.png")
     }
 
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerAnnotateTextBox() {
+        show { viewer(ViewerMode.Annotate, tool = R.string.tool_text_box) }
+        // The dialog's text field keeps Compose from going idle, as in viewerAnnotateNote.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("annotation-layer-0").performTouchInput { click(Offset(300f, 1000f)) }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_annotate_text_box.png")
+    }
+
     @Test
     fun viewerSign() = capture("viewer_sign") { viewer(ViewerMode.Sign) }
 

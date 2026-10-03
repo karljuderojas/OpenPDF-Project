@@ -64,6 +64,8 @@
     <string name="mark_rectangle">Rectangle</string>
     <string name="mark_ellipse">Ellipse</string>
     <string name="mark_other">Mark</string>
+    <string name="mark_edit_text">Edit text</string>
+    <string name="text_box_title">Add a text box</string>
     <string name="style_colour">Colour %1$d</string>
     <string name="style_size">Size %1$d</string>
     <string name="cancel">Cancel</string>

@@ -23,7 +23,8 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ✅ Pen, rectangles, sticky notes, eraser (tap a mark to remove it)
 - ✅ Sticky tools: one finger draws while a tool is chosen; choose it again to scroll
 - ✅ Undo (shared with page edits)
-- ⬜ Text box (FreeText), stamps, ellipses
+- ✅ Text box (FreeText): colour and font size, editable later; Latin, Greek and Cyrillic text
+- ⬜ Stamps, ellipses
 - ✅ Per-tool colours and sizes (remembered per tool), redo
 - ✅ Tap a mark to change its colour or size, comment on it or delete it; Comments list of every mark
 

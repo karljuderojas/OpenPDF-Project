@@ -57,7 +57,8 @@ val Mark.Kind.tool: AnnotateTool?
         Mark.Kind.Ink -> AnnotateTool.Pen
         Mark.Kind.Square, Mark.Kind.Circle -> AnnotateTool.Shapes
         Mark.Kind.Note -> AnnotateTool.Note
-        Mark.Kind.TextBox, Mark.Kind.Stamp, Mark.Kind.Other -> null
+        Mark.Kind.TextBox -> AnnotateTool.TextBox
+        Mark.Kind.Stamp, Mark.Kind.Other -> null
     }
 
 val Mark.Kind.label: Int
@@ -166,7 +167,16 @@ fun MarkEditBar(
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = onComment) {
-                    Text(stringResource(if (mark.comment.isBlank()) R.string.mark_add_comment else R.string.mark_edit_comment))
+                    Text(
+                        stringResource(
+                            when {
+                                // A text box's comment is its text.
+                                mark.kind == Mark.Kind.TextBox -> R.string.mark_edit_text
+                                mark.comment.isBlank() -> R.string.mark_add_comment
+                                else -> R.string.mark_edit_comment
+                            },
+                        ),
+                    )
                 }
                 TextButton(onClick = onDelete) { Text(stringResource(R.string.tool_delete)) }
                 TextButton(onClick = onDone) { Text(stringResource(R.string.done)) }

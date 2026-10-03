@@ -50,6 +50,9 @@ internal val InkColors = listOf(
 internal val PenWidths = listOf(1f, 2f, 4f, 8f)
 internal val LineWidths = listOf(1f, 2f, 3f)
 
+/** Text box font sizes, in points. */
+internal val FontSizes = listOf(10f, 12f, 16f, 24f)
+
 /**
  * Above the Annotate tool strip while a tool is chosen: its colours, then its sizes. The choice
  * is kept per tool, so the pen can stay thin and black while highlights stay yellow.

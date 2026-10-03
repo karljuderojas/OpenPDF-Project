@@ -25,6 +25,7 @@ import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
 import io.github.karljuderojas.freepdf.pdf.annotate.Marks
+import io.github.karljuderojas.freepdf.pdf.annotate.TextBoxes
 import io.github.karljuderojas.freepdf.pdf.displayToPdf
 import io.github.karljuderojas.freepdf.pdf.edit.EditSession
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
@@ -263,6 +264,11 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun note(page: Int, at: Offset, text: String, style: ToolStyle) = edit { document ->
         Annotator.note(document, page, displayMapper(document, page)(at), text, style.rgb)
+    }
+
+    /** Adds a text box whose top-left corner is at [at]; [style]'s width is the font size. */
+    fun textBox(page: Int, at: Offset, text: String, style: ToolStyle) = edit { document ->
+        TextBoxes.add(document, page, displayMapper(document, page)(at), text, style.rgb, fontSize = style.width)
     }
 
     /** Remembers [style] for [tool], here and the next time the app opens. */
