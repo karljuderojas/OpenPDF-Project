@@ -53,7 +53,7 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ✅ Extract and split: save chosen pages (typed like 1-3, 5) as a new PDF, or split into two after the selected page or every few pages into a folder you pick; the open PDF stays as it is
 - ✅ Redact (Edit → Redact): drag over text (snaps to words) or an area on a scan, tap Apply, and a new copy is saved with the text, pictures and line art under each area removed from the file, not just covered, then painted black. Invisible OCR text, notes and form fields in the area go too, and so do the same words in the title, author, keywords, XMP metadata, bookmarks and tagged-PDF alternate text. The open PDF is untouched. Limits: a picture is blanked pixel by pixel (stencil masks are removed whole), line art touching an area is removed whole, and shadings and pattern fills are left as they are
 - ⬜ Links
-- ⬜ Edit existing text (hard; needs font handling)
+- ✅ Edit text: tap a line of existing text and change its words. The old words are removed from the page, not covered; the new ones keep the line's font, size and colour, or use the bundled font when the PDF's font lacks a letter (the app says so). Text drawn upright only; scans have no text to edit
 
 ## More
 - ✅ Share: a sheet (top bar or More) offers the PDF with your changes, a locked copy with marks and form fields flattened into the page, some pages only, or pages as images, then Android's share sheet; a Recent row's menu sends the file as it is

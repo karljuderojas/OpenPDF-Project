@@ -43,6 +43,7 @@ import io.github.karljuderojas.freepdf.pdf.edit.PdfText
 import io.github.karljuderojas.freepdf.pdf.form.FormField
 import io.github.karljuderojas.freepdf.pdf.form.FormFiller
 import io.github.karljuderojas.freepdf.pdf.edit.Splitting
+import io.github.karljuderojas.freepdf.pdf.edit.TextEditing
 import io.github.karljuderojas.freepdf.pdf.edit.WatermarkStyle
 import io.github.karljuderojas.freepdf.pdf.edit.Watermarks
 import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
@@ -550,6 +551,22 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 PageText.words(document, page)
             }.getOrDefault(emptyList())
         }.also { wordCache[page] = it }
+    }
+
+    /** The line of existing text under [at] (page fractions) that Edit text could change, or null if none is there. */
+    suspend fun editableLine(page: Int, at: Offset): TextEditing.EditableLine? = lock.withLock {
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val document = textDocument ?: (session?.let { PDDocument.load(it.workingFile, it.password) } ?: error("Nothing is open")).also { textDocument = it }
+                TextEditing.lineAt(document, page, at.x, at.y)
+            }.getOrNull()
+        }
+    }
+
+    /** Edit text: replaces the words of the line [oldText] under [at] with [newText], as one undo step. */
+    fun replaceText(page: Int, at: Offset, oldText: String, newText: String) = edit { document ->
+        val outcome = TextEditing.replace(document, page, at.x, at.y, oldText, newText)
+        if (outcome == TextEditing.Outcome.OtherFont) _effects.trySend(ViewerEffect.Message(R.string.edit_text_other_font))
     }
 
     fun shape(page: Int, start: Offset, end: Offset, style: ToolStyle) = mark { document ->
