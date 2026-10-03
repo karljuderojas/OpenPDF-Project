@@ -71,6 +71,18 @@ class StampsTest {
     }
 
     @Test
+    fun aStampKeepsItsKindAfterACommentReplacesItsContents() {
+        sample().use { document ->
+            val stamp = Stamps.add(document, 0, PdfPoint(300f, 400f), Stamps.Kind.Draft)
+            stamp.contents = "Second draft, see page 3"
+
+            assertEquals(Stamps.Kind.Draft, Stamps.kindOf(stamp))
+            assertTrue(Stamps.restyle(document, stamp, Annotator.Rgb.Red))
+            assertEquals("Second draft, see page 3", stamp.contents)
+        }
+    }
+
+    @Test
     fun aStampFromAnotherAppIsLeftAlone() {
         sample().use { document ->
             val foreign = PDAnnotationRubberStamp().apply {

@@ -66,11 +66,16 @@ object Stamps {
         return annotation
     }
 
-    /** The kind of stamp [annotation] is, when it is one made by [add]; null for any other stamp. */
+    /**
+     * The kind of stamp [annotation] is, when it is one made by [add]; null for any other stamp.
+     *
+     * Only the /Name is checked: a comment added to a stamp later replaces its /Contents, and the
+     * stamp must still be recognised (and recolourable) afterwards.
+     */
     fun kindOf(annotation: PDAnnotation): Kind? {
         if (annotation.subtype != PDAnnotationRubberStamp.SUB_TYPE) return null
         val name = annotation.cosObject.getNameAsString(COSName.NAME)
-        return Kind.entries.firstOrNull { it.pdfName == name && it.label == annotation.contents }
+        return Kind.entries.firstOrNull { it.pdfName == name }
     }
 
     /**
