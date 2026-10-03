@@ -11,6 +11,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -136,6 +137,27 @@ class ScreenshotTest {
     @Test
     fun toolsSearch() = capture("tools_search_tick") {
         shell(MainTab.Tools) { ToolsContent(onToolPicked = {}, modifier = it, initialQuery = "tick") }
+    }
+
+    @Test
+    fun toolsSearchKeptAcrossTabs() {
+        // Tabs keep their state while another is shown: the search typed in Tools is still there
+        // after a trip to Home, so this matches tools_search_tick.
+        show {
+            var tab by remember { mutableStateOf(MainTab.Tools) }
+            AppShell(selected = tab, onSelect = { tab = it }) { selected, modifier ->
+                when (selected) {
+                    MainTab.Tools -> ToolsContent(onToolPicked = {}, modifier = modifier)
+                    else -> HomeContent(emptyList(), {}, {}, {}, {}, {}, {}, modifier = modifier)
+                }
+            }
+        }
+        composeRule.onNodeWithTag("tools-search").performTextInput("tick")
+        composeRule.onNodeWithText("Home").performClick()
+        composeRule.onNodeWithText("Tools").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("tools-search").assertTextContains("tick")
+        captureRoot("tools_search_kept")
     }
 
     @Test
