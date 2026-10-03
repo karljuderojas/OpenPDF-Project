@@ -19,7 +19,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Standard PDF annotations, so marks made here show up in Acrobat, Xodo, browsers and others.
+ * Standard PDF annotations, so marks made here show up in other PDF readers and browsers.
  * Each call also builds an appearance stream, which is what other viewers actually draw.
  */
 object Annotator {
@@ -147,7 +147,7 @@ object Annotator {
 
     /**
      * A straight line from [from] to [to], as a standard Line annotation. With [arrow] it ends in
-     * an open arrowhead at [to], the way an arrow drawn in Acrobat or Xodo does.
+     * an open arrowhead at [to], the way other PDF editors draw an arrow.
      */
     fun line(
         document: PDDocument,
