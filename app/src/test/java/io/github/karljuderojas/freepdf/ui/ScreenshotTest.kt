@@ -169,6 +169,20 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerReadOpenDocs() = capture("viewer_read_open_docs") {
+        viewer(ViewerMode.Read, openDocuments = sampleRecent.take(3))
+    }
+
+    @Test
+    fun viewerSwitcher() {
+        show { viewer(ViewerMode.Read, openDocuments = sampleRecent.take(3)) }
+        composeRule.onNodeWithTag("open-documents").performClick()
+        composeRule.waitForIdle()
+        // The sheet is its own window, so capture the whole screen rather than the root node.
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_switcher.png")
+    }
+
+    @Test
     fun viewerReadNight() = capture("viewer_read_night") { viewer(ViewerMode.Read, pageColors = PageColors.Night) }
 
     @Test
@@ -680,6 +694,7 @@ class ScreenshotTest {
         marks: List<Mark> = emptyList(),
         search: SearchResults = SearchResults(),
         searchQuery: String? = null,
+        openDocuments: List<DocumentEntry> = emptyList(),
         pageColors: PageColors = PageColors.Normal,
         tip: Int? = null,
         stamps: List<PlacedStamp> = emptyList(),
@@ -701,6 +716,8 @@ class ScreenshotTest {
             marks = marks,
             search = search,
             initialSearchQuery = searchQuery,
+            openDocuments = openDocuments,
+            currentUri = openDocuments.firstOrNull()?.uri,
             pageColors = pageColors,
             tip = tip,
             stamps = stamps,
