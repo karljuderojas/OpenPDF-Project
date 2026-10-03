@@ -7,20 +7,26 @@ import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 
 /**
- * Something placed in Sign mode that can still be moved, resized or deleted. It is drawn over the
- * page until the user leaves Sign mode or finishes signing, and only then written into the PDF.
+ * Something placed in Sign or Edit mode that can still be moved, resized or deleted. It is drawn
+ * over the page until the user leaves the mode or finishes signing, and only then written into the PDF.
  */
 data class PlacedStamp(val id: Long, val page: Int, val content: StampContent, val box: StampBox)
 
 sealed interface StampContent {
     data class Signature(val kind: SignatureStore.Kind, val image: Bitmap) : StampContent
 
-    /** Typed text or today's date; [what] names it on the audit page. */
-    data class Text(val text: String, val what: String) : StampContent {
+    /**
+     * Typed text or today's date; [what] names it on the audit page. Text added in Edit mode is
+     * not part of signing, so it has none and stays off the audit page.
+     */
+    data class Text(val text: String, val what: String?) : StampContent {
         val lines: List<String> get() = PdfText.lines(text)
     }
 
     data object Checkmark : StampContent
+
+    /** A picture added in Edit mode, such as a logo or a photo. */
+    data class Image(val image: Bitmap) : StampContent
 }
 
 /**
@@ -62,6 +68,9 @@ data class StampBox(val left: Float, val top: Float, val width: Float, val heigh
 object StampGeometry {
 
     const val TEXT_SIZE = 11f
+
+    /** Edit mode's Add text starts a little larger than form text, as a heading or label would. */
+    const val EDIT_TEXT_SIZE = 14f
     const val CHECKMARK_SIZE = 10f
     private const val LEADING = 1.2f
 
@@ -82,14 +91,34 @@ object StampGeometry {
     }
 
     /**
-     * Text with the first line's baseline on [at], starting there. [emWidth] measures one line in
-     * ems (its width at a font size of 1).
+     * Text with the first line's baseline on [at], starting there, at [fontSize] points.
+     * [emWidth] measures one line in ems (its width at a font size of 1).
      */
-    fun textBox(at: Offset, lines: List<String>, page: PageSize, emWidth: (String) -> Float): StampBox {
-        val width = lines.maxOf(emWidth) * TEXT_SIZE / page.widthPt
-        val height = lines.size * LEADING * TEXT_SIZE / page.heightPt
-        return StampBox(at.x, at.y - BASELINE * TEXT_SIZE / page.heightPt, width, height).moved(0f, 0f)
+    fun textBox(
+        at: Offset,
+        lines: List<String>,
+        page: PageSize,
+        fontSize: Float = TEXT_SIZE,
+        emWidth: (String) -> Float,
+    ): StampBox {
+        val width = lines.maxOf(emWidth) * fontSize / page.widthPt
+        val height = lines.size * LEADING * fontSize / page.heightPt
+        return StampBox(at.x, at.y - BASELINE * fontSize / page.heightPt, width, height).moved(0f, 0f)
     }
+
+    /**
+     * A picture centred on [center], as large as fits in half the page's width and a third of its
+     * height (or its own size at 72 dpi, if smaller), keeping its shape.
+     */
+    fun imageBox(center: Offset, imageWidth: Int, imageHeight: Int, page: PageSize): StampBox {
+        val scale = minOf(page.widthPt / 2 / imageWidth, page.heightPt / 3 / imageHeight, 1f)
+        val width = imageWidth * scale / page.widthPt
+        val height = imageHeight * scale / page.heightPt
+        return StampBox(center.x - width / 2, center.y - height / 2, width, height).moved(0f, 0f)
+    }
+
+    /** Where PageEditor.addImage puts a picture filling [box]: its bottom-left corner. */
+    fun imageAnchor(box: StampBox) = Offset(box.left, box.bottom)
 
     /** A checkmark with its bottom point on [at]. */
     fun checkmarkBox(at: Offset, page: PageSize): StampBox {

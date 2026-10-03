@@ -492,6 +492,31 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerEdit() = capture("viewer_edit") { viewer(ViewerMode.Edit) }
+
+    @Test
+    fun viewerEditAddText() = capture("viewer_edit_add_text") { viewer(ViewerMode.Edit, tool = R.string.tool_add_text) }
+
+    @Test
+    fun viewerEditPlaced() {
+        // A heading typed with Add text, and a picture from Add image, selected so its handles show.
+        val heading = "Draft - for review"
+        val picture = sampleLogo()
+        val stamps = listOf(
+            PlacedStamp(
+                1L, 0, StampContent.Text(heading, null),
+                StampGeometry.textBox(Offset(0.1f, 0.06f), listOf(heading), letter, StampGeometry.EDIT_TEXT_SIZE) { it.length * 0.5f },
+            ),
+            PlacedStamp(
+                2L, 0, StampContent.Image(picture),
+                StampGeometry.imageBox(Offset(0.72f, 0.2f), picture.width, picture.height, letter).scaled(0.6f, letter),
+            ),
+        )
+        show { viewer(ViewerMode.Edit, sample.copy(canUndo = true), stamps = stamps, selectedStamp = 2L) }
+        captureRoot("viewer_edit_placed")
+    }
+
+    @Test
     fun viewerPages() = capture("viewer_pages") {
         viewer(ViewerMode.Pages, sample.copy(canUndo = true, hasUnsavedChanges = true), selectedPage = 1)
     }
@@ -765,6 +790,21 @@ class ScreenshotTest {
         }
         val underline = (0..20).map { i -> Offset(150f + i * 30f, 410f - i * 2f) }
         return listOf(loops, underline)
+    }
+
+    /** A made-up company logo: a blue rounded badge with a white check, on a see-through background. */
+    private fun sampleLogo(): Bitmap {
+        val bitmap = Bitmap.createBitmap(400, 400, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        paint.color = 0xFF1A3FA8.toInt()
+        canvas.drawRoundRect(20f, 20f, 380f, 380f, 80f, 80f, paint)
+        paint.color = android.graphics.Color.WHITE
+        paint.style = android.graphics.Paint.Style.STROKE
+        paint.strokeWidth = 40f
+        paint.strokeCap = android.graphics.Paint.Cap.ROUND
+        canvas.drawLines(floatArrayOf(110f, 210f, 175f, 275f, 175f, 275f, 295f, 130f), paint)
+        return bitmap
     }
 
     private fun scaled(page: Bitmap, width: Int): Bitmap =

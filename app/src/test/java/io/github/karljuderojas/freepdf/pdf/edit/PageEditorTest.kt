@@ -5,7 +5,9 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
@@ -92,6 +94,46 @@ class PageEditorTest {
 
             File("build/outputs/qa").apply { mkdirs() }.resolve("stamps-on-rotated-page.pdf").let { document.save(it) }
         }
+    }
+
+    @Test
+    fun editModeTextAndPicturesLandInThePage() {
+        sample().use { document ->
+            val page = document.getPage(0)
+            val crop = page.cropBox.let { PdfRect(it.lowerLeftX, it.lowerLeftY, it.upperRightX, it.upperRightY) }
+            fun at(nx: Float, ny: Float) = displayToPdf(nx, ny, page.rotation, crop)
+
+            PageEditor.addText(document, 0, "Added in Edit mode", at(0.1f, 0.06f), fontSize = 14f)
+            // A photo (no transparency) and a logo with a see-through background.
+            PageEditor.addImage(document, 0, photoBitmap(), at(0.55f, 0.30f), width = 200f, height = 120f)
+            PageEditor.addImage(document, 0, logoBitmap(), at(0.08f, 0.22f), width = 72f, height = 72f)
+
+            val images = page.resources.xObjectNames.map { page.resources.getXObject(it) }.filterIsInstance<PDImageXObject>()
+            assertEquals(2, images.size)
+            // The photo is stored as JPEG to keep the file small; the logo keeps its transparency.
+            assertTrue(images.any { it.suffix == "jpg" })
+            assertTrue(images.any { it.suffix == "png" && it.cosObject.containsKey(COSName.SMASK) })
+            assertTrue(text(document, page = 1).contains("Added in Edit mode"))
+
+            File("build/outputs/qa").apply { mkdirs() }.resolve("edit-text-and-image.pdf").let { document.save(it) }
+        }
+    }
+
+    private fun photoBitmap(): Bitmap {
+        val bitmap = Bitmap.createBitmap(500, 300, Bitmap.Config.ARGB_8888)
+        Canvas(bitmap).apply {
+            drawColor(Color.rgb(135, 190, 235))
+            drawCircle(380f, 90f, 50f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(250, 200, 60) })
+            drawRect(0f, 210f, 500f, 300f, Paint().apply { color = Color.rgb(70, 140, 70) })
+        }
+        bitmap.setHasAlpha(false)
+        return bitmap
+    }
+
+    private fun logoBitmap(): Bitmap {
+        val bitmap = Bitmap.createBitmap(200, 200, Bitmap.Config.ARGB_8888)
+        Canvas(bitmap).drawCircle(100f, 100f, 90f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(200, 40, 60) })
+        return bitmap
     }
 
     private fun text(document: PDDocument, page: Int): String =

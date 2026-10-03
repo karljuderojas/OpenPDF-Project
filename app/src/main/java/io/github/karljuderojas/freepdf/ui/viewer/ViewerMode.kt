@@ -29,8 +29,7 @@ enum class ViewerMode(@StringRes val label: Int, val icon: ImageVector?, val too
         listOf(R.string.tool_signature, R.string.tool_initials, R.string.tool_date, R.string.tool_text,
             R.string.tool_checkmark),
     ),
-    // Hidden until its first tools (add text, add image) ship.
-    Edit(R.string.mode_edit, Icons.Filled.Build, emptyList()),
+    Edit(R.string.mode_edit, Icons.Filled.Build, listOf(R.string.tool_add_text, R.string.tool_add_image)),
     Pages(
         R.string.mode_pages, Icons.AutoMirrored.Filled.List,
         listOf(R.string.tool_rotate, R.string.tool_move_earlier, R.string.tool_move_later, R.string.tool_insert,
