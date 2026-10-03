@@ -53,7 +53,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -233,8 +232,6 @@ fun ViewerContent(
             selectedStamp = newest
         }
     }
-    val scope = rememberCoroutineScope()
-    val resources = LocalResources.current
 
     val ready = state as? ViewerState.Ready
     val pageCount = ready?.pageSizes?.size ?: 0
@@ -243,10 +240,6 @@ fun ViewerContent(
     val hasSignature = ready?.hasSignature == true || stamps.any { it.content is StampContent.Signature }
     LaunchedEffect(pageCount) {
         if (pageCount > 0 && selectedPage >= pageCount) selectedPage = pageCount - 1
-    }
-
-    fun comingSoon() {
-        scope.launch { snackbarHostState.showSnackbar(resources.getString(R.string.coming_soon)) }
     }
 
     fun leave() {
@@ -270,7 +263,6 @@ fun ViewerContent(
             }
             R.string.tool_delete -> confirmDelete = true
             R.string.tool_merge -> onAction(ViewerAction.Merge)
-            else -> comingSoon()
         }
     }
 
@@ -348,7 +340,6 @@ fun ViewerContent(
                 // Choosing the active Annotate tool again puts it down, so one finger scrolls again.
                 mode == ViewerMode.Annotate -> ToolStrip(mode, selectedTool, onToolSelected = {
                     when {
-                        AnnotateTool.forLabel(it) == null -> comingSoon()
                         selectedTool == it -> selectedTool = null
                         else -> selectedTool = it
                     }
@@ -364,7 +355,7 @@ fun ViewerContent(
                     ToolStrip(mode, selectedTool, onToolSelected = { label ->
                         val tool = SignTool.forLabel(label)
                         when {
-                            tool == null -> comingSoon()
+                            tool == null -> Unit
                             selectedTool == label -> selectedTool = null
                             else -> {
                                 selectedTool = label
@@ -375,7 +366,7 @@ fun ViewerContent(
                     })
                 }
                 else -> ToolStrip(mode, selectedTool = null, onToolSelected = {
-                    if (it == R.string.tool_share) onAction(ViewerAction.Share) else comingSoon()
+                    if (it == R.string.tool_share) onAction(ViewerAction.Share)
                 })
             }
         },
