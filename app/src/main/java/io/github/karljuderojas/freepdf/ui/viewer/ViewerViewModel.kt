@@ -25,6 +25,7 @@ import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
 import io.github.karljuderojas.freepdf.pdf.annotate.Marks
+import io.github.karljuderojas.freepdf.pdf.annotate.Stamps
 import io.github.karljuderojas.freepdf.pdf.annotate.TextBoxes
 import io.github.karljuderojas.freepdf.pdf.displayToPdf
 import io.github.karljuderojas.freepdf.pdf.edit.EditSession
@@ -264,6 +265,11 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun note(page: Int, at: Offset, text: String, style: ToolStyle) = edit { document ->
         Annotator.note(document, page, displayMapper(document, page)(at), text, style.rgb)
+    }
+
+    /** Places a [kind] stamp centred where the user tapped. */
+    fun stamp(page: Int, at: Offset, kind: Stamps.Kind) = edit { document ->
+        Stamps.add(document, page, displayMapper(document, page)(at), kind)
     }
 
     /** Adds a text box whose top-left corner is at [at]; [style]'s width is the font size. */

@@ -66,6 +66,13 @@
     <string name="mark_other">Mark</string>
     <string name="mark_edit_text">Edit text</string>
     <string name="text_box_title">Add a text box</string>
+    <string name="stamp_approved">Approved</string>
+    <string name="stamp_not_approved">Not approved</string>
+    <string name="stamp_draft">Draft</string>
+    <string name="stamp_final">Final</string>
+    <string name="stamp_confidential">Confidential</string>
+    <string name="stamp_for_comment">For comment</string>
+    <string name="stamp_void">Void</string>
     <string name="style_colour">Colour %1$d</string>
     <string name="style_size">Size %1$d</string>
     <string name="cancel">Cancel</string>
