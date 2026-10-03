@@ -484,6 +484,7 @@ internal class PageRedactor(
         val height = source.height
         val pixels = IntArray(width * height)
         source.getPixels(pixels, 0, width, 0, 0, width, height)
+        if (ChannelOrder.decodeSwaps) swapRedAndBlue(pixels)
 
         // The picture's own space is the unit square, with the top row of pixels at y = 1.
         val ctm = graphicsState.currentTransformationMatrix
@@ -511,16 +512,65 @@ internal class PageRedactor(
             val bottom = ceil((1f - vs.min()) * height).toInt().coerceIn(0, height)
             for (row in top until bottom) pixels.fill(BLACK, row * width + left, row * width + right)
         }
+        val jpeg = image.suffix == "jpg"
+        if (!jpeg && ChannelOrder.encodeSwaps) swapRedAndBlue(pixels)
         val blanked = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         blanked.setPixels(pixels, 0, width, 0, 0, width, height)
         // image.image has any mask applied as alpha, which the new picture stores again as its own mask.
-        if (image.suffix == "jpg") JPEGFactory.createFromImage(document, blanked, 0.92f)
+        if (jpeg) JPEGFactory.createFromImage(document, blanked, 0.92f)
         else LosslessFactory.createFromImage(document, blanked)
     } catch (_: Exception) {
         null
     } catch (_: OutOfMemoryError) {
         // A picture too big to decode here is removed whole rather than kept.
         null
+    }
+
+    private fun swapRedAndBlue(pixels: IntArray) {
+        for (i in pixels.indices) {
+            val p = pixels[i]
+            pixels[i] = (p and 0xFF00FF00.toInt()) or ((p shr 16) and 0xFF) or ((p and 0xFF) shl 16)
+        }
+    }
+
+    /**
+     * Whether reading a picture into a Bitmap, or storing a Bitmap as a lossless picture, swaps
+     * red and blue on this platform. PdfBox-Android moves pixels as raw bytes, and not every
+     * graphics backend lays them out the same way (Robolectric's does not), so a blanked
+     * picture would come back with its colours swapped. Each is checked once with a red pixel.
+     */
+    private object ChannelOrder {
+        private const val RED = 0xFFFF0000.toInt()
+
+        val decodeSwaps: Boolean by lazy {
+            runCatching {
+                PDDocument().use { document ->
+                    val samples = ByteArrayOutputStream().also { out ->
+                        java.util.zip.DeflaterOutputStream(out).use { it.write(byteArrayOf(-1, 0, 0)) }
+                    }.toByteArray()
+                    val picture = PDImageXObject(
+                        document, ByteArrayInputStream(samples), COSName.FLATE_DECODE, 1, 1, 8,
+                        com.tom_roush.pdfbox.pdmodel.graphics.color.PDDeviceRGB.INSTANCE,
+                    )
+                    val pixel = IntArray(1)
+                    picture.image.getPixels(pixel, 0, 1, 0, 0, 1, 1)
+                    isBlue(pixel[0])
+                }
+            }.getOrDefault(false)
+        }
+
+        val encodeSwaps: Boolean by lazy {
+            runCatching {
+                PDDocument().use { document ->
+                    val bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+                    bitmap.setPixels(intArrayOf(RED), 0, 1, 0, 0, 1, 1)
+                    val stored = LosslessFactory.createFromImage(document, bitmap).stream.createInputStream().use { it.readBytes() }
+                    (stored[0].toInt() and 0xFF) < (stored[2].toInt() and 0xFF)
+                }
+            }.getOrDefault(false)
+        }
+
+        private fun isBlue(pixel: Int) = (pixel shr 16 and 0xFF) < (pixel and 0xFF)
     }
 
     // ---- line art ----
