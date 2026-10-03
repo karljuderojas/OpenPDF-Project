@@ -55,6 +55,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -64,6 +65,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -71,6 +73,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalDensity
@@ -86,6 +89,8 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /** What the viewer asks its view model to do. Page numbers are zero-based. */
@@ -152,6 +157,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
         state = state,
         onBack = onBack,
         loadPage = viewModel::page,
+        loadRegion = viewModel::pageRegion,
         savedSignatures = savedSignatures,
         signerName = signerName,
         snackbarHostState = snackbarHostState,
@@ -200,6 +206,7 @@ fun ViewerContent(
     state: ViewerState,
     onBack: () -> Unit,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
+    loadRegion: LoadRegion = { _, _, _ -> null },
     initialMode: ViewerMode = ViewerMode.Read,
     initialSelectedPage: Int = 0,
     initialTool: Int? = null,
@@ -374,7 +381,7 @@ fun ViewerContent(
                 else -> {
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
                     val signTool = SignTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Sign }
-                    PageList(ready.pageSizes, ready.revision, loadPage, listState) { page ->
+                    PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState) { page ->
                         if (signTool != null) {
                             TapLayer(page) { at ->
                                 val kind = signTool.signatureKind
@@ -498,13 +505,24 @@ private fun PageList(
     pageSizes: List<PageSize>,
     revision: Int,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
+    loadRegion: LoadRegion,
     listState: LazyListState,
     overlay: @Composable BoxScope.(page: Int) -> Unit = {},
 ) {
     var zoom by remember { mutableFloatStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
+    val detail = remember { ZoomDetail() }
+    SideEffect { detail.loadRegion = loadRegion }
+    // Sharpen once the view has stopped moving, not on every frame of a pinch or fling.
+    LaunchedEffect(detail) {
+        snapshotFlow { listOf(zoom, pan, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) }
+            .collectLatest {
+                delay(SETTLE_MILLIS)
+                detail.settled++
+            }
+    }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize().onGloballyPositioned { detail.viewport = it }) {
         val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
         LazyColumn(
             state = listState,
@@ -539,7 +557,10 @@ private fun PageList(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             itemsIndexed(pageSizes) { index, size ->
-                PageImage(index, size, revision, widthPx, loadPage, Modifier.fillMaxWidth()) { overlay(index) }
+                PageImage(index, size, revision, widthPx, loadPage, Modifier.fillMaxWidth()) {
+                    ZoomDetailLayer(index, revision, detail)
+                    overlay(index)
+                }
             }
         }
     }
@@ -638,5 +659,8 @@ private fun TextEntryDialog(@StringRes title: Int, @StringRes hint: Int, onDismi
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
+
+/** How long the view must be still before zoomed pages are sharpened. */
+private const val SETTLE_MILLIS = 150L
 
 private val AnnotateTool.rgb get() = Annotator.Rgb(color.red, color.green, color.blue)

@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
+import androidx.compose.ui.unit.IntRect
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
@@ -52,6 +53,9 @@ class ScreenshotTest {
     val composeRule = createComposeRule()
 
     private val samplePages = listOf(loadSample("page-1.png"), loadSample("page-2.png"))
+
+    // Page 1 at 2.5x, standing in for PDFium's sharp rendering of a zoomed page.
+    private val largePages by lazy { mapOf(0 to loadSample("page-1-large.png")) }
     private val sample = ViewerState.Ready(List(samplePages.size) { PageSize(612f, 792f) })
 
     @Test
@@ -82,10 +86,18 @@ class ScreenshotTest {
     @Test
     fun viewerReadZoomed() {
         show { viewer(ViewerMode.Read) }
+        composeRule.waitForIdle()
         // Pinch out to about 2.5x while dragging both fingers down, which pans to the page's title.
+        // The clock is held, so the first capture is the scaled page before it is sharpened.
+        composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithTag("page-list").performTouchInput {
             pinch(Offset(440f, 250f), Offset(340f, 1300f), Offset(640f, 450f), Offset(740f, 1900f))
         }
+        composeRule.mainClock.advanceTimeByFrame()
+        captureRoot("viewer_read_zoomed_mid_pinch")
+        // Once the view has been still for a moment, the visible part is rendered at 2.5x.
+        composeRule.mainClock.advanceTimeBy(1_000)
+        composeRule.waitForIdle()
         captureRoot("viewer_read_zoomed")
     }
 
@@ -227,6 +239,7 @@ class ScreenshotTest {
             state = state,
             onBack = {},
             loadPage = { index, width -> scaled(samplePages[index], width) },
+            loadRegion = { index, fullWidth, region -> largePages[index]?.let { cropped(it, fullWidth, region) } },
             initialMode = mode,
             initialSelectedPage = selectedPage,
             initialTool = tool,
@@ -260,6 +273,21 @@ class ScreenshotTest {
 
     private fun scaled(page: Bitmap, width: Int): Bitmap =
         Bitmap.createScaledBitmap(page, width, width * page.height / page.width, true)
+
+    /** [region] of [page] as it would look with the whole page scaled to [fullWidth]. */
+    private fun cropped(page: Bitmap, fullWidth: Int, region: IntRect): Bitmap {
+        val ratio = page.width.toFloat() / fullWidth
+        val source = android.graphics.Rect(
+            (region.left * ratio).toInt(), (region.top * ratio).toInt(),
+            (region.right * ratio).toInt(), (region.bottom * ratio).toInt(),
+        )
+        val out = Bitmap.createBitmap(region.width, region.height, Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(out).apply {
+            drawColor(android.graphics.Color.WHITE)
+            drawBitmap(page, source, android.graphics.Rect(0, 0, region.width, region.height), android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+        }
+        return out
+    }
 
     private fun loadSample(name: String): Bitmap {
         val stream = javaClass.classLoader!!.getResourceAsStream("sample/$name") ?: error("Missing sample/$name")
