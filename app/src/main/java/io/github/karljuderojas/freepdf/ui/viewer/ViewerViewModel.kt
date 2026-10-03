@@ -35,6 +35,8 @@ import io.github.karljuderojas.freepdf.pdf.annotate.TextBoxes
 import io.github.karljuderojas.freepdf.pdf.displayToPdf
 import io.github.karljuderojas.freepdf.pdf.edit.EditSession
 import io.github.karljuderojas.freepdf.pdf.edit.Flattener
+import io.github.karljuderojas.freepdf.pdf.edit.CropMargins
+import io.github.karljuderojas.freepdf.pdf.edit.PageCrop
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import io.github.karljuderojas.freepdf.pdf.edit.PdfText
@@ -464,6 +466,11 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             if (bitmap != null) edit { Watermarks.addImage(it, pages, bitmap, style) }
             else edit { Watermarks.addText(it, pages, text, style) }
         }
+    }
+
+    /** Trims [pages] by [margins], or shows them in full again when [margins] is null. */
+    fun cropPages(pages: Set<Int>, margins: CropMargins?) = edit(movesPages = true) {
+        if (margins == null) PageCrop.reset(it, pages) else PageCrop.crop(it, pages, margins)
     }
 
     fun deletePages(pages: Set<Int>) {
