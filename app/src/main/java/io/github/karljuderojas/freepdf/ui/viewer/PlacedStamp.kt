@@ -2,6 +2,7 @@ package io.github.karljuderojas.freepdf.ui.viewer
 
 import android.graphics.Bitmap
 import androidx.compose.ui.geometry.Offset
+import io.github.karljuderojas.freepdf.pdf.DisplayRect
 import io.github.karljuderojas.freepdf.pdf.edit.PdfText
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
@@ -88,6 +89,16 @@ object StampGeometry {
         val width = imageWidth * scale / page.widthPt
         val height = imageHeight * scale / page.heightPt
         return StampBox(at.x - width / 2, at.y - height, width, height).moved(0f, 0f)
+    }
+
+    /** A signature image as large as fits in a place to sign, [field], centred across it with its bottom on the field's. */
+    fun fieldBox(field: DisplayRect, imageWidth: Int, imageHeight: Int, page: PageSize): StampBox {
+        val fieldWidth = (field.right - field.left) * page.widthPt
+        val fieldHeight = (field.bottom - field.top) * page.heightPt
+        val scale = minOf(fieldWidth / imageWidth, fieldHeight / imageHeight)
+        val width = imageWidth * scale / page.widthPt
+        val height = imageHeight * scale / page.heightPt
+        return StampBox((field.left + field.right) / 2 - width / 2, field.bottom - height, width, height).moved(0f, 0f)
     }
 
     /**

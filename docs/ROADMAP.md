@@ -38,8 +38,8 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - 🧱 Audit trail, SHA-256 fingerprints and audit page
 - ✅ Type a signature or initials instead of drawing them, in one of two bundled script fonts
 - ⬜ Photograph a signature on paper
-- ⬜ Field detection and the guided next-field walk
 - ✅ Finish: lock signatures into the page (with the optional seal) or keep them editable as stamp annotations; Save or Save & share
+- ✅ Places to sign: empty signature fields and "Signature" or "Sign here" labels are found and outlined, with a "2 places to sign" banner and Next field; tap one to sign it, then move or resize the signature like any other
 - ✅ Fill form: tap a highlighted field of the PDF's own form to type into it, tick it or pick from its list; values are saved in the form, so other apps see them
 - ⬜ Verify banner for signed PDFs
 - ⬜ RFC 3161 timestamps, LTV

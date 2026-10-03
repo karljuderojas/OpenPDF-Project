@@ -151,6 +151,13 @@
     <string name="sign_hint_fill_form">Tap a highlighted field to fill it in.</string>
     <string name="sign_hint_no_fields">This PDF has no form fields. Use Text and Checkmark to fill it in.</string>
     <string name="form_field_untitled">Form field</string>
+    <plurals name="sign_fields_remaining">
+        <item quantity="one">%d place to sign</item>
+        <item quantity="other">%d places to sign</item>
+    </plurals>
+    <string name="sign_fields_done">All places signed</string>
+    <string name="sign_field_next">Next field</string>
+    <string name="sign_field_tag">Sign here</string>
     <string name="finish">Finish</string>
     <string name="finish_title">Finish signing</string>
     <string name="finish_name">Your full name</string>

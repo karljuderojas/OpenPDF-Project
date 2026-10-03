@@ -41,6 +41,7 @@ import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
 import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
 import io.github.karljuderojas.freepdf.pdf.render.PageBox
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureFields
 import io.github.karljuderojas.freepdf.pdf.text.PageText
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
@@ -109,6 +110,11 @@ class ScreenshotTest {
             listOf(PageSize(612f, 792f)),
             formFields = javaClass.classLoader!!.getResourceAsStream("sample/form.pdf").use { PDDocument.load(it).use(FormFiller::fields) },
         )
+    }
+
+    // The agreement's two places to sign (both on page 2), found by the app's own code.
+    private val signing by lazy {
+        sample.copy(signFields = javaClass.classLoader!!.getResourceAsStream("sample/agreement.pdf").use { PDDocument.load(it).use(SignatureFields::find) })
     }
 
     @Test
@@ -506,6 +512,21 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_finish.png")
     }
 
+    // Next field has gone to the first place to sign, on page 2.
+    @Test
+    fun viewerSignFields() = capture("viewer_sign_fields") { viewer(ViewerMode.Sign, signing, signField = 0) }
+
+    // Both places tapped: each holds the signature, fitted to it and still movable; the last one is selected.
+    @Test
+    fun viewerSignFieldsDone() = capture("viewer_sign_fields_done") {
+        val signature = SignatureInk.render(sampleSignature(), 0xFF1A3FA8.toInt(), 6f)
+        val stamps = signing.signFields.mapIndexed { i, field ->
+            val box = StampGeometry.fieldBox(field.box, signature.width, signature.height, signing.pageSizes[field.page])
+            PlacedStamp(i + 1L, field.page, StampContent.Signature(SignatureStore.Kind.Signature, signature), box)
+        }
+        viewer(ViewerMode.Sign, signing, signField = 1, stamps = stamps, selectedStamp = stamps.size.toLong())
+    }
+
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerSignFinishEditable() {
@@ -829,6 +850,7 @@ class ScreenshotTest {
         selectedStamp: Long? = null,
         onAction: (ViewerAction) -> Unit = {},
         pages: List<Bitmap> = samplePages,
+        signField: Int? = null,
     ) {
         ViewerContent(
             state = state,
@@ -843,6 +865,7 @@ class ScreenshotTest {
             initialSelectedPage = selectedPage,
             initialSelectedPages = selectedPages,
             initialTool = tool,
+            initialSignField = signField,
             savedSignatures = savedSignatures,
             signerName = signerName,
             toolStyles = toolStyles,
