@@ -66,7 +66,6 @@
     <string name="saved">Saved</string>
     <string name="save_failed">Could not save this PDF.</string>
     <string name="edit_failed">That change could not be made to this PDF.</string>
-    <string name="coming_soon">Coming soon</string>
     <string name="cannot_delete_last_page">A PDF needs at least one page.</string>
     <string name="delete_page_title">Delete page %1$d?</string>
     <string name="delete_page_body">You can undo this until you leave the PDF.</string>
