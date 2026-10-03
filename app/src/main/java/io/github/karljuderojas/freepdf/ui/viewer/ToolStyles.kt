@@ -62,14 +62,15 @@ fun StyleBar(tool: AnnotateTool, style: ToolStyle, onStyleChange: (ToolStyle) ->
                 .fillMaxWidth()
                 .testTag("style-bar")
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            // Sized so six colours and four sizes fit across a phone without scrolling.
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             tool.palette.forEachIndexed { index, color ->
                 val label = stringResource(R.string.style_colour, index + 1)
                 Swatch(selected = color == style.color, label = label, onClick = { onStyleChange(style.copy(color = color)) }) {
-                    Box(Modifier.size(24.dp).background(color, CircleShape).border(1.dp, Color.Black.copy(alpha = 0.15f), CircleShape))
+                    Box(Modifier.size(22.dp).background(color, CircleShape).border(1.dp, Color.Black.copy(alpha = 0.15f), CircleShape))
                 }
             }
             if (tool.widths.isNotEmpty()) {
@@ -77,8 +78,8 @@ fun StyleBar(tool: AnnotateTool, style: ToolStyle, onStyleChange: (ToolStyle) ->
                 tool.widths.forEachIndexed { index, width ->
                     val label = stringResource(R.string.style_size, index + 1)
                     Swatch(selected = width == style.width, label = label, onClick = { onStyleChange(style.copy(width = width)) }) {
-                        // Dots grow with the line they draw, from 6dp for the thinnest to 22dp.
-                        val dot = 6.dp + 16.dp * index / (tool.widths.size - 1).coerceAtLeast(1)
+                        // Dots grow with the line they draw, from 5dp for the thinnest to 20dp.
+                        val dot = 5.dp + 15.dp * index / (tool.widths.size - 1).coerceAtLeast(1)
                         Box(Modifier.size(dot).background(style.color, CircleShape))
                     }
                 }
@@ -87,13 +88,13 @@ fun StyleBar(tool: AnnotateTool, style: ToolStyle, onStyleChange: (ToolStyle) ->
     }
 }
 
-/** A 36dp round target with a ring when selected. */
+/** A 32dp round target with a ring when selected. */
 @Composable
 private fun Swatch(selected: Boolean, label: String, onClick: () -> Unit, content: @Composable () -> Unit) {
     val ring = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
     Box(
         Modifier
-            .size(36.dp)
+            .size(32.dp)
             .border(2.dp, ring, CircleShape)
             .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .semantics { contentDescription = label },
