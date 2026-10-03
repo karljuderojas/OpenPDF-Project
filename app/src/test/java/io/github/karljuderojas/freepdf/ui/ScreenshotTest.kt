@@ -4,12 +4,22 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Looper
+import android.view.View
+import android.view.ViewGroup
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
+import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.node.RootForTest
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.foundation.layout.padding
@@ -123,10 +133,44 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowDialog
 import java.time.Instant
 import java.util.Calendar
 
 private const val HOUR = 60 * 60 * 1000L
+
+/**
+ * Takes the content down with its saveable state kept, and brings it back restored from that
+ * state, as the activity being recreated does. StateRestorationTester does the same but waits
+ * for Compose to be idle between the steps, which a dialog with a text field never is, so the
+ * test drives the clock itself around [save] and [restore].
+ */
+private class Restoration {
+    private var saved: Map<String, List<Any?>> = emptyMap()
+    private var parent: SaveableStateRegistry? = null
+    private var current: SaveableStateRegistry? = null
+    private var generation by mutableIntStateOf(0)
+    private var showing by mutableStateOf(true)
+
+    @Composable
+    fun Content(content: @Composable () -> Unit) {
+        parent = LocalSaveableStateRegistry.current
+        if (!showing) return
+        // Values must be ones a Bundle takes, as the activity's own registry requires.
+        val registry = remember(generation) { SaveableStateRegistry(saved) { parent?.canBeSaved(it) ?: true }.also { current = it } }
+        CompositionLocalProvider(LocalSaveableStateRegistry provides registry, content = content)
+    }
+
+    fun save() {
+        saved = checkNotNull(current).performSave()
+        showing = false
+    }
+
+    fun restore() {
+        generation++
+        showing = true
+    }
+}
 
 /**
  * Renders each screen to a PNG. CI runs `recordRoborazziDebug` on every pull request and posts
@@ -434,6 +478,16 @@ class ScreenshotTest {
         )
     }
 
+    // A phone on its side is wide enough for the rail too, though not for the tablet layouts.
+    @Test
+    @Config(qualifiers = "w800dp-h360dp-land-mdpi")
+    fun phoneLandscapeFiles() = capture("phone_landscape_files") {
+        files(
+            open = listOf(sampleRecent[0], DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * HOUR)),
+            recent = sampleRecent,
+        )
+    }
+
     @Test
     @Config(qualifiers = "w1280dp-h800dp-land-mdpi")
     fun tabletViewerLandscape() = capture("tablet_viewer_landscape") { viewer(ViewerMode.Read, state = tabletState) }
@@ -493,6 +547,18 @@ class ScreenshotTest {
             recent = sampleRecent,
             unsaved = setOf("content://b"),
             closing = true,
+        )
+    }
+
+    // The same question for a document with stamps still being placed: only the viewer can write them in.
+    @Test
+    fun filesCloseUnsavedStamps() = capture("files_close_unsaved_stamps") {
+        files(
+            open = listOf(sampleRecent[0], DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * HOUR)),
+            recent = sampleRecent,
+            unsaved = setOf("content://b"),
+            closing = true,
+            stamps = true,
         )
     }
 
@@ -1067,6 +1133,23 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_edit_add_link_ask.png")
     }
 
+    // The same dialog after the phone is turned: the dragged box and the question are still there.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerEditAddLinkAskRestored() {
+        val restoration = Restoration()
+        show { restoration.Content { viewer(ViewerMode.Edit, tool = R.string.tool_add_link) } }
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("link-box-layer-0").performTouchInput {
+            swipe(Offset(width * 0.1f, height * 0.2f), Offset(width * 0.6f, height * 0.25f))
+        }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        turn(restoration)
+        assertTrue("Add a link" in dialogTexts())
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_edit_add_link_ask_restored.png")
+    }
+
     // Tapping a web link in a PDF asks before leaving the app.
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
@@ -1137,6 +1220,54 @@ class ScreenshotTest {
         composeRule.onNodeWithTag(layer).performTouchInput { click(wordCentre(layer, 0, wordIndex(0, "Northwind"))) }
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_edit_text_dialog.png")
+    }
+
+    // The same dialog after the phone is turned: the line's words are still there to change.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerEditTextDialogRestored() {
+        val restoration = Restoration()
+        show { restoration.Content { viewer(ViewerMode.Edit, tool = R.string.tool_edit_text) } }
+        composeRule.mainClock.autoAdvance = false
+        val layer = "edit-text-layer-0"
+        composeRule.onNodeWithTag(layer).performTouchInput { click(wordCentre(layer, 0, wordIndex(0, "Northwind"))) }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        turn(restoration)
+        assertTrue(dialogTexts().any { "Northwind" in it })
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_edit_text_dialog_restored.png")
+    }
+
+    /**
+     * Saves the screen's state and brings the screen back from it, as turning the phone does,
+     * with the clock driven by hand (a dialog's text field never lets Compose go idle).
+     */
+    private fun turn(restoration: Restoration) {
+        restoration.save()
+        composeRule.mainClock.advanceTimeBy(500)
+        shadowOf(Looper.getMainLooper()).idle()
+        restoration.restore()
+        composeRule.mainClock.advanceTimeBy(500)
+        // The dialog is its own window, which is attached and laid out by the main looper.
+        shadowOf(Looper.getMainLooper()).idle()
+        composeRule.mainClock.advanceTimeBy(500)
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    /** The texts in the newest dialog window, read straight from its semantics (no idle wait). */
+    private fun dialogTexts(): List<String> {
+        val dialog = ShadowDialog.getLatestDialog() ?: return emptyList()
+        val texts = ArrayList<String>()
+        fun collect(node: SemanticsNode) {
+            node.config.getOrNull(SemanticsProperties.Text)?.forEach { texts += it.text }
+            node.config.getOrNull(SemanticsProperties.EditableText)?.let { texts += it.text }
+            node.children.forEach { collect(it) }
+        }
+        fun walk(view: View) {
+            if (view is RootForTest) collect(view.semanticsOwner.rootSemanticsNode)
+            if (view is ViewGroup) for (i in 0 until view.childCount) walk(view.getChildAt(i))
+        }
+        walk(dialog.window!!.decorView)
+        return texts
     }
 
     @Test
@@ -1694,9 +1825,15 @@ class ScreenshotTest {
     )
 
     @Composable
-    private fun files(open: List<DocumentEntry>, recent: List<DocumentEntry>, unsaved: Set<String> = emptySet(), closing: Boolean = false) = shell(MainTab.Files) {
+    private fun files(
+        open: List<DocumentEntry>,
+        recent: List<DocumentEntry>,
+        unsaved: Set<String> = emptySet(),
+        closing: Boolean = false,
+        stamps: Boolean = false,
+    ) = shell(MainTab.Files) {
         FilesContent(open, recent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {}, modifier = it, unsaved = unsaved, now = now)
-        if (closing) UnsavedCloseDialog(onSave = {}, onDiscard = {}, onCancel = {})
+        if (closing) UnsavedCloseDialog(onSave = {}, onDiscard = {}, onCancel = {}, stamps = stamps)
     }
 
     /** A tab's screen inside the bottom tab bar, as the app shows it. */

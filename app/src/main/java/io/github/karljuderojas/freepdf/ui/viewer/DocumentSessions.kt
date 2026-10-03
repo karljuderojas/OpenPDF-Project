@@ -59,8 +59,9 @@ class DocumentSession(val key: String, val session: EditSession) {
  * them keeps each one's edits, undo history and place. Owned by the application: the viewer's
  * view model comes and goes with its screen, and [attach]es to the session of the document it
  * shows. A session ends, and its working copy is deleted, when its document is [close]d or when
- * it is the oldest of more than [maxOpen] (matching the open list's own cap). Working copies
- * left in [root] by a process that was killed are deleted on start.
+ * it is the oldest without unsaved changes of more than [maxOpen] (matching the open list's own
+ * cap and rule, see Documents.MAX_OPEN). Working copies left in [root] by a process that was
+ * killed are deleted on start.
  */
 class DocumentSessions(private val root: File, private val maxOpen: Int = Documents.MAX_OPEN) {
 
@@ -83,17 +84,16 @@ class DocumentSessions(private val root: File, private val maxOpen: Int = Docume
 
     /**
      * The session for [key], made from [source] if it has none yet. Attaching makes it the most
-     * recently used; the least recently used beyond [maxOpen] are closed.
+     * recently used; the least recently used beyond [maxOpen] are closed, skipping any with
+     * unsaved changes (so there can be more than [maxOpen] while all of them have changes).
      */
     @Synchronized
     fun attach(key: String, source: () -> InputStream): DocumentSession {
         val existing = entries.remove(key)
         val entry = existing ?: DocumentSession(key, source().use { EditSession(File(root, UUID.randomUUID().toString()), it) })
         entries[key] = entry
-        while (entries.size > maxOpen) {
-            val oldest = entries.keys.first()
-            entries.remove(oldest)?.session?.close()
-        }
+        val closing = entries.values.filter { it !== entry && !it.hasUnsavedChanges }.take((entries.size - maxOpen).coerceAtLeast(0))
+        closing.forEach { entries.remove(it.key)?.session?.close() }
         refresh()
         return entry
     }

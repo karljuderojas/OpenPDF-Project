@@ -11,8 +11,14 @@ import java.io.File
 
 class FreePdfApp : Application() {
 
-    /** Open and recent PDFs for the Files tab. A PDF leaving the open list ends its session. */
-    val documents by lazy { Documents(getSharedPreferences("documents", Context.MODE_PRIVATE), onClosed = sessions::close) }
+    /** Open and recent PDFs for the Files tab. A PDF leaving the open list ends its session; one with unsaved changes stays. */
+    val documents by lazy {
+        Documents(
+            getSharedPreferences("documents", Context.MODE_PRIVATE),
+            onClosed = sessions::close,
+            hasUnsavedChanges = { uri -> sessions.get(uri)?.hasUnsavedChanges == true },
+        )
+    }
 
     /** The live working copies of the open PDFs, which the viewer attaches to; see [DocumentSessions]. */
     val sessions by lazy { DocumentSessions(File(cacheDir, "edit")) }

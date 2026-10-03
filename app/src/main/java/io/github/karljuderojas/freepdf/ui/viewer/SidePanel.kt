@@ -23,7 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -65,15 +65,16 @@ internal fun ViewerSidePanel(
         if (outline.isNotEmpty()) add(PanelTab.Contents)
         add(PanelTab.Comments)
     }
-    var selected by rememberSaveable { mutableIntStateOf(0) }
-    val tab = tabs[selected.coerceIn(0, tabs.lastIndex)]
+    // Remembered by name, not by place in the row: Contents comes and goes with the outline.
+    var selected by rememberSaveable { mutableStateOf(PanelTab.Pages) }
+    val tab = if (selected in tabs) selected else PanelTab.Pages
     Surface(modifier.width(SIDE_PANEL_WIDTH).fillMaxHeight().testTag("side-panel"), tonalElevation = 1.dp) {
         Column(Modifier.fillMaxSize()) {
             TabRow(selectedTabIndex = tabs.indexOf(tab)) {
-                tabs.forEachIndexed { index, t ->
+                tabs.forEach { t ->
                     Tab(
                         selected = t == tab,
-                        onClick = { selected = index },
+                        onClick = { selected = t },
                         text = {
                             Text(
                                 if (t == PanelTab.Comments && marks.isNotEmpty()) "${stringResource(t.label)} (${marks.size})" else stringResource(t.label),

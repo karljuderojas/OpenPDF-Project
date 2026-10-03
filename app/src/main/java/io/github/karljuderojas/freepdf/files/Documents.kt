@@ -17,12 +17,14 @@ data class DocumentEntry(val uri: String, val name: String, val openedAt: Long)
  * What the Files tab lists: the PDFs open in this session, and a recent history that survives
  * restarts. Both live only on this device (history in app preferences, never synced anywhere).
  * [onClosed] hears of every PDF leaving the open list, closed or dropped off the end, so
- * whatever is kept for it while it is open can be let go.
+ * whatever is kept for it while it is open can be let go. [hasUnsavedChanges] says whether a
+ * PDF has changes that closing would lose; such a PDF is never dropped off the end.
  */
 class Documents(
     private val prefs: SharedPreferences,
     private val clock: () -> Long = System::currentTimeMillis,
     private val onClosed: (uri: String) -> Unit = {},
+    private val hasUnsavedChanges: (uri: String) -> Boolean = { false },
 ) {
 
     private val _recent = MutableStateFlow(readRecent())
@@ -30,17 +32,20 @@ class Documents(
 
     private val _open = MutableStateFlow<List<DocumentEntry>>(emptyList())
 
-    /** Opened since the app started and not closed since, newest first, at most [MAX_OPEN]. */
+    /** Opened since the app started and not closed since, newest first, at most [MAX_OPEN] unless more have unsaved changes. */
     val open: StateFlow<List<DocumentEntry>> = _open.asStateFlow()
 
     /**
      * Called when a PDF opens. It joins the open list, and the recent history too when [remember]
      * is true (only when the app can reopen it later, i.e. it holds lasting access to the file).
+     * Past [MAX_OPEN] the oldest PDFs without unsaved changes leave the list; see [MAX_OPEN].
      */
     fun opened(uri: String, name: String, remember: Boolean) {
         val entry = DocumentEntry(uri, name, clock())
         val before = _open.value
-        val after = (listOf(entry) + before.filter { it.uri != uri }).take(MAX_OPEN)
+        val kept = listOf(entry) + before.filter { it.uri != uri }
+        val leaving = kept.drop(1).asReversed().filter { !hasUnsavedChanges(it.uri) }.take((kept.size - MAX_OPEN).coerceAtLeast(0)).map { it.uri }.toSet()
+        val after = kept.filter { it.uri !in leaving }
         _open.value = after
         before.filter { old -> after.none { it.uri == old.uri } }.forEach { onClosed(it.uri) }
         if (remember) {
@@ -91,7 +96,13 @@ class Documents(
         private const val KEY = "recent"
         private const val MAX_RECENT = 50
 
-        /** The viewer's switcher lists every open file, so the oldest drop off past this. */
+        /**
+         * The viewer's switcher lists every open file, so the oldest drop off past this. One
+         * with unsaved changes never does: dropping it would throw the changes away without a
+         * word, so the oldest saved one goes instead, and when every open file has changes the
+         * list grows past the cap until one of them is saved or closed. The same rule keeps its
+         * session alive (DocumentSessions), so the two lists stay in step.
+         */
         const val MAX_OPEN = 8
 
         /**

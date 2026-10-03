@@ -577,13 +577,13 @@ fun ViewerContent(
     // On a tablet held wide the pages sit two to a row, so the list's items are rows, not pages.
     val window = rememberWindowSize()
     val columns = if (window.twoPages) 2 else 1
-    val currentPage by remember(columns) { derivedStateOf { listState.firstVisibleItemIndex * columns } }
+    val currentPage by remember(columns) { derivedStateOf { firstPageOf(listState.firstVisibleItemIndex, columns) } }
     var panelOpen by rememberSaveable { mutableStateOf(true) }
     // The list is kept at the same page when turning the tablet changes how many pages a row holds.
     var shownColumns by rememberSaveable { mutableIntStateOf(columns) }
     LaunchedEffect(columns) {
         if (shownColumns != columns) {
-            listState.scrollToItem(listState.firstVisibleItemIndex * shownColumns / columns)
+            listState.scrollToItem(rowOf(firstPageOf(listState.firstVisibleItemIndex, shownColumns), columns))
             shownColumns = columns
         }
     }
@@ -600,7 +600,7 @@ fun ViewerContent(
     var confirmRedact by rememberSaveable { mutableStateOf(initialConfirmRedact) }
     // The address a tapped link leads to, while asking whether to open it; and the box just dragged for a new link.
     var openingLink by rememberSaveable { mutableStateOf<String?>(null) }
-    var newLinkBox by remember { mutableStateOf<Pair<Int, DisplayRect>?>(null) }
+    var newLinkBox by rememberSaveable(stateSaver = PageBoxSaver) { mutableStateOf<Pair<Int, DisplayRect>?>(null) }
     // The link tapped in Edit's Add link, by page and place in its annotations, while asking what to do with it.
     var pickedLink by rememberSaveable { mutableStateOf<Pair<Int, Int>?>(null) }
     val linkContext = LocalContext.current
@@ -612,16 +612,19 @@ fun ViewerContent(
     }
     var cropping by rememberSaveable { mutableStateOf(false) }
     // What to do once the reader settles unsaved changes; non-null while the dialog shows.
-    var leavePrompt by remember { mutableStateOf<LeavePrompt?>(null) }
+    // This and the other dialog gates below are saved, so turning or unfolding the device keeps
+    // the dialog and whatever was typed in it (each dialog saves its own fields).
+    var leavePrompt by rememberSaveable(stateSaver = LeavePromptSaver) { mutableStateOf<LeavePrompt?>(null) }
     var showSwitcher by rememberSaveable { mutableStateOf(false) }
-    var pendingNote by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
-    var pendingTextBox by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
+    var pendingNote by rememberSaveable(stateSaver = PageOffsetSaver) { mutableStateOf<Pair<Int, Offset>?>(null) }
+    var pendingTextBox by rememberSaveable(stateSaver = PageOffsetSaver) { mutableStateOf<Pair<Int, Offset>?>(null) }
     var stampKind by rememberSaveable { mutableStateOf(Stamps.Kind.Approved) }
-    var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
+    var pendingText by rememberSaveable(stateSaver = PageOffsetSaver) { mutableStateOf<Pair<Int, Offset>?>(null) }
     // The line Edit text found under the last tap: its page, where it was tapped, and its words.
-    var editingLine by remember { mutableStateOf<Triple<Int, Offset, String>?>(null) }
+    var editingLine by rememberSaveable(stateSaver = EditingLineSaver) { mutableStateOf<Triple<Int, Offset, String>?>(null) }
     val noEditableText = stringResource(R.string.edit_text_none)
-    var editingField by remember { mutableStateOf<FormField?>(null) }
+    // The form field being filled in, found again by name, page and box: fields are read afresh after a change.
+    var editingFieldKey by rememberSaveable(stateSaver = FieldKeySaver) { mutableStateOf<FieldKey?>(null) }
     var padFor by rememberSaveable { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by rememberSaveable { mutableStateOf(false) }
     var showCertificate by rememberSaveable { mutableStateOf(initialShowCertificate) }
@@ -642,14 +645,16 @@ fun ViewerContent(
 
     // Selected text, and the lines of a selection waiting for its note to be typed.
     var selection by remember { mutableStateOf<TextSelection?>(null) }
-    var pendingTextNote by remember { mutableStateOf<Pair<Int, List<Rect>>?>(null) }
+    var pendingTextNote by rememberSaveable(stateSaver = PageLinesSaver) { mutableStateOf<Pair<Int, List<Rect>>?>(null) }
 
     // The mark picked for editing, by page and index, which stay the same while it is restyled.
     var pickedMark by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val selectedMark = pickedMark?.let { (page, index) -> marks.firstOrNull { it.page == page && it.index == index } }
         ?.takeIf { mode == ViewerMode.Read || (mode == ViewerMode.Annotate && AnnotateTool.forLabel(selectedTool) == null) }
     var showComments by rememberSaveable { mutableStateOf(false) }
-    var commentFor by remember { mutableStateOf<Mark?>(null) }
+    // The mark whose comment is being typed, by page and index like [pickedMark].
+    var commentForKey by rememberSaveable(stateSaver = PagePairSaver) { mutableStateOf<Pair<Int, Int>?>(null) }
+    val commentFor = commentForKey?.let { (page, index) -> marks.firstOrNull { it.page == page && it.index == index } }
     var searching by rememberSaveable { mutableStateOf(initialSearchQuery != null) }
     var query by rememberSaveable { mutableStateOf(initialSearchQuery.orEmpty()) }
     var currentMatch by rememberSaveable { mutableIntStateOf(0) }
@@ -683,6 +688,7 @@ fun ViewerContent(
         marksMadeOn = now
     }
     val signedFields = ready?.let { signedPlaces(it, stamps) }.orEmpty()
+    val editingField = editingFieldKey?.let { key -> ready?.formFields?.firstOrNull { it.key == key } }
     val pageCount = ready?.pageSizes?.size ?: 0
     // Stamps still being placed count as changes, for Undo and for offering Finish.
     val canUndo = ready?.canUndo == true || stamps.isNotEmpty()
@@ -720,7 +726,7 @@ fun ViewerContent(
             // Pages fill the list's width, less its 8 dp padding on each side and the gaps between them.
             val pageHeight = ((viewport.width - with(density) { (8.dp * (columns + 1)).toPx() }) / columns) / size.aspectRatio
             val offset = (field.box.top * pageHeight - viewport.height / 3f).roundToInt().coerceAtLeast(0)
-            if (animate) listState.animateScrollToItem(field.page / columns, offset) else listState.scrollToItem(field.page / columns, offset)
+            if (animate) listState.animateScrollToItem(rowOf(field.page, columns), offset) else listState.scrollToItem(rowOf(field.page, columns), offset)
         }
     }
 
@@ -756,12 +762,26 @@ fun ViewerContent(
     // Stamps still on screen (placed, or being written in after Done) are changes too.
     val hasUnsavedChanges = ready?.hasUnsavedChanges == true || stamps.isNotEmpty()
 
+    /** What [prompt] goes on to do once the changes are settled. */
+    fun thenOf(prompt: LeavePrompt): () -> Unit = when (prompt.kind) {
+        LeavePrompt.Kind.Back -> onBack
+        LeavePrompt.Kind.CloseCurrent -> {
+            { openDocuments.firstOrNull { it.uri == prompt.document }?.let(onCloseDocument); onBack() }
+        }
+        LeavePrompt.Kind.CloseOther -> {
+            { openDocuments.firstOrNull { it.uri == prompt.document }?.let(onCloseDocument) }
+        }
+        LeavePrompt.Kind.CloseAll -> {
+            { onCloseAll(); onBack() }
+        }
+    }
+
     /**
-     * Runs [then] once the reader has settled the unsaved changes of the document on screen,
-     * asking to save first when there are any. Discarding runs [discard] before [then].
+     * Goes on with [prompt] once the reader has settled the unsaved changes of the document on
+     * screen, asking to save first when there are any.
      */
-    fun leave(discard: () -> Unit = {}, then: () -> Unit = onBack) {
-        if (hasUnsavedChanges) leavePrompt = LeavePrompt(then, discard = discard) else then()
+    fun leave(prompt: LeavePrompt) {
+        if (hasUnsavedChanges) leavePrompt = prompt else thenOf(prompt)()
     }
 
     // Where the reader was when this document was last on screen, once, as soon as it is shown.
@@ -771,12 +791,12 @@ fun ViewerContent(
         if (!isReady || positionRestored) return@LaunchedEffect
         positionRestored = true
         if (position.page in 1 until pageCount || (position.page == 0 && position.offset > 0)) {
-            listState.scrollToItem(position.page / columns, position.offset)
+            listState.scrollToItem(rowOf(position.page, columns), position.offset)
         }
     }
     val currentOnViewPosition by rememberUpdatedState(onViewPosition)
     LaunchedEffect(listState, columns) {
-        snapshotFlow { ViewPosition(listState.firstVisibleItemIndex * columns, listState.firstVisibleItemScrollOffset) }
+        snapshotFlow { ViewPosition(firstPageOf(listState.firstVisibleItemIndex, columns), listState.firstVisibleItemScrollOffset) }
             .collect { currentOnViewPosition(it) }
     }
 
@@ -809,7 +829,7 @@ fun ViewerContent(
     // Leaving Pages lands on the page that was selected there.
     var returnToPage by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(returnToPage) {
-        returnToPage?.let { listState.scrollToItem(it / columns) }
+        returnToPage?.let { listState.scrollToItem(rowOf(it, columns)) }
         returnToPage = null
     }
 
@@ -849,13 +869,13 @@ fun ViewerContent(
         val viewport = listState.layoutInfo.viewportSize
         val pageHeight = viewport.width / columns / size.aspectRatio
         val top = match.boxes.minOfOrNull { it.top } ?: 0f
-        listState.animateScrollToItem(match.page / columns, (top * pageHeight - viewport.height / 3f).toInt().coerceAtLeast(0))
+        listState.animateScrollToItem(rowOf(match.page, columns), (top * pageHeight - viewport.height / 3f).toInt().coerceAtLeast(0))
     }
 
     // The page being read aloud stays on screen, in whichever view is showing.
     LaunchedEffect(readAloud.active, readAloud.page, reflowing) {
         if (!readAloud.active) return@LaunchedEffect
-        if (reflowing) reflowState.animateScrollToItem(readAloud.page) else listState.animateScrollToItem(readAloud.page / columns)
+        if (reflowing) reflowState.animateScrollToItem(readAloud.page) else listState.animateScrollToItem(rowOf(readAloud.page, columns))
     }
     val readAloudUnavailable = stringResource(R.string.read_aloud_unavailable)
     LaunchedEffect(readAloud.unavailable) {
@@ -869,7 +889,7 @@ fun ViewerContent(
     // Leaving reading mode puts the page list where the reader had got to.
     fun exitReflow() {
         reflowing = false
-        scope.launch { listState.scrollToItem(reflowState.firstVisibleItemIndex / columns) }
+        scope.launch { listState.scrollToItem(rowOf(reflowState.firstVisibleItemIndex, columns)) }
     }
 
     BackHandler(enabled = reflowing || selectedMark != null || mode != ViewerMode.Read || searching || ready?.hasUnsavedChanges == true) {
@@ -878,7 +898,7 @@ fun ViewerContent(
             selectedMark != null -> pickedMark = null
             mode != ViewerMode.Read -> backToReading()
             searching -> closeSearch()
-            else -> leave(discard = { onAction(ViewerAction.DiscardChanges) })
+            else -> leave(LeavePrompt(LeavePrompt.Kind.Back))
         }
     }
 
@@ -913,7 +933,7 @@ fun ViewerContent(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                         }
                     } else if (mode == ViewerMode.Read) {
-                        IconButton(onClick = { if (searching) closeSearch() else leave(discard = { onAction(ViewerAction.DiscardChanges) }) }) {
+                        IconButton(onClick = { if (searching) closeSearch() else leave(LeavePrompt(LeavePrompt.Kind.Back)) }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                         }
                     } else if (mode == ViewerMode.Pages && selectedPages.size > 1) {
@@ -1007,7 +1027,7 @@ fun ViewerContent(
                             onAction(ViewerAction.EditMark(selectedMark.page, selectedMark.index, color = color, width = width))
                         }
                     },
-                    onComment = { commentFor = selectedMark },
+                    onComment = { commentForKey = selectedMark?.let { it.page to it.index } },
                     onDelete = {
                         onAction(ViewerAction.DeleteMark(selectedMark.page, selectedMark.index))
                         pickedMark = null
@@ -1114,9 +1134,11 @@ fun ViewerContent(
                 pageColors = pageColors,
                 outline = ready.outline,
                 marks = marks,
-                onGoToPage = { page -> scope.launch { listState.animateScrollToItem(page / columns) } },
+                onGoToPage = { page -> scope.launch { listState.animateScrollToItem(rowOf(page, columns)) } },
                 onOpenMark = { mark ->
-                    if (mode != ViewerMode.Annotate) mode = ViewerMode.Read
+                    // Mark editing happens while reading, or in Annotate with no tool picked. Done
+                    // is taken on the way out of Sign or Edit, so stamps still being placed are kept.
+                    if (mode != ViewerMode.Annotate) backToReading()
                     selectedTool = null
                     returnToPage = mark.page
                     pickedMark = mark.page to mark.index
@@ -1182,7 +1204,7 @@ fun ViewerContent(
                             LinkLayer(page, pageLinks, onOpen = { link ->
                                 when (val target = link.target) {
                                     is LinkTarget.Web -> openingLink = target.uri
-                                    is LinkTarget.Page -> scope.launch { listState.animateScrollToItem(target.index.coerceIn(0, pageCount - 1)) }
+                                    is LinkTarget.Page -> scope.launch { listState.animateScrollToItem(rowOf(target.index.coerceIn(0, pageCount - 1), columns)) }
                                 }
                             }) {
                             MarkTapLayer(page, marks, selectedMark, onSelect = { pickedMark = it?.let { m -> m.page to m.index } }) {
@@ -1230,7 +1252,7 @@ fun ViewerContent(
                             FormFieldLayer(ready.formFields.filter { it.page == page }) { field ->
                                 when (val tap = formTap(field)) {
                                     is FormTap.Set -> onAction(ViewerAction.FillField(field, tap.value))
-                                    FormTap.Ask -> editingField = field
+                                    FormTap.Ask -> editingFieldKey = field.key
                                     FormTap.Nothing -> Unit
                                 }
                             }
@@ -1593,9 +1615,9 @@ fun ViewerContent(
     editingField?.let { field ->
         FormFieldDialog(
             field = field,
-            onDismiss = { editingField = null },
+            onDismiss = { editingFieldKey = null },
             onSet = { value ->
-                editingField = null
+                editingFieldKey = null
                 if (value != field.value) onAction(ViewerAction.FillField(field, value))
             },
         )
@@ -1658,21 +1680,21 @@ fun ViewerContent(
                 when {
                     entry.uri == currentUri -> {
                         showSwitcher = false
-                        leave { onCloseDocument(entry); onBack() }
+                        leave(LeavePrompt(LeavePrompt.Kind.CloseCurrent, entry.uri))
                     }
                     entry.uri in unsavedOthers -> {
                         showSwitcher = false
-                        leavePrompt = LeavePrompt(then = { onCloseDocument(entry) }, document = entry.uri)
+                        leavePrompt = LeavePrompt(LeavePrompt.Kind.CloseOther, entry.uri)
                     }
                     else -> onCloseDocument(entry)
                 }
             },
             onCloseAll = {
                 showSwitcher = false
-                val closeAll = { onCloseAll(); onBack() }
                 // Saving from here could only save the document on screen, so when others have
                 // changes too the choice is to discard them all or go back and save each.
-                if (unsavedOthers.isNotEmpty()) leavePrompt = LeavePrompt(closeAll, canSave = false) else leave(then = closeAll)
+                val closeAll = LeavePrompt(LeavePrompt.Kind.CloseAll, canSave = unsavedOthers.isEmpty())
+                if (unsavedOthers.isNotEmpty()) leavePrompt = closeAll else leave(closeAll)
             },
             onOpenAnother = {
                 showSwitcher = false
@@ -1702,9 +1724,9 @@ fun ViewerContent(
             confirm = R.string.save,
             // Clearing a comment removes it; a text box needs some text (Delete removes the box).
             allowBlank = !isTextBox,
-            onDismiss = { commentFor = null },
+            onDismiss = { commentForKey = null },
             onAdd = { text ->
-                commentFor = null
+                commentForKey = null
                 onAction(ViewerAction.EditMark(mark.page, mark.index, comment = text))
             },
         )
@@ -1719,7 +1741,7 @@ fun ViewerContent(
                 if (prompt.canSave) {
                     TextButton(onClick = {
                         leavePrompt = null
-                        onAction(ViewerAction.SaveAndLeave(prompt.then, prompt.document))
+                        onAction(ViewerAction.SaveAndLeave(thenOf(prompt), prompt.document))
                     }) { Text(stringResource(R.string.save)) }
                 }
             },
@@ -1728,8 +1750,10 @@ fun ViewerContent(
                     TextButton(onClick = { leavePrompt = null }) { Text(stringResource(R.string.cancel)) }
                     TextButton(onClick = {
                         leavePrompt = null
-                        prompt.discard()
-                        prompt.then()
+                        // Going back leaves the session in place, so its changes are dropped first;
+                        // the other ways out close the session, changes and all.
+                        if (prompt.kind == LeavePrompt.Kind.Back) onAction(ViewerAction.DiscardChanges)
+                        thenOf(prompt)()
                     }) { Text(stringResource(R.string.discard)) }
                 }
             },
@@ -1738,15 +1762,66 @@ fun ViewerContent(
 }
 
 /**
- * The unsaved-changes question: [then] runs once they are saved or discarded, [discard] first
- * when they are discarded. [document] is the other open document being closed, or null for the
- * one on screen. With [canSave] false only discarding is offered (several documents have changes).
+ * The unsaved-changes question, and what it is on the way to ([kind]): going back, closing the
+ * document on screen, closing another open document, or closing them all. [document] is the
+ * document being closed for the two closing kinds. With [canSave] false only discarding is
+ * offered (several documents have changes). Plain values, so the open dialog survives a turn.
  */
-private class LeavePrompt(
-    val then: () -> Unit,
-    val document: String? = null,
-    val canSave: Boolean = true,
-    val discard: () -> Unit = {},
+private data class LeavePrompt(val kind: Kind, val document: String? = null, val canSave: Boolean = true) {
+    enum class Kind { Back, CloseCurrent, CloseOther, CloseAll }
+}
+
+private val LeavePromptSaver = listSaver<LeavePrompt?, Any>(
+    save = { prompt -> if (prompt == null) emptyList() else listOf(prompt.kind.name, prompt.document ?: "", prompt.canSave) },
+    restore = { saved -> LeavePrompt(LeavePrompt.Kind.valueOf(saved[0] as String), (saved[1] as String).ifEmpty { null }, saved[2] as Boolean) },
+)
+
+/** Picks a form field out of the document's list again after a turn: a radio group shares a name, so the box tells its choices apart. */
+private data class FieldKey(val name: String, val page: Int, val box: DisplayRect)
+
+private val FormField.key: FieldKey get() = FieldKey(name, page, box)
+
+private val FieldKeySaver = listSaver<FieldKey?, Any>(
+    save = { key -> if (key == null) emptyList() else listOf(key.name, key.page, key.box.left, key.box.top, key.box.right, key.box.bottom) },
+    restore = { saved ->
+        FieldKey(saved[0] as String, saved[1] as Int, DisplayRect(saved[2] as Float, saved[3] as Float, saved[4] as Float, saved[5] as Float))
+    },
+)
+
+// Savers for the dialog gates: a page with a tapped point, a dragged box, a line's words or the
+// selected lines. Each saves nothing for null, so the dialog stays closed when it was closed.
+
+private val PageOffsetSaver = listSaver<Pair<Int, Offset>?, Any>(
+    save = { pending -> if (pending == null) emptyList() else listOf(pending.first, pending.second.x, pending.second.y) },
+    restore = { saved -> (saved[0] as Int) to Offset(saved[1] as Float, saved[2] as Float) },
+)
+
+private val PagePairSaver = listSaver<Pair<Int, Int>?, Int>(
+    save = { pair -> if (pair == null) emptyList() else listOf(pair.first, pair.second) },
+    restore = { saved -> saved[0] to saved[1] },
+)
+
+private val PageBoxSaver = listSaver<Pair<Int, DisplayRect>?, Any>(
+    save = { pending ->
+        if (pending == null) emptyList()
+        else listOf(pending.first, pending.second.left, pending.second.top, pending.second.right, pending.second.bottom)
+    },
+    restore = { saved -> (saved[0] as Int) to DisplayRect(saved[1] as Float, saved[2] as Float, saved[3] as Float, saved[4] as Float) },
+)
+
+private val EditingLineSaver = listSaver<Triple<Int, Offset, String>?, Any>(
+    save = { line -> if (line == null) emptyList() else listOf(line.first, line.second.x, line.second.y, line.third) },
+    restore = { saved -> Triple(saved[0] as Int, Offset(saved[1] as Float, saved[2] as Float), saved[3] as String) },
+)
+
+private val PageLinesSaver = listSaver<Pair<Int, List<Rect>>?, Any>(
+    save = { pending ->
+        if (pending == null) emptyList()
+        else listOf(pending.first) + pending.second.flatMap { listOf(it.left, it.top, it.right, it.bottom) }
+    },
+    restore = { saved ->
+        (saved[0] as Int) to saved.drop(1).chunked(4).map { Rect(it[0] as Float, it[1] as Float, it[2] as Float, it[3] as Float) }
+    },
 )
 
 @Composable
@@ -1810,16 +1885,20 @@ private fun PageList(
             contentPadding = PaddingValues(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items((pageSizes.size + columns - 1) / columns) { row ->
+            items(rowCount(pageSizes.size, columns)) { row ->
+                val first = firstPageOf(row, columns)
+                val next = firstPageOf(row + 1, columns)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-                    for (index in row * columns until minOf(pageSizes.size, row * columns + columns)) {
+                    // The first page of a two-page view sits alone on the right, as a book's cover does.
+                    if (next - first < columns) Spacer(Modifier.weight((columns - (next - first)).toFloat()))
+                    for (index in first until minOf(pageSizes.size, next)) {
                         PageImage(index, pageSizes[index], revision, widthPx, loadPage, Modifier.weight(1f), pageColors) {
                             ZoomDetailLayer(index, revision, detail, detailColors)
                             overlay(index)
                         }
                     }
                     // A last page left alone in its row keeps its width instead of stretching.
-                    if (row * columns + columns > pageSizes.size) Spacer(Modifier.weight((row * columns + columns - pageSizes.size).toFloat()))
+                    if (next > pageSizes.size) Spacer(Modifier.weight((next - pageSizes.size).toFloat()))
                 }
             }
         }
@@ -1956,6 +2035,18 @@ private fun Set<Int>.toggle(page: Int): Set<Int> = when {
 }
 
 private val PageSetSaver = listSaver<Set<Int>, Int>(save = { it.toList() }, restore = { it.toSet() })
+
+// The page list's items are rows of [columns] pages. With two columns the first page sits alone in
+// row 0, as the cover of a book, so facing pages (2-3, 4-5) share a row; with one column a row is a page.
+
+/** The row holding [page]. */
+internal fun rowOf(page: Int, columns: Int): Int = if (columns == 1) page else (page + 1) / columns
+
+/** The first page of [row]; one past the last page for the row after the last. */
+internal fun firstPageOf(row: Int, columns: Int): Int = if (columns == 1) row else (row * columns - 1).coerceAtLeast(0)
+
+/** How many rows [pageCount] pages take. */
+internal fun rowCount(pageCount: Int, columns: Int): Int = if (pageCount == 0) 0 else rowOf(pageCount - 1, columns) + 1
 
 /** Keeps the current place to sign across configuration changes; nothing is saved for null. */
 private val SignFieldSaver = listSaver<SignField?, Any>(

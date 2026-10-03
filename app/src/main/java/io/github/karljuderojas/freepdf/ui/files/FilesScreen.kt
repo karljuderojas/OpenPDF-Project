@@ -44,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,7 +77,13 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
     val sessions = (context.applicationContext as FreePdfApp).sessions
     val unsaved by sessions.unsaved.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    var closing by remember { mutableStateOf<DocumentEntry?>(null) }
+    // The document the save-or-discard question is about, by URI: found again in the open list,
+    // so the question survives a turn or a trip to another tab, and goes if the document is closed.
+    var closingUri by rememberSaveable { mutableStateOf<String?>(null) }
+    val closing = closingUri?.let { uri -> open.firstOrNull { it.uri == uri } }
+    // Documents whose save from here is still being written. Opening one meanwhile would put
+    // the viewer on a session the save is about to close; closing it again would close it twice.
+    var saving by remember { mutableStateOf(emptySet<String>()) }
 
     val openFile = rememberPdfPicker(onOpenPdf)
 
@@ -84,10 +91,16 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
         open = open,
         recent = recent,
         onOpenFile = openFile,
-        onOpen = { onOpenPdf(Uri.parse(it.uri)) },
+        onOpen = { if (it.uri !in saving) onOpenPdf(Uri.parse(it.uri)) },
         unsaved = unsaved,
         // Like the viewer, closing a document with unsaved changes asks first.
-        onClose = { if (it.uri in unsaved) closing = it else documents.close(it.uri) },
+        onClose = {
+            when {
+                it.uri in saving -> Unit
+                it.uri in unsaved -> closingUri = it.uri
+                else -> documents.close(it.uri)
+            }
+        },
         onShare = { entry ->
             // The file may be gone or the grant revoked since it was last opened.
             runCatching { Sharing.shareUri(context, Uri.parse(entry.uri), entry.name) }
@@ -98,52 +111,61 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
     )
 
     closing?.let { entry ->
+        val session = sessions.get(entry.uri)
+        // Stamps still being placed are written into the PDF by the viewer, so they cannot be
+        // saved from here: the dialog says so and offers to open the document instead.
+        val stamps = session != null && session.stamps.isNotEmpty()
         UnsavedCloseDialog(
+            stamps = stamps,
             onSave = {
-                closing = null
-                val session = sessions.get(entry.uri)
-                if (session == null) {
-                    documents.close(entry.uri)
-                } else if (session.stamps.isNotEmpty()) {
-                    // Stamps still being placed are written into the PDF by the viewer, so they
-                    // are not lost here: the document stays open to be finished there.
-                    Toast.makeText(context, R.string.save_open_to_finish, Toast.LENGTH_LONG).show()
-                } else {
-                    scope.launch {
-                        val saved = withContext(Dispatchers.IO) {
-                            runCatching {
-                                SafeWrite.write(context, session.uri, session.session.workingFile)
-                                session.session.markSaved()
-                            }.isSuccess
-                        }
-                        sessions.refresh()
-                        // A file that cannot be written here stays open; the viewer offers Save As.
-                        if (saved) {
-                            Toast.makeText(context, R.string.saved, Toast.LENGTH_SHORT).show()
-                            documents.close(entry.uri)
-                        } else {
-                            Toast.makeText(context, R.string.save_failed_open_to_save_a_copy, Toast.LENGTH_LONG).show()
+                closingUri = null
+                when {
+                    session == null -> documents.close(entry.uri)
+                    stamps -> onOpenPdf(Uri.parse(entry.uri))
+                    else -> {
+                        saving = saving + entry.uri
+                        scope.launch {
+                            val saved = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    SafeWrite.write(context, session.uri, session.session.workingFile)
+                                    session.session.markSaved()
+                                }.isSuccess
+                            }
+                            sessions.refresh()
+                            saving = saving - entry.uri
+                            // A file that cannot be written here stays open; the viewer offers Save As.
+                            if (saved) {
+                                Toast.makeText(context, R.string.saved, Toast.LENGTH_SHORT).show()
+                                // Only if it is still open: it may have been closed another way meanwhile.
+                                if (documents.open.value.any { it.uri == entry.uri }) documents.close(entry.uri)
+                            } else {
+                                Toast.makeText(context, R.string.save_failed_open_to_save_a_copy, Toast.LENGTH_LONG).show()
+                            }
                         }
                     }
                 }
             },
             onDiscard = {
-                closing = null
+                closingUri = null
                 documents.close(entry.uri)
             },
-            onCancel = { closing = null },
+            onCancel = { closingUri = null },
         )
     }
 }
 
-/** The save-or-discard question the viewer asks, for closing a document from the Files tab. */
+/**
+ * The save-or-discard question the viewer asks, for closing a document from the Files tab. With
+ * [stamps] the document has stamps that only the viewer can write in, so instead of Save the
+ * dialog explains and offers Open; [onSave] then opens the document.
+ */
 @Composable
-fun UnsavedCloseDialog(onSave: () -> Unit, onDiscard: () -> Unit, onCancel: () -> Unit) {
+fun UnsavedCloseDialog(onSave: () -> Unit, onDiscard: () -> Unit, onCancel: () -> Unit, stamps: Boolean = false) {
     AlertDialog(
         onDismissRequest = onCancel,
         title = { Text(stringResource(R.string.unsaved_title)) },
-        text = { Text(stringResource(R.string.unsaved_body)) },
-        confirmButton = { TextButton(onClick = onSave) { Text(stringResource(R.string.save)) } },
+        text = { Text(stringResource(if (stamps) R.string.save_open_to_finish else R.string.unsaved_body)) },
+        confirmButton = { TextButton(onClick = onSave) { Text(stringResource(if (stamps) R.string.open else R.string.save)) } },
         dismissButton = {
             Row {
                 TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
