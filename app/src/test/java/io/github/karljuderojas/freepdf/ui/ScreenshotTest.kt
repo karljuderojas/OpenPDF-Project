@@ -220,6 +220,16 @@ class ScreenshotTest {
         sample.copy(signFields = javaClass.classLoader!!.getResourceAsStream("sample/agreement.pdf").use { PDDocument.load(it).use(SignatureFields::find) })
     }
 
+    // A flat authorization (sample/witness.pdf) whose "Signature:" label sits apart from its typed
+    // line, under a sentence ending "signed:"; its one place to sign, found by the app's own code.
+    private val witnessPages = listOf(loadSample("witness-page.png"))
+    private val witness by lazy {
+        ViewerState.Ready(
+            listOf(PageSize(612f, 792f)),
+            signFields = javaClass.classLoader!!.getResourceAsStream("sample/witness.pdf").use { PDDocument.load(it).use(SignatureFields::find) },
+        )
+    }
+
     @Test
     fun home() = capture("home") { shell(MainTab.Home) { HomeContent(sampleRecent, {}, {}, {}, {}, {}, {}, modifier = it) } }
 
@@ -1054,6 +1064,22 @@ class ScreenshotTest {
             PlacedStamp(i + 1L, field.page, StampContent.Signature(SignatureStore.Kind.Signature, signature), box)
         }
         viewer(ViewerMode.Sign, signing, signField = 1, stamps = stamps, selectedStamp = stamps.size.toLong())
+    }
+
+    // The place to sign sits on the line after "Signature:", not over the sentence above it.
+    @Test
+    fun viewerSignFieldOnLine() = capture("viewer_sign_field_on_line") {
+        viewer(ViewerMode.Sign, witness, signField = 0, pages = witnessPages)
+    }
+
+    // That place tapped: the signature sits on the line.
+    @Test
+    fun viewerSignFieldOnLineSigned() = capture("viewer_sign_field_on_line_signed") {
+        val signature = SignatureInk.render(sampleSignature(), 0xFF1A3FA8.toInt(), 6f)
+        val field = witness.signFields.single()
+        val box = StampGeometry.fieldBox(field.box, signature.width, signature.height, witness.pageSizes[field.page])
+        val stamp = PlacedStamp(1L, field.page, StampContent.Signature(SignatureStore.Kind.Signature, signature), box)
+        viewer(ViewerMode.Sign, witness, signField = 0, stamps = listOf(stamp), pages = witnessPages)
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
