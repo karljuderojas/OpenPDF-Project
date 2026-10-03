@@ -77,6 +77,35 @@ class DocumentsTest {
     }
 
     @Test
+    fun aDocumentWithUnsavedChangesIsNeverDroppedOffTheEnd() {
+        val closed = ArrayList<String>()
+        val documents = Documents(prefs, { time++ }, onClosed = closed::add, hasUnsavedChanges = { it == "content://1" || it == "content://3" })
+        (1..9).forEach { documents.opened("content://$it", "$it.pdf", remember = false) }
+        // The oldest saved one (2) goes instead of the oldest (1), which has changes.
+        assertEquals(listOf("content://2"), closed)
+        assertEquals(listOf(9, 8, 7, 6, 5, 4, 3, 1).map { "$it.pdf" }, documents.open.value.map { it.name })
+
+        documents.opened("content://10", "10.pdf", remember = false)
+        assertEquals(listOf("content://2", "content://4"), closed)
+        assertEquals(listOf(10, 9, 8, 7, 6, 5, 3, 1).map { "$it.pdf" }, documents.open.value.map { it.name })
+    }
+
+    @Test
+    fun theOpenListGrowsPastTheCapWhileEveryDocumentHasChanges() {
+        val closed = ArrayList<String>()
+        val documents = Documents(prefs, { time++ }, onClosed = closed::add, hasUnsavedChanges = { true })
+        (1..10).forEach { documents.opened("content://$it", "$it.pdf", remember = false) }
+        assertEquals(emptyList<String>(), closed)
+        assertEquals(10, documents.open.value.size)
+
+        // Once something is saved, the next open lets the oldest saved one go.
+        val saved = Documents(prefs, { time++ }, onClosed = closed::add, hasUnsavedChanges = { it != "content://2" })
+        (1..10).forEach { saved.opened("content://$it", "$it.pdf", remember = false) }
+        assertEquals(listOf("content://2"), closed)
+        assertEquals(9, saved.open.value.size)
+    }
+
+    @Test
     fun leavingTheOpenListIsReportedHoweverItHappens() {
         val closed = ArrayList<String>()
         val documents = Documents(prefs, { time++ }, onClosed = closed::add)

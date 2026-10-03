@@ -79,6 +79,30 @@ class DocumentSessionsTest {
     }
 
     @Test
+    fun aSessionWithUnsavedChangesOutlivesTheCap() {
+        val sessions = DocumentSessions(root, maxOpen = 2)
+        val a = sessions.attach("content://a") { sample() }
+        a.session.edit { PageEditor.rotate(it, 0, 90) }
+        val b = sessions.attach("content://b") { sample() }
+        val c = sessions.attach("content://c") { sample() }
+
+        // B, the oldest without changes, goes; A stays although it is older.
+        assertEquals(2, sessions.size)
+        assertNull(sessions.get("content://b"))
+        assertFalse(b.session.workingFile.exists())
+        assertSame(a, sessions.get("content://a"))
+        assertSame(c, sessions.get("content://c"))
+
+        // With changes everywhere nothing is closed, so there are more sessions than the cap.
+        c.stamps = listOf(PlacedStamp(1L, 0, StampContent.Checkmark, StampBox(0.1f, 0.1f, 0.2f, 0.2f)))
+        val d = sessions.attach("content://d") { sample() }
+        assertEquals(3, sessions.size)
+        assertTrue(a.session.workingFile.exists())
+        assertTrue(c.session.workingFile.exists())
+        assertTrue(d.session.workingFile.exists())
+    }
+
+    @Test
     fun unsavedListsTheDocumentsWithChanges() {
         val sessions = DocumentSessions(root)
         val a = sessions.attach("content://a") { sample() }
