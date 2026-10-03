@@ -58,6 +58,7 @@ import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
 import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
+import io.github.karljuderojas.freepdf.ui.files.UnsavedCloseDialog
 import io.github.karljuderojas.freepdf.ui.sign.CertificatePasswordDialog
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.home.HomeContent
@@ -217,6 +218,27 @@ class ScreenshotTest {
         files(
             open = listOf(sampleRecent[0], DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * HOUR)),
             recent = sampleRecent,
+        )
+    }
+
+    @Test
+    fun viewerReflow() = capture("viewer_reflow") { viewer(ViewerMode.Read, reflow = true) }
+
+    @Test
+    fun viewerReflowNightLarge() = capture("viewer_reflow_night_large") {
+        viewer(ViewerMode.Read, reflow = true, pageColors = PageColors.Night, readingTextSize = 26)
+    }
+
+    @Test
+    fun viewerReflowSepia() = capture("viewer_reflow_sepia") { viewer(ViewerMode.Read, reflow = true, pageColors = PageColors.Sepia) }
+
+    @Test
+    fun filesCloseUnsaved() = capture("files_close_unsaved") {
+        files(
+            open = listOf(sampleRecent[0], DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * HOUR)),
+            recent = sampleRecent,
+            unsaved = setOf("content://b"),
+            closing = true,
         )
     }
 
@@ -1149,8 +1171,9 @@ class ScreenshotTest {
     )
 
     @Composable
-    private fun files(open: List<DocumentEntry>, recent: List<DocumentEntry>) = shell(MainTab.Files) {
-        FilesContent(open, recent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {}, modifier = it, now = now)
+    private fun files(open: List<DocumentEntry>, recent: List<DocumentEntry>, unsaved: Set<String> = emptySet(), closing: Boolean = false) = shell(MainTab.Files) {
+        FilesContent(open, recent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {}, modifier = it, unsaved = unsaved, now = now)
+        if (closing) UnsavedCloseDialog(onSave = {}, onDiscard = {}, onCancel = {})
     }
 
     /** A tab's screen inside the bottom tab bar, as the app shows it. */
@@ -1180,6 +1203,8 @@ class ScreenshotTest {
         openDocuments: List<DocumentEntry> = emptyList(),
         unsavedDocuments: Set<String> = emptySet(),
         pageColors: PageColors = PageColors.Normal,
+        reflow: Boolean = false,
+        readingTextSize: Int = 18,
         tip: Int? = null,
         stamps: List<PlacedStamp> = emptyList(),
         selectedStamp: Long? = null,
@@ -1216,6 +1241,8 @@ class ScreenshotTest {
             unsavedDocuments = unsavedDocuments,
             currentUri = openDocuments.firstOrNull()?.uri,
             pageColors = pageColors,
+            initialReflow = reflow,
+            readingTextSize = readingTextSize,
             tip = tip,
             stamps = stamps,
             initialSelectedStamp = selectedStamp,
