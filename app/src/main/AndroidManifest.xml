@@ -31,6 +31,12 @@
                 <data android:scheme="file" />
                 <data android:mimeType="application/pdf" />
             </intent-filter>
+            <!-- Lets FreePDF appear in other apps' Share menus for PDFs. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+            </intent-filter>
         </activity>
 
         <provider

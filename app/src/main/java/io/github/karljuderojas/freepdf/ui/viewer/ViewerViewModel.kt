@@ -171,6 +171,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     private var renderer: PdfRenderer? = null
     private var session: EditSession? = null
     private var openedUri: Uri? = null
+
+    /** The URI the last [open] was asked for, which may differ from [openedUri] after Save As. */
+    private var requestedUri: Uri? = null
     private var revision = 0
     private var closeAfterSave = false
 
@@ -268,7 +271,11 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun open(uri: Uri) {
-        if (uri == openedUri) return
+        // Compared with what the screen asked for, not with [openedUri]: Save As and a signed copy
+        // move openedUri to the new file, and the screen's route still names the old one, so a
+        // configuration change would otherwise reopen the original and throw the session away.
+        if (uri == requestedUri) return
+        requestedUri = uri
         openedUri = uri
         _state.value = ViewerState.Loading
         viewModelScope.launch {
@@ -344,7 +351,10 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         return lock.withLock {
             val current = renderer ?: return@withLock null
             if (index >= current.pageCount) return@withLock null
-            cache.get(key) ?: current.renderPage(index, widthPx).also { cache.put(key, it) }
+            cache.get(key) ?: runCatching { current.renderPage(index, widthPx) }
+                .onSuccess { cache.put(key, it) }
+                // A page too big for the heap stays blank rather than taking the app down.
+                .getOrElse { if (it is OutOfMemoryError) null else throw it }
         }
     }
 
@@ -584,7 +594,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                             .onFailure { failed = true }
                     }
                 }
-                _state.value = reloadLocked()
+                _state.value = reloadOrFail()
                 // Taken off only now, so they stay on screen until the page shows them drawn in.
                 val done = placed.map { it.id }.toSet()
                 _stamps.update { stamps -> stamps.filter { it.id !in done } }
@@ -1017,7 +1027,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 // The undone edit may have moved pages around.
                 signFields = null
-                _state.value = reloadLocked()
+                _state.value = reloadOrFail()
             }
         }
     }
@@ -1033,7 +1043,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
                 signFields = null
-                _state.value = reloadLocked()
+                _state.value = reloadOrFail()
             }
         }
     }
@@ -1116,7 +1126,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         signedLog += null
                         redoSignedLog.clear()
                         if (movesPages) signFields = null
-                        _state.value = reloadLocked()
+                        _state.value = reloadOrFail()
                         done?.let { _effects.send(ViewerEffect.Message(it)) }
                     }
                     is NothingChanged -> onNoChange?.let { _effects.send(ViewerEffect.Message(it)) }
@@ -1148,6 +1158,26 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         val locked = session?.let { withContext(Dispatchers.IO) { runCatching { it.needsPassword() }.getOrDefault(false) } }
         if (locked == true) ViewerState.Locked() else throw e
     }
+
+    /**
+     * [reloadLocked], but a working copy PDFium refuses (a merged file it cannot parse, say) is
+     * taken back with undo instead of crashing the app from inside a coroutine. Call with [lock] held.
+     */
+    private suspend fun reloadOrFail(): ViewerState =
+        runCatching { reloadLocked() }.getOrElse { first ->
+            val current = session
+            if (current?.canUndo == true) {
+                runCatching {
+                    withContext(Dispatchers.IO) { current.undo() }
+                    if (editLog.isNotEmpty()) editLog.removeAt(editLog.lastIndex)
+                    if (signedLog.isNotEmpty()) signedLog.removeAt(signedLog.lastIndex)
+                    _effects.send(ViewerEffect.Message(R.string.edit_failed))
+                    reloadLocked()
+                }.getOrElse { ViewerState.Failed(first.message) }
+            } else {
+                ViewerState.Failed(first.message)
+            }
+        }
 
     /** Re-opens the working copy in PDFium. Call with [lock] held. */
     private suspend fun reloadLocked(): ViewerState {

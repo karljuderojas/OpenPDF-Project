@@ -77,6 +77,7 @@ fun PageGrid(
     onSelectionToggled: (Int) -> Unit,
     onPageMoved: (from: Int, to: Int) -> Unit,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
+    pageColors: PageColors = PageColors.Normal,
 ) {
     val gridState = rememberLazyGridState()
     LaunchedEffect(Unit) { gridState.scrollToItem(selectedPages.minOrNull() ?: 0) }
@@ -149,7 +150,8 @@ fun PageGrid(
                 ) {
                     PageImage(
                         page, pageSizes[page], revision, thumbWidthPx, loadPage,
-                        Modifier
+                        pageColors = pageColors,
+                        modifier = Modifier
                             .fillMaxWidth()
                             .clip(shape)
                             .border(

@@ -25,7 +25,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        incomingPdf.value = intent.pdfUri()
+        // Only on a fresh start: after a rotation the navigation stack already holds the viewer,
+        // and getIntent() still returns the same ACTION_VIEW, which would push a second one.
+        if (savedInstanceState == null) incomingPdf.value = intent.pdfUri()
         setContent {
             val theme by (application as FreePdfApp).settings.theme.collectAsStateWithLifecycle()
             val dark = when (theme) {
@@ -52,5 +54,12 @@ class MainActivity : ComponentActivity() {
         intent.pdfUri()?.let { incomingPdf.value = it }
     }
 
-    private fun Intent.pdfUri(): Uri? = if (action == Intent.ACTION_VIEW) data else null
+    /** The PDF in an open-with (ACTION_VIEW) or share-to (ACTION_SEND) intent, if any. */
+    private fun Intent.pdfUri(): Uri? = when (action) {
+        Intent.ACTION_VIEW -> data
+        Intent.ACTION_SEND ->
+            @Suppress("DEPRECATION")
+            (getParcelableExtra(Intent.EXTRA_STREAM) as? Uri) ?: clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
+        else -> null
+    }
 }

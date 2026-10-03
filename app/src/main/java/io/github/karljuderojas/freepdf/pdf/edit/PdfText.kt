@@ -16,7 +16,8 @@ object PdfText {
     const val LIBERATION_SANS = "com/tom_roush/pdfbox/resources/ttf/LiberationSans-Regular.ttf"
 
     fun fontFor(document: PDDocument, text: String): PDFont {
-        if (PDType1Font.HELVETICA.canShow(text)) return PDType1Font.HELVETICA
+        // Line breaks and tabs are handled by the callers, so they must not force the fallback font.
+        if (PDType1Font.HELVETICA.canShow(text.replace("\n", "").replace('\t', ' '))) return PDType1Font.HELVETICA
         return PDType0Font.load(document, PDFBoxResourceLoader.getStream(LIBERATION_SANS))
     }
 
