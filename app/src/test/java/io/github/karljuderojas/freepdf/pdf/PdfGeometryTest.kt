@@ -40,6 +40,19 @@ class PdfGeometryTest {
         assertPoint(10f, 800f, displayToPdf(0f, 0f, 0, PdfRect(10f, 8f, 622f, 800f)))
     }
 
+    @Test
+    fun pdfToDisplayUndoesDisplayToPdf() {
+        val crop = PdfRect(10f, 8f, 622f, 800f)
+        for (rotation in listOf(0, 90, 180, 270)) {
+            for ((nx, ny) in listOf(0f to 0f, 1f to 1f, 0.25f to 0.7f, 0.9f to 0.1f)) {
+                val p = displayToPdf(nx, ny, rotation, crop)
+                val (bx, by) = pdfToDisplay(p.x, p.y, rotation, crop)
+                assertEquals("x at $rotation°", nx, bx, 0.0001f)
+                assertEquals("y at $rotation°", ny, by, 0.0001f)
+            }
+        }
+    }
+
     private fun assertPoint(x: Float, y: Float, p: PdfPoint) {
         assertEquals(x, p.x, 0.001f)
         assertEquals(y, p.y, 0.001f)

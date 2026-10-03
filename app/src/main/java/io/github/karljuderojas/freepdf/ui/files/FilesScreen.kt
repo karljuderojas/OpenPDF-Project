@@ -1,11 +1,8 @@
 package io.github.karljuderojas.freepdf.ui.files
 
-import android.content.Intent
 import android.net.Uri
 import android.text.format.DateUtils
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -59,31 +56,23 @@ import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.share.Sharing
+import io.github.karljuderojas.freepdf.ui.rememberPdfPicker
 import java.util.Calendar
 
-/** The start screen: PDFs open now, recent history grouped by day, and Open file. */
+/** The Files tab: PDFs open now, recent history grouped by day, and Open file. */
 @Composable
-fun FilesScreen(onOpenPdf: (Uri) -> Unit) {
+fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val documents = (context.applicationContext as FreePdfApp).documents
     val open by documents.open.collectAsStateWithLifecycle()
     val recent by documents.recent.collectAsStateWithLifecycle()
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            // Keep access across restarts so the file can appear in Recent. Some providers only
-            // grant read access, in which case asking for write as well would lose both.
-            val read = Intent.FLAG_GRANT_READ_URI_PERMISSION
-            runCatching { context.contentResolver.takePersistableUriPermission(uri, read or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
-                .recoverCatching { context.contentResolver.takePersistableUriPermission(uri, read) }
-            onOpenPdf(uri)
-        }
-    }
+    val openFile = rememberPdfPicker(onOpenPdf)
 
     FilesContent(
         open = open,
         recent = recent,
-        onOpenFile = { picker.launch(arrayOf("application/pdf")) },
+        onOpenFile = openFile,
         onOpen = { onOpenPdf(Uri.parse(it.uri)) },
         onClose = { documents.close(it.uri) },
         onShare = { entry ->
@@ -92,6 +81,7 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit) {
                 .onFailure { Toast.makeText(context, R.string.share_failed, Toast.LENGTH_SHORT).show() }
         },
         onForget = { documents.forget(it.uri) },
+        modifier = modifier,
     )
 }
 
@@ -106,9 +96,11 @@ fun FilesContent(
     onClose: (DocumentEntry) -> Unit,
     onShare: (DocumentEntry) -> Unit,
     onForget: (DocumentEntry) -> Unit,
+    modifier: Modifier = Modifier,
     now: Long = System.currentTimeMillis(),
 ) {
     Scaffold(
+        modifier = modifier,
         topBar = { TopAppBar(title = { Text(stringResource(R.string.files_title)) }) },
         floatingActionButton = {
             if (open.isNotEmpty() || recent.isNotEmpty()) {
@@ -180,7 +172,7 @@ private fun SectionHeader(text: String) {
 }
 
 @Composable
-private fun PdfBadge(modifier: Modifier = Modifier) {
+internal fun PdfBadge(modifier: Modifier = Modifier) {
     Box(
         modifier.background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(6.dp)),
         contentAlignment = Alignment.Center,
@@ -209,7 +201,7 @@ private fun OpenCard(entry: DocumentEntry, onOpen: (DocumentEntry) -> Unit, onCl
 }
 
 @Composable
-private fun RecentRow(
+internal fun RecentRow(
     entry: DocumentEntry,
     onOpen: (DocumentEntry) -> Unit,
     onShare: (DocumentEntry) -> Unit,
