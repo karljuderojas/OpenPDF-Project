@@ -59,6 +59,17 @@ internal object Appearances {
         else -> Matrix()
     }
 
+    /** The turn an appearance made by [set] was given, read back from its /Matrix; 0 when there is none. */
+    fun rotationOf(annotation: PDAnnotation): Int {
+        val m = annotation.normalAppearanceStream?.matrix ?: return 0
+        return when {
+            m.shearY > 0f -> 90
+            m.shearY < 0f -> 270
+            m.scaleX < 0f -> 180
+            else -> 0
+        }
+    }
+
     /**
      * The page-space rectangle for a box of [width] x [height] whose top-left corner, as the
      * page is displayed, is at [topLeft].

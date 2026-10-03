@@ -61,6 +61,19 @@ val Mark.Kind.tool: AnnotateTool?
         Mark.Kind.Stamp, Mark.Kind.Other -> null
     }
 
+/**
+ * The colours a mark of this kind can be changed to. A stamp this app placed is redrawn in the
+ * new colour; marks made elsewhere ([Mark.Kind.Other]) keep the look they came with, so none.
+ */
+val Mark.Kind.palette: List<Color>
+    get() = when (this) {
+        Mark.Kind.Stamp -> InkColors
+        else -> tool?.palette.orEmpty()
+    }
+
+/** The line widths or font sizes a mark of this kind can be changed to; empty when it has none. */
+val Mark.Kind.widths: List<Float> get() = tool?.widths.orEmpty()
+
 val Mark.Kind.label: Int
     get() = when (this) {
         Mark.Kind.Highlight -> R.string.tool_highlight
@@ -155,7 +168,9 @@ fun MarkEditBar(
     onDone: () -> Unit,
 ) {
     Column(Modifier.testTag("mark-edit-bar")) {
-        mark.kind.tool?.let { tool -> StyleBar(tool, mark.style, onStyle) }
+        if (mark.kind.palette.isNotEmpty() || mark.kind.widths.isNotEmpty()) {
+            StyleBar(mark.kind.palette, mark.kind.widths, mark.style, onStyle)
+        }
         Surface(tonalElevation = 3.dp, color = MaterialTheme.colorScheme.surfaceContainer) {
             Row(
                 Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),

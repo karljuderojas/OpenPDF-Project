@@ -1,8 +1,11 @@
 package io.github.karljuderojas.freepdf.ui.viewer
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -109,16 +112,21 @@ fun AnnotationLayer(
         AnnotateTool.Gesture.Tap -> Modifier.pointerInput(tool) {
             detectTapGestures { currentOnTap(it.normalised()) }
         }
+        // No touch slop: the stroke starts where the finger lands, so its first few pixels
+        // are not lost, and a tap that never moves still leaves a dot.
         AnnotateTool.Gesture.Draw -> Modifier.pointerInput(tool) {
-            detectDragGestures(
-                onDragStart = { stroke.clear(); stroke.add(it) },
-                onDrag = { change, _ -> change.consume(); stroke.add(change.position) },
-                onDragEnd = {
-                    if (stroke.isNotEmpty()) currentOnStroke(stroke.map { it.normalised() })
-                    stroke.clear()
-                },
-                onDragCancel = { stroke.clear() },
-            )
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                down.consume()
+                stroke.clear()
+                stroke.add(down.position)
+                val finished = drag(down.id) { change ->
+                    change.consume()
+                    stroke.add(change.position)
+                }
+                if (finished && stroke.isNotEmpty()) currentOnStroke(stroke.map { it.normalised() })
+                stroke.clear()
+            }
         }
         AnnotateTool.Gesture.Box -> Modifier.pointerInput(tool) {
             var start = Offset.Zero
@@ -168,6 +176,9 @@ fun AnnotationLayer(
                 stroke.drop(1).forEach { lineTo(it.x, it.y) }
             }
             drawPath(path, style.color, style = Stroke(lineWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        } else if (stroke.size == 1) {
+            // A finger that has not moved yet: the dot it would leave.
+            drawCircle(style.color, lineWidth / 2, stroke[0])
         }
         snapped?.takeIf { it.last < words.size }?.let { range ->
             words.lineBoxes(range).forEach { line ->

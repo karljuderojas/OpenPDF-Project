@@ -43,11 +43,19 @@ data class Mark(
 /** Lists, restyles, comments on and deletes the marks in a document. */
 object Marks {
 
-    /** Every mark in [document], page by page in drawing order. Links, form fields and pop-ups are left out. */
-    fun list(document: PDDocument): List<Mark> = document.pages.flatMapIndexed { pageIndex, page ->
+    /**
+     * Every mark in [document], page by page in drawing order. Links, form fields and pop-ups are
+     * left out. [wordsOn] gives the words on a page, for the text a highlight covers; it is only
+     * asked for pages that have marked text, and a caller that keeps the words from one listing
+     * to the next (the pages' text does not change when a mark does) can hand them back here.
+     */
+    fun list(
+        document: PDDocument,
+        wordsOn: (pageIndex: Int) -> List<PageWord> = { runCatching { PageText.words(document, it) }.getOrDefault(emptyList()) },
+    ): List<Mark> = document.pages.flatMapIndexed { pageIndex, page ->
         val annotations = page.annotations
         // Only pages with marked text need their words.
-        val words by lazy { runCatching { PageText.words(document, pageIndex) }.getOrDefault(emptyList()) }
+        val words by lazy { wordsOn(pageIndex) }
         annotations.mapIndexedNotNull { index, annotation ->
             val kind = kindOf(annotation) ?: return@mapIndexedNotNull null
             val box = annotation.rectangle ?: return@mapIndexedNotNull null
@@ -98,19 +106,21 @@ object Marks {
             )
             return
         }
-        if (color != null) annotation.color = color.toPdColor()
-        if (width != null && annotation is PDAnnotationMarkup) {
-            annotation.borderStyle = (annotation.borderStyle ?: PDBorderStyleDictionary()).apply { this.width = width }
-        }
         if (comment != null) annotation.contents = comment.ifBlank { null }
-        annotation.setModifiedDate(Calendar.getInstance())
-        // Only redraw kinds this app knows how to draw; others keep their own appearance.
-        if (color != null || width != null) {
-            when (kindOf(annotation)) {
-                Mark.Kind.TextBox, Mark.Kind.Stamp, Mark.Kind.Other, null -> Unit
-                else -> annotation.constructAppearances(document)
+        when (kindOf(annotation)) {
+            // A stamp's look is all in the appearance this app drew, so it is drawn again in the new colour.
+            Mark.Kind.Stamp -> if (color != null) Stamps.restyle(document, annotation, color)
+            // Marks made elsewhere keep their own appearance; a colour that would not show is not written either.
+            Mark.Kind.Other -> Unit
+            else -> {
+                if (color != null) annotation.color = color.toPdColor()
+                if (width != null && annotation is PDAnnotationMarkup) {
+                    annotation.borderStyle = (annotation.borderStyle ?: PDBorderStyleDictionary()).apply { this.width = width }
+                }
+                if (color != null || width != null) annotation.constructAppearances(document)
             }
         }
+        annotation.setModifiedDate(Calendar.getInstance())
     }
 
     /** Removes the mark at [index] on [pageIndex], and the pop-up window that belongs to it, if any. */
@@ -142,7 +152,12 @@ object Marks {
         PDAnnotationText.SUB_TYPE -> Mark.Kind.Note
         PDAnnotationMarkup.SUB_TYPE_FREETEXT -> Mark.Kind.TextBox
         // A signature placed in Sign mode is a stamp too, but it is managed there, not as a mark.
-        "Stamp" -> if (SignatureAnnotation.isSignature(annotation)) null else Mark.Kind.Stamp
+        // A stamp from another app has a look this cannot redraw, so it is listed like any other mark.
+        "Stamp" -> when {
+            SignatureAnnotation.isSignature(annotation) -> null
+            Stamps.kindOf(annotation) != null -> Mark.Kind.Stamp
+            else -> Mark.Kind.Other
+        }
         "Link", "Widget", "Popup" -> null
         // Lines, polygons, carets and the like still show in the list, under a general name.
         else -> if (annotation is PDAnnotationMarkup) Mark.Kind.Other else null

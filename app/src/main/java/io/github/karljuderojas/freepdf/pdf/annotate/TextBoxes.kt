@@ -2,9 +2,11 @@ package io.github.karljuderojas.freepdf.pdf.annotate
 
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationMarkup
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDBorderStyleDictionary
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
+import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.annotate.Appearances.stamp
 import io.github.karljuderojas.freepdf.pdf.annotate.Appearances.toPdRectangle
 import io.github.karljuderojas.freepdf.pdf.annotate.Appearances.toPdfRect
@@ -25,12 +27,15 @@ object TextBoxes {
     private const val PADDING = 4f
     private const val LINE_SPACING = 1.2f
 
+    /** Narrowest a box wraps to, in font sizes, so one placed by the page's edge still reads. */
+    private const val MIN_WRAP_EMS = 4f
+
     /** The text style stored on a box, for prefilling the editor when the user taps it. */
     data class Style(val color: Annotator.Rgb, val fontSize: Float)
 
     /**
      * Adds a text box whose top-left corner, as the page is shown, is at [at]. The box grows
-     * to fit the text; line breaks start new lines.
+     * to fit the text; line breaks start new lines, and long lines wrap before the page's edge.
      */
     fun add(
         document: PDDocument,
@@ -51,7 +56,7 @@ object TextBoxes {
             if (rotation != 0) cosObject.setInt(COSName.ROTATE, rotation)
             stamp(author)
         }
-        draw(document, annotation, at, text, color, fontSize, rotation)
+        draw(document, annotation, at, text, color, fontSize, rotation, wrapWidth(page, at, rotation, fontSize))
         page.annotations.add(annotation)
         return annotation
     }
@@ -60,8 +65,26 @@ object TextBoxes {
     fun edit(document: PDDocument, annotation: PDAnnotationMarkup, text: String, color: Annotator.Rgb, fontSize: Float) {
         val rotation = Appearances.normalizedRotation(annotation.cosObject.getInt(COSName.ROTATE, 0))
         val topLeft = Appearances.topLeftOf(annotation.rectangle.toPdfRect(), rotation)
-        draw(document, annotation, topLeft, text, color, fontSize, rotation)
+        val page = annotation.page ?: document.pages.firstOrNull { p -> p.annotations.any { it.cosObject === annotation.cosObject } }
+        val maxWidth = page?.let { wrapWidth(it, topLeft, rotation, fontSize) } ?: Float.MAX_VALUE
+        draw(document, annotation, topLeft, text, color, fontSize, rotation, maxWidth)
         annotation.setModifiedDate(Calendar.getInstance())
+    }
+
+    /**
+     * How wide the text in a box at [topLeft] may be before it wraps: the room left to the
+     * page's right edge as shown, less the padding, but never less than a few letters.
+     */
+    private fun wrapWidth(page: PDPage, topLeft: PdfPoint, rotation: Int, fontSize: Float): Float {
+        val crop = page.cropBox.let { PdfRect(it.lowerLeftX, it.lowerLeftY, it.upperRightX, it.upperRightY) }
+        // The displayed x axis runs along +x, +y, -x or -y of the page as it turns.
+        val room = when (rotation) {
+            90 -> crop.top - topLeft.y
+            180 -> topLeft.x - crop.left
+            270 -> topLeft.y - crop.bottom
+            else -> crop.right - topLeft.x
+        }
+        return maxOf(room - 2 * PADDING, MIN_WRAP_EMS * fontSize)
     }
 
     /**
@@ -86,11 +109,12 @@ object TextBoxes {
         color: Annotator.Rgb,
         fontSize: Float,
         rotation: Int,
+        maxWidth: Float,
     ) {
         val font = PdfText.fontFor(document, text)
-        val lines = PdfText.lines(PdfText.printable(text, font))
+        val lines = PdfText.wrap(PdfText.printable(text, font), font, fontSize, maxWidth)
         val leading = fontSize * LINE_SPACING
-        val textWidth = lines.maxOf { font.getStringWidth(it) } / 1000f * fontSize
+        val textWidth = lines.maxOf { PdfText.widthOf(it, font, fontSize) }
         val width = maxOf(textWidth, fontSize) + 2 * PADDING
         val height = lines.size * leading + 2 * PADDING
 
