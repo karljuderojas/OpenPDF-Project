@@ -10,6 +10,8 @@ import android.provider.OpenableColumns
 import android.util.LruCache
 import androidx.annotation.StringRes
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.IntRect
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -74,6 +76,7 @@ sealed interface ViewerState {
         val pageSizes: List<PageSize>,
         val revision: Int = 0,
         val canUndo: Boolean = false,
+        val canRedo: Boolean = false,
         val hasUnsavedChanges: Boolean = false,
         val hasSignature: Boolean = false,
         val outline: List<OutlineItem> = emptyList(),
@@ -124,6 +127,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     private var originalSha256 = ""
     private var openedAt = Instant.now()
     private val editLog = ArrayList<AuditEvent?>()
+    private val redoLog = ArrayList<AuditEvent?>()
 
     /** The finished signed copy, in the cache, waiting for the user to pick where it goes. */
     private var pendingSignedCopy: File? = null
@@ -156,6 +160,12 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     /** The user's saved signature and initials, if they have drawn them. */
     val savedSignatures: StateFlow<Map<SignatureStore.Kind, Bitmap>> = _savedSignatures.asStateFlow()
+
+    private val annotatePrefs = application.getSharedPreferences("annotate", Context.MODE_PRIVATE)
+    private val _toolStyles = MutableStateFlow(loadToolStyles())
+
+    /** The colour and size last chosen for each Annotate tool. */
+    val toolStyles: StateFlow<Map<AnnotateTool, ToolStyle>> = _toolStyles.asStateFlow()
 
     private val _stamps = MutableStateFlow<List<PlacedStamp>>(emptyList())
     private var nextStampId = 1L
@@ -190,6 +200,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         originalSha256 = newSession.workingFile.inputStream().use { DocumentHash.sha256(it) }
                         openedAt = Instant.now()
                         editLog.clear()
+                        redoLog.clear()
                     }
                     _stamps.value = emptyList()
                     firstLoadLocked()
@@ -285,23 +296,41 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         PdfDocuments.load(context, other).use { PageEditor.append(document, it) }
     }
 
-    fun ink(page: Int, strokes: List<List<Offset>>, color: Annotator.Rgb) = edit { document ->
+    fun ink(page: Int, strokes: List<List<Offset>>, style: ToolStyle) = edit { document ->
         val toPdf = displayMapper(document, page)
-        Annotator.ink(document, page, strokes.map { stroke -> stroke.map(toPdf) }, color)
+        Annotator.ink(document, page, strokes.map { stroke -> stroke.map(toPdf) }, style.rgb, style.width)
     }
 
-    fun markText(page: Int, start: Offset, end: Offset, kind: Annotator.TextMarkup, color: Annotator.Rgb) =
+    fun markText(page: Int, start: Offset, end: Offset, kind: Annotator.TextMarkup, style: ToolStyle) =
         edit { document ->
-            Annotator.markText(document, page, listOf(boxOf(document, page, start, end)), kind, color)
+            Annotator.markText(document, page, listOf(boxOf(document, page, start, end)), kind, style.rgb, style.width)
         }
 
-    fun shape(page: Int, start: Offset, end: Offset, color: Annotator.Rgb) = edit { document ->
-        Annotator.shape(document, page, boxOf(document, page, start, end), color = color)
+    fun shape(page: Int, start: Offset, end: Offset, style: ToolStyle) = edit { document ->
+        Annotator.shape(document, page, boxOf(document, page, start, end), color = style.rgb, lineWidth = style.width)
     }
 
-    fun note(page: Int, at: Offset, text: String) = edit { document ->
-        Annotator.note(document, page, displayMapper(document, page)(at), text)
+    fun note(page: Int, at: Offset, text: String, style: ToolStyle) = edit { document ->
+        Annotator.note(document, page, displayMapper(document, page)(at), text, style.rgb)
     }
+
+    /** Remembers [style] for [tool], here and the next time the app opens. */
+    fun setToolStyle(tool: AnnotateTool, style: ToolStyle) {
+        _toolStyles.value += tool to style
+        annotatePrefs.edit().putString(tool.name, "${style.color.toArgb()},${style.width}").apply()
+    }
+
+    private fun loadToolStyles(): Map<AnnotateTool, ToolStyle> = AnnotateTool.entries.mapNotNull { tool ->
+        val saved = annotatePrefs.getString(tool.name, null)?.split(',') ?: return@mapNotNull null
+        val color = saved.getOrNull(0)?.toIntOrNull()?.let { Color(it) } ?: return@mapNotNull null
+        val width = saved.getOrNull(1)?.toFloatOrNull() ?: return@mapNotNull null
+        // A colour or size this version no longer offers falls back to the tool's default.
+        val default = tool.defaultStyle
+        tool to ToolStyle(
+            color.takeIf { it in tool.palette } ?: default.color,
+            width.takeIf { it in tool.widths } ?: default.width,
+        )
+    }.toMap()
 
     /** Removes the topmost mark under [at]. Links and form fields are left alone. */
     fun erase(page: Int, at: Offset) {
@@ -588,7 +617,22 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 withContext(Dispatchers.IO) {
                     session?.takeIf { it.canUndo }?.let {
                         it.undo()
-                        editLog.removeLastOrNull()
+                        // An undone edit that was not logged leaves the log as it is.
+                        if (editLog.isNotEmpty()) redoLog += editLog.removeAt(editLog.lastIndex)
+                    }
+                }
+                _state.value = reloadLocked()
+            }
+        }
+    }
+
+    fun redo() {
+        viewModelScope.launch {
+            lock.withLock {
+                withContext(Dispatchers.IO) {
+                    session?.takeIf { it.canRedo }?.let {
+                        it.redo()
+                        if (redoLog.isNotEmpty()) editLog += redoLog.removeAt(redoLog.lastIndex)
                     }
                 }
                 _state.value = reloadLocked()
@@ -653,6 +697,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 when (val error = result.exceptionOrNull()) {
                     null -> {
                         editLog += event?.copy(at = Instant.now())
+                        redoLog.clear()
                         _state.value = reloadLocked()
                     }
                     is NothingChanged -> onNoChange?.let { _effects.send(ViewerEffect.Message(it)) }
@@ -698,7 +743,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         renderer = next
         val hasSignature = editLog.any { it?.type == AuditEvent.Type.Signed }
         val outline = runCatching { next.outline() }.getOrDefault(emptyList())
-        return ViewerState.Ready(next.pageSizes, revision, current.canUndo, current.hasUnsavedChanges, hasSignature, outline)
+        return ViewerState.Ready(
+            next.pageSizes, revision, current.canUndo, current.canRedo, current.hasUnsavedChanges, hasSignature, outline,
+        )
     }
 
     /** Lists [uri] in the Files tab; in the history too if the app can reopen it later. */
