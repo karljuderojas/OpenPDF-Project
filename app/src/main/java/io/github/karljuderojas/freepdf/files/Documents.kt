@@ -47,6 +47,12 @@ class Documents(private val prefs: SharedPreferences, private val clock: () -> L
         writeRecent()
     }
 
+    /** Empties the history. Files open right now stay open. */
+    fun clearHistory() {
+        _recent.value = emptyList()
+        writeRecent()
+    }
+
     private fun readRecent(): List<DocumentEntry> = runCatching {
         val array = JSONArray(prefs.getString(KEY, "[]"))
         (0 until array.length()).map { i ->

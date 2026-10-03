@@ -11,7 +11,8 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ✅ Continuous vertical scroll with PDFium rendering and a bitmap cache
 - ✅ Pinch to zoom (basic: scales the whole list)
 - ✅ Sharp re-rendering when zoomed: the visible part of each page is rendered at the zoom level
-- ⬜ Text search, outline/bookmarks, go to page, page thumbnails
+- ✅ Text search with highlighted matches and previous/next, the outline (Contents), go to page (tap "Page 3 of 12")
+- ⬜ Page thumbnails while reading
 - ⬜ Text selection with a Highlight / Underline / Note popup
 - ✅ Files tab: documents open this session on top, recent history grouped by Today / Yesterday / Earlier, "Open file" through Android's file picker (stored on the device only)
 - ⬜ Switcher between open documents, tab style
@@ -24,7 +25,7 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ✅ Sticky tools: one finger draws while a tool is chosen; choose it again to scroll
 - ✅ Undo (shared with page edits)
 - ⬜ Text box (FreeText), stamps, ellipses
-- ⬜ Per-tool colours and sizes, redo
+- ✅ Per-tool colours and sizes (remembered per tool), redo
 - ⬜ Comments list
 
 ## Signing (Sign mode), see [signing-design.md](signing-design.md)
