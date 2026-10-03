@@ -117,6 +117,7 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
 import io.github.karljuderojas.freepdf.settings.Tip
 import io.github.karljuderojas.freepdf.print.Printing
+import io.github.karljuderojas.freepdf.settings.AppSettings
 import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.pdf.sign.CertificateInfo
@@ -255,6 +256,7 @@ fun ViewerScreen(
     val context = LocalContext.current
     val settings = (context.applicationContext as FreePdfApp).settings
     val pageColors by settings.pageColors.collectAsStateWithLifecycle()
+    val readingTextSize by settings.readingTextSize.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var shownInfo by remember { mutableStateOf<ViewerEffect.ShowInfo?>(null) }
     val scope = rememberCoroutineScope()
@@ -347,6 +349,8 @@ fun ViewerScreen(
         onViewPosition = viewModel::viewPositionChanged,
         pageColors = pageColors,
         onPageColors = settings::setPageColors,
+        readingTextSize = readingTextSize,
+        onReadingTextSize = settings::setReadingTextSize,
         tip = tip?.text,
         onTipDismissed = { tip = null },
         onModeEntered = { mode ->
@@ -481,6 +485,9 @@ fun ViewerContent(
     onViewPosition: (ViewPosition) -> Unit = {},
     pageColors: PageColors = PageColors.Normal,
     onPageColors: (PageColors) -> Unit = {},
+    readingTextSize: Int = AppSettings.DEFAULT_TEXT_SIZE,
+    onReadingTextSize: (Int) -> Unit = {},
+    initialReflow: Boolean = false,
     @StringRes tip: Int? = null,
     onTipDismissed: () -> Unit = {},
     onModeEntered: (ViewerMode) -> Unit = {},
@@ -539,6 +546,9 @@ fun ViewerContent(
     val searchFocus = remember { FocusRequester() }
     var focusSearch by remember { mutableStateOf(false) }
     var goingToPage by rememberSaveable { mutableStateOf(false) }
+    // Reading mode shows the text reflowed instead of the pages; only from Read mode.
+    var reflowing by rememberSaveable { mutableStateOf(initialReflow) }
+    val reflowState = rememberLazyListState()
     var showingOutline by rememberSaveable { mutableStateOf(false) }
     var selectedStamp by remember { mutableStateOf(initialSelectedStamp) }
     // A newly placed stamp starts out selected, so its handles show right away.
@@ -721,8 +731,15 @@ fun ViewerContent(
         listState.animateScrollToItem(match.page, (top * pageHeight - viewport.height / 3f).toInt().coerceAtLeast(0))
     }
 
-    BackHandler(enabled = selectedMark != null || mode != ViewerMode.Read || searching || ready?.hasUnsavedChanges == true) {
+    // Leaving reading mode puts the page list where the reader had got to.
+    fun exitReflow() {
+        reflowing = false
+        scope.launch { listState.scrollToItem(reflowState.firstVisibleItemIndex) }
+    }
+
+    BackHandler(enabled = reflowing || selectedMark != null || mode != ViewerMode.Read || searching || ready?.hasUnsavedChanges == true) {
         when {
+            reflowing -> exitReflow()
             selectedMark != null -> pickedMark = null
             mode != ViewerMode.Read -> backToReading()
             searching -> closeSearch()
@@ -736,6 +753,7 @@ fun ViewerContent(
             TopAppBar(
                 title = {
                     when {
+                        reflowing -> Text(stringResource(R.string.reading_mode))
                         mode == ViewerMode.Read && searching -> SearchField(
                             query = query,
                             onQueryChange = { query = it },
@@ -755,7 +773,11 @@ fun ViewerContent(
                     }
                 },
                 navigationIcon = {
-                    if (mode == ViewerMode.Read) {
+                    if (reflowing) {
+                        IconButton(onClick = { exitReflow() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                        }
+                    } else if (mode == ViewerMode.Read) {
                         IconButton(onClick = { if (searching) closeSearch() else leave(discard = { onAction(ViewerAction.DiscardChanges) }) }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                         }
@@ -766,7 +788,13 @@ fun ViewerContent(
                     }
                 },
                 actions = {
-                    if (mode == ViewerMode.Read && searching) {
+                    if (reflowing) {
+                        TextSizeButtons(
+                            readingTextSize, onReadingTextSize,
+                            AppSettings.MIN_TEXT_SIZE, AppSettings.MAX_TEXT_SIZE, AppSettings.TEXT_SIZE_STEP,
+                        )
+                        PageColorsButton(pageColors, onPageColors)
+                    } else if (mode == ViewerMode.Read && searching) {
                         SearchStepper(search, currentMatch) { step ->
                             val count = search.matches.size
                             if (count > 0) currentMatch = (currentMatch + step + count) % count
@@ -778,6 +806,10 @@ fun ViewerContent(
                                 searching = true
                             }) {
                                 Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.search))
+                            }
+                            ReadingModeButton {
+                                scope.launch { reflowState.scrollToItem(currentPage) }
+                                reflowing = true
                             }
                             IconButton(onClick = { sharing = true }) {
                                 Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.tool_share))
@@ -817,7 +849,7 @@ fun ViewerContent(
         },
         bottomBar = {
             when {
-                ready == null -> Unit
+                ready == null || reflowing -> Unit
                 selectedMark != null -> MarkEditBar(
                     mark = selectedMark,
                     onStyle = { style ->
@@ -923,6 +955,14 @@ fun ViewerContent(
                     onCancel = onBack,
                 )
                 ready == null -> CircularProgressIndicator()
+                reflowing -> ReflowView(
+                    pageCount = pageCount,
+                    revision = ready.revision,
+                    loadWords = loadWords,
+                    textSize = readingTextSize,
+                    pageColors = pageColors,
+                    listState = reflowState,
+                )
                 mode == ViewerMode.Pages -> PageGrid(
                     pageSizes = ready.pageSizes,
                     revision = ready.revision,
