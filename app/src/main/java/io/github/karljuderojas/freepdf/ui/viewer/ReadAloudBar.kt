@@ -27,7 +27,8 @@ import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.speech.ReadAloudState
 
 /** What the read-aloud bar asks for besides starting. */
-enum class ReadAloudCommand { Pause, Resume, Next, Previous, Stop }
+/** [Acknowledge] says the "not available" message has been shown; the bar never sends it. */
+enum class ReadAloudCommand { Pause, Resume, Next, Previous, Stop, Acknowledge }
 
 /** The controls shown while reading aloud: the sentence being spoken, skip back and on, pause or play, and Stop. */
 @Composable
