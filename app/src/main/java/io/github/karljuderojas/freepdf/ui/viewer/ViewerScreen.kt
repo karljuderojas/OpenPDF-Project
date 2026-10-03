@@ -25,7 +25,9 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -40,10 +42,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Menu
@@ -122,6 +125,7 @@ import io.github.karljuderojas.freepdf.print.Printing
 import io.github.karljuderojas.freepdf.settings.AppSettings
 import io.github.karljuderojas.freepdf.speech.ReadAloudState
 import io.github.karljuderojas.freepdf.settings.PageColors
+import io.github.karljuderojas.freepdf.ui.rememberWindowSize
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.pdf.sign.CertificateInfo
 import io.github.karljuderojas.freepdf.ui.sign.CertificateDialog
@@ -523,7 +527,19 @@ fun ViewerContent(
     onAction: (ViewerAction) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
-    val currentPage by remember { derivedStateOf { listState.firstVisibleItemIndex } }
+    // On a tablet held wide the pages sit two to a row, so the list's items are rows, not pages.
+    val window = rememberWindowSize()
+    val columns = if (window.twoPages) 2 else 1
+    val currentPage by remember(columns) { derivedStateOf { listState.firstVisibleItemIndex * columns } }
+    var panelOpen by rememberSaveable { mutableStateOf(true) }
+    // The list is kept at the same page when turning the tablet changes how many pages a row holds.
+    var shownColumns by rememberSaveable { mutableIntStateOf(columns) }
+    LaunchedEffect(columns) {
+        if (shownColumns != columns) {
+            listState.scrollToItem(listState.firstVisibleItemIndex * shownColumns / columns)
+            shownColumns = columns
+        }
+    }
     var mode by rememberSaveable { mutableStateOf(initialMode) }
     var selectedTool by rememberSaveable { mutableStateOf(initialTool) }
     // Pages mode's selection; never empty, so the tools always have something to act on.
@@ -634,10 +650,10 @@ fun ViewerContent(
         currentField = field
         scope.launch {
             val viewport = snapshotFlow { listState.layoutInfo.viewportSize }.first { it.height > 0 }
-            // Pages fill the list's width, less its 8 dp padding on each side.
-            val pageHeight = (viewport.width - with(density) { 16.dp.toPx() }) / size.aspectRatio
+            // Pages fill the list's width, less its 8 dp padding on each side and the gaps between them.
+            val pageHeight = ((viewport.width - with(density) { (8.dp * (columns + 1)).toPx() }) / columns) / size.aspectRatio
             val offset = (field.box.top * pageHeight - viewport.height / 3f).roundToInt().coerceAtLeast(0)
-            if (animate) listState.animateScrollToItem(field.page, offset) else listState.scrollToItem(field.page, offset)
+            if (animate) listState.animateScrollToItem(field.page / columns, offset) else listState.scrollToItem(field.page / columns, offset)
         }
     }
 
@@ -688,12 +704,12 @@ fun ViewerContent(
         if (!isReady || positionRestored) return@LaunchedEffect
         positionRestored = true
         if (position.page in 1 until pageCount || (position.page == 0 && position.offset > 0)) {
-            listState.scrollToItem(position.page, position.offset)
+            listState.scrollToItem(position.page / columns, position.offset)
         }
     }
     val currentOnViewPosition by rememberUpdatedState(onViewPosition)
-    LaunchedEffect(listState) {
-        snapshotFlow { ViewPosition(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) }
+    LaunchedEffect(listState, columns) {
+        snapshotFlow { ViewPosition(listState.firstVisibleItemIndex * columns, listState.firstVisibleItemScrollOffset) }
             .collect { currentOnViewPosition(it) }
     }
 
@@ -726,7 +742,7 @@ fun ViewerContent(
     // Leaving Pages lands on the page that was selected there.
     var returnToPage by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(returnToPage) {
-        returnToPage?.let { listState.scrollToItem(it) }
+        returnToPage?.let { listState.scrollToItem(it / columns) }
         returnToPage = null
     }
 
@@ -764,15 +780,15 @@ fun ViewerContent(
         val match = shownMatch ?: return@LaunchedEffect
         val size = ready?.pageSizes?.getOrNull(match.page) ?: return@LaunchedEffect
         val viewport = listState.layoutInfo.viewportSize
-        val pageHeight = viewport.width / size.aspectRatio
+        val pageHeight = viewport.width / columns / size.aspectRatio
         val top = match.boxes.minOfOrNull { it.top } ?: 0f
-        listState.animateScrollToItem(match.page, (top * pageHeight - viewport.height / 3f).toInt().coerceAtLeast(0))
+        listState.animateScrollToItem(match.page / columns, (top * pageHeight - viewport.height / 3f).toInt().coerceAtLeast(0))
     }
 
     // The page being read aloud stays on screen, in whichever view is showing.
     LaunchedEffect(readAloud.active, readAloud.page, reflowing) {
         if (!readAloud.active) return@LaunchedEffect
-        if (reflowing) reflowState.animateScrollToItem(readAloud.page) else listState.animateScrollToItem(readAloud.page)
+        if (reflowing) reflowState.animateScrollToItem(readAloud.page) else listState.animateScrollToItem(readAloud.page / columns)
     }
     val readAloudUnavailable = stringResource(R.string.read_aloud_unavailable)
     LaunchedEffect(readAloud.unavailable) {
@@ -782,7 +798,7 @@ fun ViewerContent(
     // Leaving reading mode puts the page list where the reader had got to.
     fun exitReflow() {
         reflowing = false
-        scope.launch { listState.scrollToItem(reflowState.firstVisibleItemIndex) }
+        scope.launch { listState.scrollToItem(reflowState.firstVisibleItemIndex / columns) }
     }
 
     BackHandler(enabled = reflowing || selectedMark != null || mode != ViewerMode.Read || searching || ready?.hasUnsavedChanges == true) {
@@ -859,6 +875,11 @@ fun ViewerContent(
                                 searching = true
                             }) {
                                 Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.search))
+                            }
+                            if (window.sidePanel) {
+                                IconButton(onClick = { panelOpen = !panelOpen }) {
+                                    Icon(Icons.AutoMirrored.Filled.List, contentDescription = stringResource(R.string.side_panel))
+                                }
                             }
                             ReadingModeButton {
                                 scope.launch { reflowState.scrollToItem(currentPage) }
@@ -1003,8 +1024,28 @@ fun ViewerContent(
             }
         },
     ) { padding ->
+        Row(Modifier.fillMaxSize().padding(padding)) {
+        // On a large screen the pages, contents and comments sit beside the document.
+        if (window.sidePanel && panelOpen && ready != null && mode != ViewerMode.Pages && !reflowing) {
+            ViewerSidePanel(
+                pageSizes = ready.pageSizes,
+                revision = ready.revision,
+                currentPage = currentPage,
+                loadPage = loadPage,
+                pageColors = pageColors,
+                outline = ready.outline,
+                marks = marks,
+                onGoToPage = { page -> scope.launch { listState.animateScrollToItem(page / columns) } },
+                onOpenMark = { mark ->
+                    if (mode != ViewerMode.Annotate) mode = ViewerMode.Read
+                    selectedTool = null
+                    returnToPage = mark.page
+                    pickedMark = mark.page to mark.index
+                },
+            )
+        }
         Box(
-            Modifier.fillMaxSize().padding(padding).background(MaterialTheme.colorScheme.surfaceVariant),
+            Modifier.weight(1f).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
             when {
@@ -1044,7 +1085,7 @@ fun ViewerContent(
                 else -> {
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
                     val signTool = SignTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Sign }
-                    PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState, pageColors) { page ->
+                    PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState, pageColors, columns) { page ->
                         if (mode == ViewerMode.Read && searching) {
                             val onPage = search.matches.withIndex().filter { it.value.page == page }
                             if (onPage.isNotEmpty()) SearchHighlights(onPage, currentMatch)
@@ -1163,6 +1204,7 @@ fun ViewerContent(
             if (tip != null && ready != null) {
                 TipCard(tip, onTipDismissed, Modifier.align(Alignment.BottomCenter).padding(16.dp))
             }
+        }
         }
     }
 
@@ -1527,6 +1569,7 @@ private fun PageList(
     loadRegion: LoadRegion,
     listState: LazyListState,
     pageColors: PageColors,
+    columns: Int = 1,
     overlay: @Composable BoxScope.(page: Int) -> Unit = {},
 ) {
     var zoom by remember { mutableFloatStateOf(1f) }
@@ -1545,7 +1588,8 @@ private fun PageList(
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().onGloballyPositioned { detail.viewport = it }) {
-        val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
+        // Each page is as wide as its share of the row, so one is rendered at that width.
+        val widthPx = with(LocalDensity.current) { ((maxWidth - 8.dp * (columns + 1)) / columns).roundToPx() }
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -1578,10 +1622,16 @@ private fun PageList(
             contentPadding = PaddingValues(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            itemsIndexed(pageSizes) { index, size ->
-                PageImage(index, size, revision, widthPx, loadPage, Modifier.fillMaxWidth(), pageColors) {
-                    ZoomDetailLayer(index, revision, detail, detailColors)
-                    overlay(index)
+            items((pageSizes.size + columns - 1) / columns) { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                    for (index in row * columns until minOf(pageSizes.size, row * columns + columns)) {
+                        PageImage(index, pageSizes[index], revision, widthPx, loadPage, Modifier.weight(1f), pageColors) {
+                            ZoomDetailLayer(index, revision, detail, detailColors)
+                            overlay(index)
+                        }
+                    }
+                    // A last page left alone in its row keeps its width instead of stretching.
+                    if (row * columns + columns > pageSizes.size) Spacer(Modifier.weight((row * columns + columns - pageSizes.size).toFloat()))
                 }
             }
         }

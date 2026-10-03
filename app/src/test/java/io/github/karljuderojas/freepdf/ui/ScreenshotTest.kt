@@ -134,6 +134,16 @@ class ScreenshotTest {
     // The two sample pages repeated, for the selection and drag screens.
     private val sixPages = ViewerState.Ready(List(6) { PageSize(612f, 792f) })
 
+    // Six pages with a table of contents, for the tablet's side panel.
+    private val tabletState = sixPages.copy(
+        outline = listOf(
+            OutlineItem("Service Agreement", 0, 0),
+            OutlineItem("1. Services", 0, 1),
+            OutlineItem("2. Payment", 1, 1),
+            OutlineItem("Signatures", 1, 0),
+        ),
+    )
+
     // The sign-up form (sample/form.pdf), with its fields read by the app's own code.
     private val formPages = listOf(loadSample("form-page.png"))
     private val form by lazy {
@@ -319,6 +329,41 @@ class ScreenshotTest {
             recent = sampleRecent,
         )
     }
+
+    // Tablets: tabs in a rail, and a landscape viewer with a side panel and two pages to a row.
+
+    @Test
+    @Config(qualifiers = "w1280dp-h800dp-land-mdpi")
+    fun tabletFiles() = capture("tablet_files") {
+        files(
+            open = listOf(sampleRecent[0], DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * HOUR)),
+            recent = sampleRecent,
+        )
+    }
+
+    @Test
+    @Config(qualifiers = "w1280dp-h800dp-land-mdpi")
+    fun tabletViewerLandscape() = capture("tablet_viewer_landscape") { viewer(ViewerMode.Read, state = tabletState) }
+
+    @Test
+    @Config(qualifiers = "w1280dp-h800dp-land-mdpi")
+    fun tabletViewerContents() {
+        show { viewer(ViewerMode.Read, state = tabletState) }
+        composeRule.onNodeWithText("Contents").performClick()
+        captureRoot("tablet_viewer_contents")
+    }
+
+    @Test
+    @Config(qualifiers = "w1280dp-h800dp-land-mdpi")
+    fun tabletViewerComments() {
+        show { viewer(ViewerMode.Read, state = tabletState, marks = sampleMarks) }
+        composeRule.onNodeWithText("Comments", substring = true).performClick()
+        captureRoot("tablet_viewer_comments")
+    }
+
+    @Test
+    @Config(qualifiers = "w800dp-h1280dp-mdpi")
+    fun tabletViewerPortrait() = capture("tablet_viewer_portrait") { viewer(ViewerMode.Read, state = tabletState) }
 
     @Test
     fun viewerReflow() = capture("viewer_reflow") { viewer(ViewerMode.Read, reflow = true) }

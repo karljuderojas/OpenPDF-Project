@@ -437,6 +437,7 @@
     <string name="open_documents_close_all">Close all</string>
     <string name="open_documents_open_another">Open another</string>
     <!-- Reading modes -->
+    <string name="side_panel">Pages, contents and comments</string>
     <string name="page_label">Page %1$d</string>
     <string name="reading_mode">Reading mode</string>
     <string name="reading_mode_no_text">No text on this page. It may be a scan.</string>
