@@ -266,7 +266,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     suspend fun words(page: Int): List<PageWord> = lock.withLock {
         wordCache[page] ?: withContext(Dispatchers.IO) {
             runCatching {
-                val document = textDocument ?: PDDocument.load(session?.workingFile ?: error("Nothing is open")).also { textDocument = it }
+                val document = textDocument ?: session?.let { PDDocument.load(it.workingFile, it.password) } ?: error("Nothing is open").also { textDocument = it }
                 PageText.words(document, page)
             }.getOrDefault(emptyList())
         }.also { wordCache[page] = it }
