@@ -20,6 +20,14 @@ data class ToolEntry(val mode: ViewerMode, @StringRes val label: Int) {
 }
 
 /**
+ * A tool that makes a new PDF, so it needs no open document and has no viewer mode. They are
+ * listed above the viewer's tools and open their own screen.
+ */
+enum class CreateTool(@StringRes val label: Int, @StringRes val description: Int, @StringRes val synonyms: Int) {
+    ImagesToPdf(R.string.tool_images_to_pdf, R.string.tool_about_images_to_pdf, R.string.tool_synonyms_images_to_pdf),
+}
+
+/**
  * Every working tool, grouped like the viewer's mode bar with signing first. It is read from
  * [ViewerMode], so a tool shows up here as soon as it ships there.
  */
@@ -65,6 +73,7 @@ private val descriptions = mapOf(
     R.string.tool_insert to R.string.tool_about_insert,
     R.string.tool_delete to R.string.tool_about_delete,
     R.string.tool_merge to R.string.tool_about_merge,
+    R.string.tool_watermark to R.string.tool_about_watermark,
     R.string.tool_share to R.string.tool_about_share,
     R.string.tool_password to R.string.tool_about_password,
     R.string.tool_info to R.string.tool_about_info,
@@ -94,6 +103,7 @@ private val synonymLists = mapOf(
     R.string.tool_insert to R.string.tool_synonyms_insert,
     R.string.tool_delete to R.string.tool_synonyms_delete,
     R.string.tool_merge to R.string.tool_synonyms_merge,
+    R.string.tool_watermark to R.string.tool_synonyms_watermark,
     R.string.tool_share to R.string.tool_synonyms_share,
     R.string.tool_password to R.string.tool_synonyms_password,
     R.string.tool_info to R.string.tool_synonyms_info,

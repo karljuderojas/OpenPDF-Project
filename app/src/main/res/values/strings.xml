@@ -50,7 +50,6 @@
     <string name="tool_certificate">Certificate</string>
     <string name="tool_edit_text">Edit text</string>
     <string name="tool_add_text">Add text</string>
-    <string name="tool_edit_text">Edit text</string>
     <string name="tool_add_image">Add image</string>
     <string name="tool_redact">Redact</string>
     <string name="tool_links">Links</string>
@@ -65,6 +64,7 @@
     <string name="tool_select_all">Select all</string>
     <string name="tool_share_selected">Share selected</string>
     <string name="tool_split">Split</string>
+    <string name="tool_watermark">Watermark</string>
     <string name="tool_password">Password</string>
     <string name="tool_print">Print</string>
     <string name="tool_share">Share</string>
@@ -257,6 +257,27 @@
     <string name="share_pages_hint">For example 1-3, 5</string>
     <string name="share_pages_invalid">Use page numbers from 1 to %1$d</string>
     <string name="share_images_too_many">Pick up to %1$d pages at a time</string>
+    <string name="watermark_title">Add a watermark</string>
+    <string name="watermark_text_option">Text</string>
+    <string name="watermark_picture_option">Picture</string>
+    <string name="watermark_text_label">Watermark text</string>
+    <string name="watermark_choose_picture">Choose a picture</string>
+    <string name="watermark_change_picture">Change picture</string>
+    <string name="watermark_no_picture">No picture chosen yet.</string>
+    <string name="watermark_picture_chosen">Picture chosen.</string>
+    <string name="watermark_opacity">Strength</string>
+    <string name="watermark_angle">Angle</string>
+    <string name="watermark_size">Size</string>
+    <string name="watermark_angle_value">%1$d°</string>
+    <string name="watermark_color">Colour</string>
+    <string name="watermark_note">It is drawn on top of the page. Use Undo to take it off.</string>
+    <string name="watermark_apply">Add</string>
+    <string name="watermark_apply_selected">Selected pages (%1$s)</string>
+    <string name="watermark_apply_all">All %1$d pages</string>
+    <string name="watermark_color_gray">Gray</string>
+    <string name="watermark_color_red">Red</string>
+    <string name="watermark_color_blue">Blue</string>
+    <string name="watermark_color_black">Black</string>
     <string name="crop_title">Crop pages</string>
     <string name="crop_body">Trim each edge of the page. The cut-off part stays in the file, so you can undo this or bring it back with Show whole page.</string>
     <string name="crop_left">Left</string>
@@ -360,6 +381,7 @@
     <string name="tool_about_move_later">Move a page towards the end.</string>
     <string name="tool_about_insert">Add an empty page.</string>
     <string name="tool_about_delete">Remove a page.</string>
+    <string name="tool_about_watermark">Stamp text or a picture across pages, such as DRAFT or a logo.</string>
     <string name="tool_about_merge">Add another PDF\'s pages to this one.</string>
     <string name="tool_about_share">Send the PDF to another app.</string>
     <string name="tool_about_password">Lock the PDF with a password, or change or remove one.</string>
@@ -386,6 +408,7 @@
     <string name="tool_synonyms_reorder">reorder, order, arrange, sort, move page</string>
     <string name="tool_synonyms_insert">add page, new page, blank page</string>
     <string name="tool_synonyms_delete">remove page, delete page</string>
+    <string name="tool_synonyms_watermark">stamp, draft, confidential, logo, overlay, background, text across page</string>
     <string name="tool_synonyms_merge">combine, join, append, add pdf, attach</string>
     <string name="tool_synonyms_share">send, email, export, upload</string>
     <string name="tool_synonyms_password">lock, unlock, protect, encrypt, secure</string>
@@ -414,6 +437,11 @@
     <string name="open_documents_close_all">Close all</string>
     <string name="open_documents_open_another">Open another</string>
     <!-- Reading modes -->
+    <string name="page_label">Page %1$d</string>
+    <string name="reading_mode">Reading mode</string>
+    <string name="reading_mode_no_text">No text on this page. It may be a scan.</string>
+    <string name="reading_mode_smaller">Smaller text</string>
+    <string name="reading_mode_larger">Larger text</string>
     <string name="page_colors">Page colors</string>
     <string name="page_colors_normal">Normal</string>
     <string name="page_colors_night">Night</string>
@@ -433,4 +461,28 @@
     <string name="settings_reset_tips">Show all tips again</string>
     <string name="settings_reset_tips_detail">Each hint appears once more when its feature comes up.</string>
     <string name="settings_reset_tips_done">Tips will show again</string>
+    <string name="tools_create">Create</string>
+    <string name="tool_images_to_pdf">Images to PDF</string>
+    <string name="tool_about_images_to_pdf">Turn photos from your gallery into one PDF.</string>
+    <string name="tool_synonyms_images_to_pdf">picture, photo, jpg, jpeg, png, gallery, convert, make pdf, create</string>
+    <string name="images_title">Images to PDF</string>
+    <string name="images_empty_title">Pick the pictures for your PDF</string>
+    <string name="images_empty_body">Each picture becomes one page. You can reorder them before saving.</string>
+    <string name="images_choose">Choose pictures</string>
+    <string name="images_add_more">Add more</string>
+    <string name="images_create">Create PDF</string>
+    <string name="images_page_size">Page size</string>
+    <string name="images_fit_a4">A4</string>
+    <string name="images_fit_picture">Same as picture</string>
+    <string name="images_page_n">Page %1$d</string>
+    <string name="images_move_earlier">Move page %1$d earlier</string>
+    <string name="images_move_later">Move page %1$d later</string>
+    <string name="images_remove">Remove page %1$d</string>
+    <string name="images_making">Making page %1$d of %2$d…</string>
+    <string name="images_failed">Could not make the PDF. Check that there is room on your phone and try again.</string>
+    <string name="images_default_name">Images</string>
+    <plurals name="images_count">
+        <item quantity="one">%1$d picture</item>
+        <item quantity="other">%1$d pictures</item>
+    </plurals>
 </resources>
