@@ -68,6 +68,9 @@
     <string name="page_number">Page %1$d</string>
     <string name="save">Save</string>
     <string name="undo">Undo</string>
+    <string name="redo">Redo</string>
+    <string name="style_colour">Colour %1$d</string>
+    <string name="style_size">Size %1$d</string>
     <string name="cancel">Cancel</string>
     <string name="discard">Discard</string>
     <string name="saved">Saved</string>
