@@ -42,6 +42,17 @@ class PrintingTest {
         }
     }
 
+    @Test
+    fun aPdfWithAnOpenPasswordIsPrintedWithIt() {
+        val source = protectedSample(AccessPermission(), userPassword = "open sesame")
+        val target = File(dir, "copy.pdf")
+        Printing.printableCopy(source, target, "open sesame")
+        PDDocument.load(target).use {
+            assertFalse(it.isEncrypted)
+            assertEquals(2, it.numberOfPages)
+        }
+    }
+
     @Test(expected = Printing.NotAllowed::class)
     fun aPdfThatForbidsPrintingIsNotPrinted() {
         val source = protectedSample(AccessPermission().apply { setCanPrint(false) })
@@ -54,10 +65,10 @@ class PrintingTest {
         }
     }
 
-    /** The sample locked with an owner password only, so it opens without one, as many PDFs do. */
-    private fun protectedSample(permissions: AccessPermission): File = File(dir, "protected.pdf").also { file ->
+    /** The sample locked with an owner password, and by default no open password, as many PDFs are. */
+    private fun protectedSample(permissions: AccessPermission, userPassword: String = ""): File = File(dir, "protected.pdf").also { file ->
         PDDocument.load(sample()).use { document ->
-            document.protect(StandardProtectionPolicy("owner-secret", "", permissions).apply { encryptionKeyLength = 128 })
+            document.protect(StandardProtectionPolicy("owner-secret", userPassword, permissions).apply { encryptionKeyLength = 128 })
             document.save(file)
         }
     }
