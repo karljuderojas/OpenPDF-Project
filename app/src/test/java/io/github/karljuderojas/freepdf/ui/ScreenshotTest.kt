@@ -33,6 +33,7 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.DocumentEntry
+import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
 import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
 import io.github.karljuderojas.freepdf.pdf.render.PageBox
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
@@ -47,6 +48,7 @@ import io.github.karljuderojas.freepdf.ui.home.HomeContent
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
 import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
+import io.github.karljuderojas.freepdf.ui.viewer.DocumentInfoDialog
 import io.github.karljuderojas.freepdf.ui.viewer.AnnotateTool
 import io.github.karljuderojas.freepdf.ui.viewer.ToolStyle
 import io.github.karljuderojas.freepdf.ui.viewer.GoToPageDialog
@@ -433,6 +435,8 @@ class ScreenshotTest {
         show { viewer(ViewerMode.More) }
         // The dialog's fields never let Compose go idle, so drive the clock by hand and capture
         // without further input, like the Extract and Split dialogs.
+        composeRule.onNodeWithText("Password").performScrollTo()
+        composeRule.waitForIdle()
         composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithText("Password").performClick()
         composeRule.mainClock.advanceTimeBy(1_000)
@@ -443,9 +447,35 @@ class ScreenshotTest {
     @Test
     fun viewerPasswordLocked() {
         show { viewer(ViewerMode.More, sample.copy(isProtected = true)) }
+        composeRule.onNodeWithText("Password").performScrollTo()
         composeRule.onNodeWithText("Password").performClick()
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_password_locked.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerDocumentInfo() {
+        fun at(day: Int, hour: Int, minute: Int) =
+            Calendar.getInstance().apply { set(2026, Calendar.SEPTEMBER, day, hour, minute, 0) }.toInstant()
+        val info = DocumentInfo(
+            title = "Service Agreement",
+            author = "Dana Whitfield",
+            creator = "Microsoft Word",
+            producer = "Microsoft Word for Microsoft 365",
+            created = at(28, 9, 30),
+            modified = at(30, 16, 5),
+            pageCount = 2,
+            pageSize = PageSize(612f, 792f),
+            pdfVersion = "1.7",
+            fileSizeBytes = 84_000,
+        )
+        show {
+            viewer(ViewerMode.More)
+            DocumentInfoDialog("Service Agreement.pdf", info, onDismiss = {})
+        }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_document_info.png")
     }
 
     /** Words of the sample's pages, found by the app's own PageText from the sample PDF. */

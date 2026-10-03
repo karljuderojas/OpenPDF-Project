@@ -30,6 +30,7 @@ import io.github.karljuderojas.freepdf.pdf.edit.EditSession
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import io.github.karljuderojas.freepdf.pdf.edit.PdfText
+import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
 import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
 import io.github.karljuderojas.freepdf.pdf.render.PageBox
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
@@ -45,6 +46,7 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
 import io.github.karljuderojas.freepdf.pdf.sign.SignerRecord
 import io.github.karljuderojas.freepdf.pdf.sign.SigningIdentity
+import io.github.karljuderojas.freepdf.print.Printing
 import io.github.karljuderojas.freepdf.share.Sharing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -105,8 +107,14 @@ sealed interface ViewerEffect {
     data object Close : ViewerEffect
     data class Share(val file: File) : ViewerEffect
 
+    /** Open the print dialog for [file], a printable copy named [name]. */
+    data class Print(val file: File, val name: String, val pageCount: Int) : ViewerEffect
+
     /** Ask where to save the signed copy; see [ViewerViewModel.saveSignedCopy]. */
     data class SaveSigned(val suggestedName: String) : ViewerEffect
+
+    /** Show [info] about the open PDF, titled with its file [name]. */
+    data class ShowInfo(val name: String, val info: DocumentInfo) : ViewerEffect
 }
 
 class ViewerViewModel(application: Application) : AndroidViewModel(application) {
@@ -621,6 +629,40 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             else -> R.string.password_added
         }
         update(done = done) { it.setPassword(password) }
+    }
+
+    /** Reads the details of the PDF as it is now, unsaved changes included, for Document info. */
+    fun documentInfo() {
+        val uri = openedUri ?: return
+        viewModelScope.launch {
+            val shown: Result<ViewerEffect> = runCatching {
+                lock.withLock {
+                    withContext(Dispatchers.IO) {
+                        val current = session ?: error("Nothing is open")
+                        ViewerEffect.ShowInfo(displayName(uri), DocumentInfo.read(current.workingFile, current.password))
+                    }
+                }
+            }
+            _effects.send(shown.getOrElse { ViewerEffect.Message(R.string.info_failed) })
+        }
+    }
+
+    /** Prints the PDF as it is now, unsaved changes included. */
+    fun print() {
+        val uri = openedUri ?: return
+        viewModelScope.launch {
+            val effect = runCatching {
+                lock.withLock {
+                    withContext(Dispatchers.IO) {
+                        val current = session ?: error("Nothing is open")
+                        val copy = File(context.cacheDir, "print/${UUID.randomUUID()}.pdf")
+                        Printing.printableCopy(current.workingFile, copy, current.password)
+                        ViewerEffect.Print(copy, displayName(uri), renderer?.pageCount ?: 0)
+                    }
+                }
+            }.getOrElse { ViewerEffect.Message(if (it is Printing.NotAllowed) R.string.print_not_allowed else R.string.print_failed) }
+            _effects.send(effect)
+        }
     }
 
     /** Takes back the last stamp still being placed, or else the last edit. */

@@ -149,6 +149,29 @@
     <string name="password_added">Password added. Save to keep it.</string>
     <string name="password_changed">Password changed. Save to keep it.</string>
     <string name="password_removed">Password removed. Save to keep it.</string>
+    <string name="info_failed">Could not read the details of this PDF.</string>
+    <string name="info_close">Close</string>
+    <string name="info_title">Title</string>
+    <string name="info_author">Author</string>
+    <string name="info_subject">Subject</string>
+    <string name="info_keywords">Keywords</string>
+    <string name="info_creator">Made with</string>
+    <string name="info_producer">PDF made by</string>
+    <string name="info_created">Created</string>
+    <string name="info_modified">Modified</string>
+    <string name="info_pages">Pages</string>
+    <string name="info_page_size">Page size</string>
+    <string name="info_mixed_sizes">Mixed sizes</string>
+    <string name="info_file_size">File size</string>
+    <string name="info_pdf_version">PDF version</string>
+    <string name="info_protected">Password protected</string>
+    <string name="info_form">Form fields</string>
+    <string name="info_signatures">Digital signatures</string>
+    <string name="info_yes">Yes</string>
+    <string name="info_no">No</string>
+    <string name="info_none">None</string>
+    <string name="print_failed">Could not prepare this PDF for printing.</string>
+    <string name="print_not_allowed">Whoever made this PDF has turned off printing.</string>
     <string name="tab_home">Home</string>
     <string name="tab_tools">Tools</string>
     <string name="tab_settings">Settings</string>
@@ -180,6 +203,8 @@
     <string name="tool_about_merge">Add another PDF\'s pages to this one.</string>
     <string name="tool_about_share">Send the PDF to another app.</string>
     <string name="tool_about_password">Lock the PDF with a password, or change or remove one.</string>
+    <string name="tool_about_info">See the title, author, page size and other details.</string>
+    <string name="tool_about_print">Print it, or save it as a PDF from the print screen.</string>
     <!-- Other words people search the Tools tab with, comma-separated. Translate freely; add local terms. -->
     <string name="tool_synonyms_signature">sign, signing, autograph, e-sign, esign, electronic signature</string>
     <string name="tool_synonyms_initials">initial, sign</string>
@@ -200,6 +225,8 @@
     <string name="tool_synonyms_merge">combine, join, append, add pdf, attach</string>
     <string name="tool_synonyms_share">send, email, export, upload</string>
     <string name="tool_synonyms_password">lock, unlock, protect, encrypt, secure</string>
+    <string name="tool_synonyms_info">details, properties, metadata, author, title, size</string>
+    <string name="tool_synonyms_print">printer, paper, hard copy</string>
     <string name="settings_appearance">Appearance</string>
     <string name="settings_theme">Theme</string>
     <string name="theme_system">System</string>
