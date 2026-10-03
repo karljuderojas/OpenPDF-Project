@@ -99,4 +99,6 @@
     <string name="forget_recent">Remove from recent</string>
     <string name="share_title">Share %1$s</string>
     <string name="share_failed">Could not prepare this PDF for sharing.</string>
+    <string name="print_failed">Could not prepare this PDF for printing.</string>
+    <string name="print_not_allowed">Whoever made this PDF has turned off printing.</string>
 </resources>
