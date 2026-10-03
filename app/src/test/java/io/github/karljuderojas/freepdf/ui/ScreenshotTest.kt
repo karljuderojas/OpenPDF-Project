@@ -637,11 +637,49 @@ class ScreenshotTest {
     @Test
     fun viewerPageColorsMenu() {
         show { viewer(ViewerMode.Read, pageColors = PageColors.Night) }
-        composeRule.onNodeWithContentDescription("Page colors").performClick()
+        // On a phone the page colors sit in the top bar's menu.
+        composeRule.onNodeWithTag("top-bar-menu").performClick()
         composeRule.waitForIdle()
         // The menu is a popup, so capture the whole screen rather than the root node.
         captureScreenRoboImage("build/outputs/roborazzi/viewer_page_colors_menu.png")
     }
+
+    /** Opens the top bar's "More options" menu, where a phone keeps the rarer actions, and taps [label]. */
+    private fun fromTopBarMenu(label: String) {
+        composeRule.onNodeWithTag("top-bar-menu").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText(label).performClick()
+    }
+
+    // A narrow phone (360 dp, like a Galaxy at a large display size): the page label keeps one line.
+    @Test
+    @Config(qualifiers = "w360dp-h780dp-xxhdpi")
+    fun viewerReadNarrow() = capture("viewer_read_narrow") { viewer(ViewerMode.Read) }
+
+    // The busiest Read bar: Save showing and three documents open, still on one line.
+    @Test
+    @Config(qualifiers = "w360dp-h780dp-xxhdpi")
+    fun viewerUnsavedNarrow() = capture("viewer_read_unsaved_narrow") {
+        viewer(ViewerMode.Read, sample.copy(canUndo = true, hasUnsavedChanges = true), openDocuments = sampleRecent.take(3))
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    @Config(qualifiers = "w360dp-h780dp-xxhdpi")
+    fun viewerTopBarMenuNarrow() {
+        show { viewer(ViewerMode.Read, sample.copy(canUndo = true, hasUnsavedChanges = true), openDocuments = sampleRecent.take(3)) }
+        composeRule.onNodeWithTag("top-bar-menu").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_top_bar_menu_narrow.png")
+    }
+
+    @Test
+    @Config(qualifiers = "w360dp-h780dp-xxhdpi")
+    fun viewerReflowNarrow() = capture("viewer_reflow_narrow") { viewer(ViewerMode.Read, reflow = true) }
+
+    @Test
+    @Config(qualifiers = "w360dp-h780dp-xxhdpi")
+    fun viewerSignNarrow() = capture("viewer_sign_narrow") { viewer(ViewerMode.Sign) }
 
     @Test
     fun viewerUnsaved() = capture("viewer_read_unsaved") {
@@ -695,7 +733,7 @@ class ScreenshotTest {
                 .map { OutlineItem(it, 0, 1) } +
             listOf("6. Confidentiality", "7. Termination", "Signatures").map { OutlineItem(it, 1, 1) }
         show { viewer(ViewerMode.Read, sample.copy(outline = outline)) }
-        composeRule.onNodeWithContentDescription("Contents").performClick()
+        fromTopBarMenu("Contents")
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_outline.png")
     }
@@ -1657,7 +1695,7 @@ class ScreenshotTest {
     @Test
     fun viewerShare() {
         show { viewer(ViewerMode.Read) }
-        composeRule.onNodeWithContentDescription("Share").performClick()
+        fromTopBarMenu("Share")
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_share.png")
     }
@@ -1680,7 +1718,7 @@ class ScreenshotTest {
     @Test
     fun viewerShareSomePages() {
         show { viewer(ViewerMode.Read) }
-        composeRule.onNodeWithContentDescription("Share").performClick()
+        fromTopBarMenu("Share")
         composeRule.onNodeWithText("Some pages only").performClick()
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_share_some_pages.png")
@@ -1690,7 +1728,7 @@ class ScreenshotTest {
     @Test
     fun viewerShareImages() {
         show { viewer(ViewerMode.Read) }
-        composeRule.onNodeWithContentDescription("Share").performClick()
+        fromTopBarMenu("Share")
         // A short PDF starts with every page picked.
         composeRule.onNodeWithText("As images").performClick()
         composeRule.waitForIdle()

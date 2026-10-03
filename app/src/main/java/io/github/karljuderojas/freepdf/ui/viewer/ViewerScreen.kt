@@ -102,6 +102,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -902,29 +904,36 @@ fun ViewerContent(
         }
     }
 
+    // Under 600 dp wide the top bar keeps search, Save and the open documents, and the rest go in a menu.
+    val compactBar = !window.navigationRail
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
                     when {
-                        reflowing -> Text(stringResource(R.string.reading_mode))
+                        reflowing -> TopBarTitle(stringResource(R.string.reading_mode))
                         mode == ViewerMode.Read && searching -> SearchField(
                             query = query,
                             onQueryChange = { query = it },
                             focusRequester = searchFocus,
                         )
                         mode == ViewerMode.Pages && selectedPages.size > 1 ->
-                            Text(pluralStringResource(R.plurals.pages_selected, selectedPages.size, selectedPages.size))
-                        mode != ViewerMode.Read -> Text(stringResource(mode.label))
-                        // Tapping "Page 3 of 12" asks which page to go to.
-                        ready != null -> Text(
-                            stringResource(R.string.page_of, currentPage + 1, pageCount),
-                            modifier = Modifier
-                                .clickable(onClickLabel = stringResource(R.string.go_to_page)) { goingToPage = true }
-                                .testTag("page-indicator"),
-                        )
-                        else -> Text(stringResource(R.string.app_name))
+                            TopBarTitle(pluralStringResource(R.plurals.pages_selected, selectedPages.size, selectedPages.size))
+                        mode != ViewerMode.Read -> TopBarTitle(stringResource(mode.label))
+                        // Tapping "Page 3 of 12" asks which page to go to. A phone shows it as
+                        // "3 / 12" so it keeps to one line beside the actions.
+                        ready != null -> {
+                            val full = stringResource(R.string.page_of, currentPage + 1, pageCount)
+                            TopBarTitle(
+                                if (compactBar) stringResource(R.string.page_of_short, currentPage + 1, pageCount) else full,
+                                modifier = Modifier
+                                    .clickable(onClickLabel = stringResource(R.string.go_to_page)) { goingToPage = true }
+                                    .semantics { contentDescription = full }
+                                    .testTag("page-indicator"),
+                            )
+                        }
+                        else -> TopBarTitle(stringResource(R.string.app_name))
                     }
                 },
                 navigationIcon = {
@@ -948,18 +957,29 @@ fun ViewerContent(
                             readingTextSize, onReadingTextSize,
                             AppSettings.MIN_TEXT_SIZE, AppSettings.MAX_TEXT_SIZE, AppSettings.TEXT_SIZE_STEP,
                         )
-                        if (!readAloud.active) {
-                            TextButton(onClick = { onAction(ViewerAction.StartReadAloud(reflowState.firstVisibleItemIndex)) }) {
-                                Text(stringResource(R.string.tool_read_aloud))
+                        val readAloudFromHere = { onAction(ViewerAction.StartReadAloud(reflowState.firstVisibleItemIndex)) }
+                        if (compactBar) {
+                            TopBarMenu(
+                                items = if (readAloud.active) emptyList() else listOf(TopBarMenuItem(R.string.tool_read_aloud, readAloudFromHere)),
+                                pageColors = pageColors,
+                                onPageColors = onPageColors,
+                            )
+                        } else {
+                            if (!readAloud.active) {
+                                TextButton(onClick = readAloudFromHere) { Text(stringResource(R.string.tool_read_aloud)) }
                             }
+                            PageColorsButton(pageColors, onPageColors)
                         }
-                        PageColorsButton(pageColors, onPageColors)
                     } else if (mode == ViewerMode.Read && searching) {
                         SearchStepper(search, currentMatch) { step ->
                             val count = search.matches.size
                             if (count > 0) currentMatch = (currentMatch + step + count) % count
                         }
                     } else if (mode == ViewerMode.Read) {
+                        val openReadingMode = {
+                            scope.launch { reflowState.scrollToItem(currentPage) }
+                            reflowing = true
+                        }
                         if (ready != null) {
                             IconButton(onClick = {
                                 focusSearch = true
@@ -972,26 +992,40 @@ fun ViewerContent(
                                     Icon(Icons.AutoMirrored.Filled.List, contentDescription = stringResource(R.string.side_panel))
                                 }
                             }
-                            ReadingModeButton {
-                                scope.launch { reflowState.scrollToItem(currentPage) }
-                                reflowing = true
-                            }
-                            IconButton(onClick = { sharing = true }) {
-                                Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.tool_share))
-                            }
-                            if (ready.outline.isNotEmpty()) {
-                                IconButton(onClick = { showingOutline = true }) {
-                                    Icon(Icons.Filled.Menu, contentDescription = stringResource(R.string.contents))
+                            if (!compactBar) {
+                                ReadingModeButton { openReadingMode() }
+                                IconButton(onClick = { sharing = true }) {
+                                    Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.tool_share))
+                                }
+                                if (ready.outline.isNotEmpty()) {
+                                    IconButton(onClick = { showingOutline = true }) {
+                                        Icon(Icons.Filled.Menu, contentDescription = stringResource(R.string.contents))
+                                    }
                                 }
                             }
                         }
                         if (ready?.hasUnsavedChanges == true) {
-                            TextButton(onClick = { onAction(ViewerAction.Save) }) { Text(stringResource(R.string.save)) }
+                            TextButton(onClick = { onAction(ViewerAction.Save) }) { Text(stringResource(R.string.save), maxLines = 1) }
                         }
                         if (openDocuments.isNotEmpty()) {
                             OpenDocumentsButton(openDocuments.size, onClick = { showSwitcher = true })
                         }
-                        if (ready != null) PageColorsButton(pageColors, onPageColors)
+                        if (ready != null) {
+                            if (compactBar) {
+                                // On a phone the rarer actions share one menu, so "3 / 12" never wraps.
+                                TopBarMenu(
+                                    items = buildList {
+                                        add(TopBarMenuItem(R.string.reading_mode) { openReadingMode() })
+                                        add(TopBarMenuItem(R.string.tool_share) { sharing = true })
+                                        if (ready.outline.isNotEmpty()) add(TopBarMenuItem(R.string.contents) { showingOutline = true })
+                                    },
+                                    pageColors = pageColors,
+                                    onPageColors = onPageColors,
+                                )
+                            } else {
+                                PageColorsButton(pageColors, onPageColors)
+                            }
+                        }
                     } else {
                         IconButton(onClick = { pickedMark = null; onAction(ViewerAction.Undo) }, enabled = canUndo) {
                             Icon(EditIcons.Undo, contentDescription = stringResource(R.string.undo))
