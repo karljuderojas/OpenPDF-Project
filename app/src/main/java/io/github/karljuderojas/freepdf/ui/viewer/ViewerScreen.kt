@@ -324,7 +324,7 @@ fun ViewerContent(
                             tool = tool,
                             savedImage = tool.signatureKind?.let { savedSignatures[it] },
                             onRedraw = { padFor = tool.signatureKind },
-                            hint = if (tool == SignTool.FillForm && ready?.formFields?.isEmpty() == true) R.string.sign_hint_no_fields else tool.hint,
+                            hint = if (tool == SignTool.FillForm && ready.formFields.isEmpty()) R.string.sign_hint_no_fields else tool.hint,
                         )
                     }
                     ToolStrip(mode, selectedTool, onToolSelected = { label ->

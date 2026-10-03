@@ -25,17 +25,12 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -100,11 +95,10 @@ fun FormFieldDialog(field: FormField, onDismiss: () -> Unit, onSet: (String) -> 
         ChoiceDialog(field, onDismiss, onSet)
         return
     }
-    // Opens ready to type, with the cursor after what is there.
+    // The cursor starts after what is there.
     var text by rememberSaveable(field.name, stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(field.value, TextRange(field.value.length)))
     }
-    val focus = remember { FocusRequester() }
     val submit = { onSet(if (field.multiline) text.text.trimEnd() else text.text.trim()) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -117,13 +111,8 @@ fun FormFieldDialog(field: FormField, onDismiss: () -> Unit, onSet: (String) -> 
                 minLines = if (field.multiline) 3 else 1,
                 keyboardOptions = KeyboardOptions(imeAction = if (field.multiline) ImeAction.Default else ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { submit() }),
-                modifier = Modifier.fillMaxWidth().focusRequester(focus).testTag("form-field-input"),
+                modifier = Modifier.fillMaxWidth().testTag("form-field-input"),
             )
-            // A frame after the dialog opens, once its window can take focus.
-            LaunchedEffect(Unit) {
-                withFrameNanos { }
-                focus.requestFocus()
-            }
         },
         confirmButton = {
             TextButton(onClick = submit) {
