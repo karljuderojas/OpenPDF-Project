@@ -16,7 +16,7 @@ data class ToolEntry(val mode: ViewerMode, @StringRes val label: Int) {
      * Annotate and Sign tools, and Edit's Add text, stay selected; Pages and More tools and Add
      * image act once, so only the mode opens.
      */
-    val preselects: Boolean get() = mode == ViewerMode.Annotate || mode == ViewerMode.Sign || label == R.string.tool_add_text
+    val preselects: Boolean get() = mode == ViewerMode.Annotate || mode == ViewerMode.Sign || label == R.string.tool_add_text || label == R.string.tool_add_link
 }
 
 /**
@@ -57,6 +57,7 @@ private val descriptions = mapOf(
     R.string.tool_eraser to R.string.tool_about_eraser,
     R.string.tool_add_text to R.string.tool_about_add_text,
     R.string.tool_add_image to R.string.tool_about_add_image,
+    R.string.tool_add_link to R.string.tool_about_add_link,
     R.string.tool_rotate to R.string.tool_about_rotate,
     R.string.tool_crop to R.string.tool_about_crop,
     R.string.tool_move_earlier to R.string.tool_about_move_earlier,
@@ -85,6 +86,7 @@ private val synonymLists = mapOf(
     R.string.tool_eraser to R.string.tool_synonyms_eraser,
     R.string.tool_add_text to R.string.tool_synonyms_add_text,
     R.string.tool_add_image to R.string.tool_synonyms_add_image,
+    R.string.tool_add_link to R.string.tool_synonyms_add_link,
     R.string.tool_rotate to R.string.tool_synonyms_rotate,
     R.string.tool_crop to R.string.tool_synonyms_crop,
     R.string.tool_move_earlier to R.string.tool_synonyms_reorder,

@@ -2,6 +2,7 @@ package io.github.karljuderojas.freepdf.ui.viewer
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
@@ -103,7 +104,9 @@ import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
+import io.github.karljuderojas.freepdf.pdf.DisplayRect
 import io.github.karljuderojas.freepdf.pdf.edit.CropMargins
+import io.github.karljuderojas.freepdf.pdf.links.LinkTarget
 import io.github.karljuderojas.freepdf.pdf.form.FormField
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
 import io.github.karljuderojas.freepdf.pdf.annotate.Stamps
@@ -153,6 +156,8 @@ sealed interface ViewerAction {
     data class Rotate(val pages: Set<Int>) : ViewerAction
     /** Trims [pages] by [margins], or shows them in full again when [margins] is null. */
     data class Crop(val pages: Set<Int>, val margins: CropMargins?) : ViewerAction
+    /** Adds a link over [box], an area of [page] as shown, leading to [target]. */
+    data class AddLink(val page: Int, val box: DisplayRect, val target: LinkTarget) : ViewerAction
     data class Delete(val pages: Set<Int>) : ViewerAction
     data class InsertBlank(val afterPage: Int) : ViewerAction
     data class Move(val from: Int, val to: Int) : ViewerAction
@@ -365,6 +370,7 @@ fun ViewerScreen(
                 ViewerAction.DiscardChanges -> viewModel.discardChanges()
                 is ViewerAction.Rotate -> viewModel.rotatePages(action.pages)
                 is ViewerAction.Crop -> viewModel.cropPages(action.pages, action.margins)
+                is ViewerAction.AddLink -> viewModel.addLink(action.page, action.box, action.target)
                 is ViewerAction.Delete -> viewModel.deletePages(action.pages)
                 is ViewerAction.InsertBlank -> viewModel.insertBlankPage(action.afterPage)
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
@@ -496,6 +502,11 @@ fun ViewerContent(
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     var extracting by rememberSaveable { mutableStateOf(false) }
     var splitting by rememberSaveable { mutableStateOf(false) }
+    // The address a tapped link leads to, while asking whether to open it; and the box just dragged for a new link.
+    var openingLink by rememberSaveable { mutableStateOf<String?>(null) }
+    var newLinkBox by remember { mutableStateOf<Pair<Int, DisplayRect>?>(null) }
+    val linkContext = LocalContext.current
+    val linkResources = LocalResources.current
     var cropping by rememberSaveable { mutableStateOf(false) }
     // What to do once the reader settles unsaved changes; non-null while the dialog shows.
     var leavePrompt by remember { mutableStateOf<LeavePrompt?>(null) }
@@ -861,6 +872,7 @@ fun ViewerContent(
                 }
                 mode == ViewerMode.Edit -> Column {
                     if (selectedTool == R.string.tool_add_text) EditHint(R.string.edit_hint_text)
+                    if (selectedTool == R.string.tool_add_link) EditHint(R.string.edit_hint_link)
                     ToolStrip(mode, selectedTool, onToolSelected = { label ->
                         when {
                             // Add image acts once: pick a picture and it lands on the page in view.
@@ -975,6 +987,20 @@ fun ViewerContent(
                                 },
                             )
                             }
+                        }
+                        if (mode == ViewerMode.Read) {
+                            val onPage = ready.links.filter { it.page == page }
+                            if (onPage.isNotEmpty()) {
+                                LinkLayer(page, onPage) { link ->
+                                    when (val target = link.target) {
+                                        is LinkTarget.Web -> openingLink = target.uri
+                                        is LinkTarget.Page -> scope.launch { listState.animateScrollToItem(target.index.coerceIn(0, pageCount - 1)) }
+                                    }
+                                }
+                            }
+                        }
+                        if (mode == ViewerMode.Edit && selectedTool == R.string.tool_add_link) {
+                            LinkBoxLayer(page) { box -> newLinkBox = page to box }
                         }
                         if (signTool == SignTool.FillForm) {
                             FormFieldLayer(ready.formFields.filter { it.page == page }) { field ->
@@ -1122,6 +1148,33 @@ fun ViewerContent(
             onExtract = {
                 extracting = false
                 onAction(ViewerAction.Extract(it))
+            },
+        )
+    }
+
+    openingLink?.let { address ->
+        OpenLinkDialog(
+            address = address,
+            onDismiss = { openingLink = null },
+            onOpen = {
+                openingLink = null
+                val opened = runCatching {
+                    linkContext.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse(address)).addCategory(Intent.CATEGORY_BROWSABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }.isSuccess
+                if (!opened) scope.launch { snackbarHostState.showSnackbar(linkResources.getString(R.string.link_open_failed)) }
+            },
+        )
+    }
+
+    newLinkBox?.let { (page, box) ->
+        AddLinkDialog(
+            pageCount = pageCount,
+            onDismiss = { newLinkBox = null },
+            onAdd = { target ->
+                newLinkBox = null
+                onAction(ViewerAction.AddLink(page, box, target))
             },
         )
     }
