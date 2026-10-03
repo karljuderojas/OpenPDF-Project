@@ -182,6 +182,12 @@ private fun StampFrame(
 @Composable
 private fun StampPreview(content: StampContent, heightPx: Float) {
     when (content) {
+        is StampContent.Image -> Image(
+            content.image.asImageBitmap(),
+            contentDescription = null,
+            contentScale = ContentScale.FillBounds,
+            modifier = Modifier.fillMaxSize(),
+        )
         is StampContent.Signature -> Image(
             content.image.asImageBitmap(),
             contentDescription = null,

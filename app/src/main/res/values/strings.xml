@@ -144,6 +144,8 @@
     <string name="sign_hint_date">Tap where today\'s date goes. Drag it to move it.</string>
     <string name="sign_hint_text">Tap where you want to type text. Drag it to move it.</string>
     <string name="sign_hint_checkmark">Tap a box to tick it. Drag the tick to move it.</string>
+    <string name="edit_hint_text">Tap where the text goes. Drag it to move it, or its corner to resize.</string>
+    <string name="image_failed">Could not open that picture.</string>
     <string name="stamp_delete">Delete</string>
     <string name="stamp_resize">Resize</string>
     <string name="finish">Finish</string>
@@ -256,6 +258,8 @@
     <string name="tool_about_signature">Draw your signature once, then tap to place it.</string>
     <string name="tool_about_initials">Draw your initials once, then tap to place them.</string>
     <string name="tool_about_date">Add today\'s date.</string>
+    <string name="tool_about_add_text">Type a heading, label or note straight onto the page.</string>
+    <string name="tool_about_add_image">Put a photo, logo or picture on the page and size it.</string>
     <string name="tool_about_text">Type a name, address or answer onto the page.</string>
     <string name="tool_about_checkmark">Tick a box on a form.</string>
     <string name="tool_about_highlight">Mark text in color.</string>
@@ -279,6 +283,8 @@
     <string name="tool_synonyms_signature">sign, signing, autograph, e-sign, esign, electronic signature</string>
     <string name="tool_synonyms_initials">initial, sign</string>
     <string name="tool_synonyms_date">today, day, time</string>
+    <string name="tool_synonyms_add_text">type, write, words, label, heading, edit</string>
+    <string name="tool_synonyms_add_image">picture, photo, logo, insert, gallery, edit</string>
     <string name="tool_synonyms_text">type, write, fill, form, name, address</string>
     <string name="tool_synonyms_checkmark">tick, check, checkbox, form</string>
     <string name="tool_synonyms_highlight">highlighter, marker, mark, color</string>
@@ -312,11 +318,25 @@
     <string name="settings_version">%1$s %2$s</string>
     <string name="settings_about_detail">Free and open source under the Apache 2.0 license. No ads, no account, and your files never leave this phone.</string>
     <string name="settings_source_code">Source code</string>
+    <!-- Open-documents switcher -->
+    <string name="open_documents_switch">Open documents: %1$d, switch</string>
+    <string name="open_documents_title">Open documents · %1$d</string>
+    <string name="open_documents_viewing">Viewing</string>
+    <string name="open_documents_close_all">Close all</string>
+    <string name="open_documents_open_another">Open another</string>
+    <!-- Reading modes -->
+    <string name="page_colors">Page colors</string>
+    <string name="page_colors_normal">Normal</string>
+    <string name="page_colors_night">Night</string>
+    <string name="page_colors_sepia">Sepia</string>
+    <string name="settings_reading">Reading</string>
+    <string name="settings_page_colors_detail">Night and sepia are easier on the eyes in the dark. Your PDF is not changed.</string>
     <!-- Tips -->
     <string name="tip_read_zoom">Pinch to zoom. Double-tap to go back to the full page.</string>
     <string name="tip_annotate">Pick a tool, then mark the page. Pick it again to scroll with one finger.</string>
     <string name="tip_sign">Pick Signature, then tap where you want to sign. You draw it once; it is saved on this phone.</string>
     <string name="tip_pages">Tap a page to select it, or tap the circles to pick several. Hold a page and drag it to move it.</string>
+    <string name="tip_edit">Add text or a picture, then drag it into place. Done writes it into the PDF.</string>
     <string name="tip_got_it">Got it</string>
     <string name="settings_tips">Tips</string>
     <string name="settings_show_tips">Show tips</string>

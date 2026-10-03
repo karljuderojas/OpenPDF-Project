@@ -65,6 +65,31 @@ class StampGeometryTest {
         assertEquals(0f, box.top, 0.0001f)
     }
 
+    @Test
+    fun editTextStartsLargerAndKeepsItsSize() {
+        val box = StampGeometry.textBox(tap, listOf("Draft"), letter, StampGeometry.EDIT_TEXT_SIZE) { it.length * 0.5f }
+        val fontSize = StampGeometry.fontSize(box, 1, letter)
+        assertEquals(StampGeometry.EDIT_TEXT_SIZE, fontSize, 0.01f)
+        assertOffset(tap, StampGeometry.textAnchor(box, fontSize, letter))
+    }
+
+    @Test
+    fun pictureIsCentredAndFitsHalfThePageWidth() {
+        val box = StampGeometry.imageBox(Offset(0.5f, 0.5f), 4000, 3000, letter)
+        // 4000x3000 fits half of 612 points wide (306) before a third of 792 high (264).
+        assertEquals(306f, box.width * letter.widthPt, 0.01f)
+        assertEquals(229.5f, box.height * letter.heightPt, 0.01f)
+        assertOffset(Offset(0.5f, 0.5f), Offset(box.left + box.width / 2, box.top + box.height / 2))
+        assertOffset(Offset(box.left, box.bottom), StampGeometry.imageAnchor(box))
+    }
+
+    @Test
+    fun smallPictureIsNotBlownUp() {
+        val box = StampGeometry.imageBox(Offset(0.5f, 0.5f), 100, 50, letter)
+        assertEquals(100f, box.width * letter.widthPt, 0.01f)
+        assertEquals(50f, box.height * letter.heightPt, 0.01f)
+    }
+
     private fun assertOffset(expected: Offset, actual: Offset) {
         assertEquals(expected.x, actual.x, 0.0001f)
         assertEquals(expected.y, actual.y, 0.0001f)

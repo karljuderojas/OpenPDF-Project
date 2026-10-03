@@ -59,4 +59,21 @@ class DocumentsTest {
         assertEquals(emptyList<DocumentEntry>(), documents().recent.value)
         assertEquals(listOf("A.pdf"), documents.open.value.map { it.name })
     }
+
+    @Test
+    fun atMostEightDocumentsStayOpenDroppingTheOldest() {
+        val documents = documents()
+        (1..10).forEach { documents.opened("content://$it", "$it.pdf", remember = false) }
+        assertEquals((10 downTo 3).map { "$it.pdf" }, documents.open.value.map { it.name })
+    }
+
+    @Test
+    fun closeAllEmptiesOpenDocumentsButKeepsHistory() {
+        val documents = documents()
+        documents.opened("content://a", "A.pdf", remember = true)
+        documents.opened("content://b", "B.pdf", remember = true)
+        documents.closeAll()
+        assertEquals(emptyList<DocumentEntry>(), documents.open.value)
+        assertEquals(listOf("B.pdf", "A.pdf"), documents.recent.value.map { it.name })
+    }
 }
