@@ -10,7 +10,10 @@ class CropBoxTest {
     fun draggingACornerMovesOnlyItsOwnEdges() {
         val box = CropBox(0.2f, 0.2f, 0.8f, 0.8f)
         val moved = box.dragged(2, 0.1f, -0.05f)
-        assertEquals(CropBox(0.2f, 0.2f, 0.9f, 0.75f), moved)
+        assertEquals(0.2f, moved.left, 0.0001f)
+        assertEquals(0.2f, moved.top, 0.0001f)
+        assertEquals(0.9f, moved.right, 0.0001f)
+        assertEquals(0.75f, moved.bottom, 0.0001f)
         val other = box.dragged(0, -0.1f, 0.1f)
         assertEquals(0.1f, other.left, 0.0001f)
         assertEquals(0.3f, other.top, 0.0001f)

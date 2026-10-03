@@ -39,7 +39,8 @@ class SignatureCutoutTest {
             val p = cut.getPixel(x, y)
             if (Color.alpha(p) > 200) {
                 solid++
-                assertEquals(Color.rgb(17, 17, 17), Color.rgb(Color.red(p), Color.green(p), Color.blue(p)))
+                // Partly see-through pixels are stored premultiplied, so allow for rounding.
+                assertTrue("pixel $x,$y was ${Integer.toHexString(p)}", listOf(Color.red(p), Color.green(p), Color.blue(p)).all { kotlin.math.abs(it - 17) <= 3 })
             }
         }
         assertTrue("solid ink pixels $solid", solid > 800)

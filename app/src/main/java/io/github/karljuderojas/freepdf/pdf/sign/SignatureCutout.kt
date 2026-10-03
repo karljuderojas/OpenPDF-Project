@@ -25,6 +25,9 @@ object SignatureCutout {
     /** ...and this share (more means the crop is mostly dark, not paper). */
     private const val MAX_INK = 0.45f
 
+    /** Paper is light: a crop whose middle brightness is below this is a dark desk or a shadow, not paper. */
+    private const val MIN_PAPER = 110
+
     /**
      * Cuts the ink out of [photo] and draws it in [argb] on a transparent bitmap trimmed to the
      * ink, with a small margin. Returns null when no signature can be told apart from the paper:
@@ -46,6 +49,7 @@ object SignatureCutout {
         // Paper brightness near each pixel: the average over a wide window, never below most of
         // the picture's median, so a dense signature does not pull its own paper level down.
         val median = luma.sortedArray()[luma.size / 2]
+        if (median < MIN_PAPER) return null
         val stride = w + 1
         val integral = LongArray(stride * (h + 1))
         for (y in 0 until h) {
