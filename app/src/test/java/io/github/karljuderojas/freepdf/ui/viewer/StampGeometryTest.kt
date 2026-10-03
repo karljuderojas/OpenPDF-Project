@@ -1,6 +1,7 @@
 package io.github.karljuderojas.freepdf.ui.viewer
 
 import androidx.compose.ui.geometry.Offset
+import io.github.karljuderojas.freepdf.pdf.DisplayRect
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import org.junit.Assert.assertEquals
@@ -18,6 +19,16 @@ class StampGeometryTest {
         assertEquals(160f, box.width * letter.widthPt, 0.01f)
         assertEquals(40f, box.height * letter.heightPt, 0.01f)
         assertOffset(tap, StampGeometry.signatureAnchor(box))
+    }
+
+    @Test
+    fun signatureFillsAPlaceToSign() {
+        // A 306 x 79.2 point field; a 400x100 image fits it at 306 x 76.5, centred, on its bottom.
+        val field = DisplayRect(0.25f, 0.5f, 0.75f, 0.6f)
+        val box = StampGeometry.fieldBox(field, 400, 100, letter)
+        assertEquals(306f, box.width * letter.widthPt, 0.01f)
+        assertEquals(76.5f, box.height * letter.heightPt, 0.01f)
+        assertOffset(Offset(0.5f, 0.6f), StampGeometry.signatureAnchor(box))
     }
 
     @Test

@@ -12,6 +12,7 @@ import com.tom_roush.pdfbox.pdmodel.interactive.form.PDButton
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDCheckBox
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDChoice
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDRadioButton
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDSignatureField
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDTerminalField
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDTextField
 import io.github.karljuderojas.freepdf.pdf.DisplayRect
@@ -52,10 +53,7 @@ object FormFiller {
     /** Every fillable box, in page order. Hidden and read-only fields are left out. */
     fun fields(document: PDDocument): List<FormField> {
         val form = document.documentCatalog.acroForm ?: return emptyList()
-        val pageOf = IdentityHashMap<COSDictionary, Int>()
-        document.pages.forEachIndexed { index, page ->
-            page.annotations.filterIsInstance<PDAnnotationWidget>().forEach { pageOf[it.cosObject] = index }
-        }
+        val pageOf = widgetPages(document)
         val fields = ArrayList<FormField>()
         for (field in form.fieldTree) {
             if (field !is PDTerminalField || field.isReadOnly) continue
@@ -77,18 +75,14 @@ object FormFiller {
                 else -> field.valueAsString.orEmpty()
             }
             for (widget in field.widgets) {
-                if (widget.isHidden || widget.isNoView) continue
-                val pageIndex = pageOf[widget.cosObject] ?: widget.page?.let { document.pages.indexOf(it) }?.takeIf { it >= 0 } ?: continue
-                val rect = widget.rectangle ?: continue
-                val page = document.getPage(pageIndex)
-                val crop = page.cropBox.let { PdfRect(it.lowerLeftX, it.lowerLeftY, it.upperRightX, it.upperRightY) }
+                val (pageIndex, box) = placeOf(document, pageOf, widget) ?: continue
                 val onState = (field as? PDButton)?.let { onStateOf(widget) }
                 fields += FormField(
                     name = field.fullyQualifiedName,
                     label = label,
                     kind = kind,
                     page = pageIndex,
-                    box = pdfToDisplay(PdfRect(rect.lowerLeftX, rect.lowerLeftY, rect.upperRightX, rect.upperRightY), page.rotation, crop),
+                    box = box,
                     value = value,
                     onState = onState,
                     checked = onState != null && widget.appearanceState?.name == onState,
@@ -99,6 +93,39 @@ object FormFiller {
             }
         }
         return fields.sortedBy { it.page }
+    }
+
+    /**
+     * Where the boxes of signature fields not signed yet are, as page and on-screen box, for
+     * guided signing (see [io.github.karljuderojas.freepdf.pdf.sign.SignatureFields]).
+     */
+    fun unsignedSignatureBoxes(document: PDDocument): List<Pair<Int, DisplayRect>> {
+        val form = document.documentCatalog.acroForm ?: return emptyList()
+        val pageOf = widgetPages(document)
+        return form.fieldTree.filterIsInstance<PDSignatureField>()
+            .filter { it.signature == null && !it.isReadOnly }
+            .flatMap { field -> field.widgets.mapNotNull { placeOf(document, pageOf, it) } }
+            // Invisible signature fields have an empty box; there is nowhere to sign them.
+            .filter { (_, box) -> box.right - box.left > 0.001f && box.bottom - box.top > 0.001f }
+    }
+
+    /** The page each widget is on, from the pages' own annotation lists. */
+    private fun widgetPages(document: PDDocument): IdentityHashMap<COSDictionary, Int> {
+        val pageOf = IdentityHashMap<COSDictionary, Int>()
+        document.pages.forEachIndexed { index, page ->
+            page.annotations.filterIsInstance<PDAnnotationWidget>().forEach { pageOf[it.cosObject] = index }
+        }
+        return pageOf
+    }
+
+    /** The page [widget] is on and where it appears there, or null if it is hidden or placed nowhere. */
+    private fun placeOf(document: PDDocument, pageOf: Map<COSDictionary, Int>, widget: PDAnnotationWidget): Pair<Int, DisplayRect>? {
+        if (widget.isHidden || widget.isNoView) return null
+        val pageIndex = pageOf[widget.cosObject] ?: widget.page?.let { document.pages.indexOf(it) }?.takeIf { it >= 0 } ?: return null
+        val rect = widget.rectangle ?: return null
+        val page = document.getPage(pageIndex)
+        val crop = page.cropBox.let { PdfRect(it.lowerLeftX, it.lowerLeftY, it.upperRightX, it.upperRightY) }
+        return pageIndex to pdfToDisplay(PdfRect(rect.lowerLeftX, rect.lowerLeftY, rect.upperRightX, rect.upperRightY), page.rotation, crop)
     }
 
     /**
