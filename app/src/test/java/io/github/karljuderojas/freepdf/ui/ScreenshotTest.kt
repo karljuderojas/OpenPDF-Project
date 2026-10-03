@@ -81,9 +81,9 @@ class ScreenshotTest {
     @Test
     fun viewerReadZoomed() {
         show { viewer(ViewerMode.Read) }
-        // Pinch out on the first page, then drag both fingers up to pan down to the signature line.
+        // Pinch out to about 2.5x on the first page while drifting both fingers up, which pans.
         composeRule.onNodeWithTag("page-list").performTouchInput {
-            pinch(Offset(440f, 1000f), Offset(200f, 500f), Offset(640f, 1200f), Offset(880f, 1700f))
+            pinch(Offset(440f, 1050f), Offset(340f, 700f), Offset(640f, 1250f), Offset(740f, 1300f))
         }
         captureRoot("viewer_read_zoomed")
     }

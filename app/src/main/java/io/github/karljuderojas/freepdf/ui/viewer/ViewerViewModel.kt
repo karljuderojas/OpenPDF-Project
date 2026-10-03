@@ -22,6 +22,7 @@ import io.github.karljuderojas.freepdf.pdf.displayToPdf
 import io.github.karljuderojas.freepdf.pdf.edit.EditSession
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
+import io.github.karljuderojas.freepdf.pdf.edit.PdfText
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.render.PdfRenderer
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStamper
@@ -41,6 +42,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
+import java.util.Locale
 import java.util.UUID
 
 sealed interface ViewerState {
@@ -145,8 +147,10 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun insertBlankPage(afterIndex: Int) = edit { document ->
-        val size = document.getPage(afterIndex).mediaBox
-        PageEditor.insertBlank(document, afterIndex + 1, size)
+        val neighbour = document.getPage(afterIndex)
+        PageEditor.insertBlank(document, afterIndex + 1, neighbour.mediaBox)
+        // A blank next to a rotated scan should face the same way as its neighbour.
+        document.getPage(afterIndex + 1).rotation = neighbour.rotation
     }
 
     fun movePage(from: Int, to: Int) = edit { PageEditor.move(it, from, to) }
@@ -208,7 +212,10 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun addDate(page: Int, at: Offset) {
-        val today = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date())
+        // The phone's own date format, unless it uses a script the bundled fonts cannot show
+        // (Arabic, Devanagari, CJK), in which case the English form is placed instead of "?".
+        val today = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date()).takeIf { PdfText.isLatinGreekOrCyrillic(it) }
+            ?: DateFormat.getDateInstance(DateFormat.MEDIUM, Locale.US).format(Date())
         addText(page, at, today)
     }
 

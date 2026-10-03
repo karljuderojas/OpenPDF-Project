@@ -35,6 +35,15 @@ object PdfText {
         }
     }
 
+    /** True when every letter in [text] is one Liberation Sans can show (digits and punctuation included). */
+    fun isLatinGreekOrCyrillic(text: String): Boolean = text.codePoints().allMatch { cp ->
+        !Character.isLetter(cp) || Character.UnicodeScript.of(cp) in SUPPORTED_SCRIPTS
+    } && text.codePoints().allMatch { !Character.isDigit(it) || Character.UnicodeBlock.of(it) == Character.UnicodeBlock.BASIC_LATIN }
+
+    private val SUPPORTED_SCRIPTS = setOf(
+        Character.UnicodeScript.LATIN, Character.UnicodeScript.GREEK, Character.UnicodeScript.CYRILLIC, Character.UnicodeScript.COMMON,
+    )
+
     /** Splits on line breaks and drops a trailing empty line left by a final Enter. */
     fun lines(text: String): List<String> = text.split('\n').dropLastWhile { it.isBlank() }.ifEmpty { listOf("") }
 

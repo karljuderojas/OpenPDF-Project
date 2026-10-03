@@ -53,6 +53,10 @@ class PageEditorTest {
             assertEquals("2026?10?3?", PdfText.printable("2026年10月3日", font))
             assertEquals("a b", PdfText.printable("a\tb", font))
             assertEquals(listOf("one", "two"), PdfText.lines("one\ntwo\n"))
+            assertTrue(PdfText.isLatinGreekOrCyrillic("3 paź 2026"))
+            assertTrue(PdfText.isLatinGreekOrCyrillic("3 окт. 2026 г."))
+            assertTrue(!PdfText.isLatinGreekOrCyrillic("2026年10月3日"))
+            assertTrue(!PdfText.isLatinGreekOrCyrillic("٣ أكتوبر ٢٠٢٦"))
         }
     }
 
