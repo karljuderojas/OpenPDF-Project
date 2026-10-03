@@ -8,8 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    outputs:
-      apk-url: ${{ steps.apk.outputs.artifact-url }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
@@ -19,22 +17,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - name: Build, unit test and lint
         run: ./gradlew assembleDebug testDebugUnitTest lintDebug
-      # Uploaded unzipped so the link opens straight to an installable .apk on a phone.
-      - name: Name the debug APK after its commit
-        env:
-          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: mv app/build/outputs/apk/debug/*.apk "freepdf-debug-${SHA::7}.apk"
+      # PRs still compile the app, but only main keeps an installable debug APK.
       - uses: actions/upload-artifact@v7
-        id: apk
+        if: github.event_name == 'push'
         with:
-          path: freepdf-debug-*.apk
-          archive: false
+          name: freepdf-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
 
   # Renders every screen (see ScreenshotTest) and posts the images on the pull request.
   screenshots:
-    # Waits for build so the comment can link its APK, but still runs when build fails (e.g. lint).
-    needs: build
-    if: "!cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository"
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: write        # push images to the "screenshots" branch
@@ -103,19 +95,12 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SHOTS_SHA: ${{ steps.publish.outputs.sha }}
-          APK_URL: ${{ needs.build.outputs.apk-url }}
         run: |
           marker="<!-- screenshots -->"
           {
             echo "$marker"
             echo "### Screenshots"
             echo "Rendered from ${HEAD_SHA::7} on a Pixel 7-sized screen."
-            echo
-            if [ -n "$APK_URL" ]; then
-              echo "📱 **[Download the debug APK for ${HEAD_SHA::7}]($APK_URL)** (sign in to GitHub first; the link expires with the run's artifacts after 90 days)."
-            else
-              echo "📱 No debug APK for ${HEAD_SHA::7}: the build job failed."
-            fi
             echo
             for f in app/build/outputs/roborazzi/*.png; do
               name=$(basename "$f" .png)
