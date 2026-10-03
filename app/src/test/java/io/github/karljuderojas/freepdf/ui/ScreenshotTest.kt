@@ -456,6 +456,15 @@ class ScreenshotTest {
 
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
+    fun viewerShare() {
+        show { viewer(ViewerMode.Read) }
+        composeRule.onNodeWithContentDescription("Share").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_share.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
     fun viewerPasswordAdd() {
         show { viewer(ViewerMode.More) }
         // The dialog's fields never let Compose go idle, so drive the clock by hand and capture
@@ -466,6 +475,16 @@ class ScreenshotTest {
         composeRule.onNodeWithText("Password").performClick()
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_password_add.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerShareSomePages() {
+        show { viewer(ViewerMode.Read) }
+        composeRule.onNodeWithContentDescription("Share").performClick()
+        composeRule.onNodeWithText("Some pages only").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_share_some_pages.png")
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
