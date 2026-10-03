@@ -104,6 +104,7 @@ import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.edit.TextEditing
+import io.github.karljuderojas.freepdf.pdf.edit.CropMargins
 import io.github.karljuderojas.freepdf.pdf.form.FormField
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
 import io.github.karljuderojas.freepdf.pdf.annotate.Stamps
@@ -151,6 +152,8 @@ sealed interface ViewerAction {
     data object DiscardChanges : ViewerAction
 
     data class Rotate(val pages: Set<Int>) : ViewerAction
+    /** Trims [pages] by [margins], or shows them in full again when [margins] is null. */
+    data class Crop(val pages: Set<Int>, val margins: CropMargins?) : ViewerAction
     data class Delete(val pages: Set<Int>) : ViewerAction
     data class InsertBlank(val afterPage: Int) : ViewerAction
     data class Move(val from: Int, val to: Int) : ViewerAction
@@ -366,6 +369,7 @@ fun ViewerScreen(
                 }
                 ViewerAction.DiscardChanges -> viewModel.discardChanges()
                 is ViewerAction.Rotate -> viewModel.rotatePages(action.pages)
+                is ViewerAction.Crop -> viewModel.cropPages(action.pages, action.margins)
                 is ViewerAction.Delete -> viewModel.deletePages(action.pages)
                 is ViewerAction.InsertBlank -> viewModel.insertBlankPage(action.afterPage)
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
@@ -499,6 +503,7 @@ fun ViewerContent(
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     var extracting by rememberSaveable { mutableStateOf(false) }
     var splitting by rememberSaveable { mutableStateOf(false) }
+    var cropping by rememberSaveable { mutableStateOf(false) }
     // What to do once the reader settles unsaved changes; non-null while the dialog shows.
     var leavePrompt by remember { mutableStateOf<LeavePrompt?>(null) }
     var showSwitcher by rememberSaveable { mutableStateOf(false) }
@@ -669,6 +674,7 @@ fun ViewerContent(
                 val after = selectedPages.max()
                 editPages(ViewerAction.InsertBlank(after), then = setOf(after + 1))
             }
+            R.string.tool_crop -> cropping = true
             R.string.tool_delete -> confirmDelete = true
             R.string.tool_extract -> extracting = true
             R.string.tool_merge -> onAction(ViewerAction.Merge)
@@ -1137,6 +1143,19 @@ fun ViewerContent(
             onExtract = {
                 extracting = false
                 onAction(ViewerAction.Extract(it))
+            },
+        )
+    }
+
+    if (cropping) {
+        CropPagesDialog(
+            pageCount = pageCount,
+            selectedPages = selectedPages.sorted(),
+            pageAspect = ready?.pageSizes?.getOrNull(selectedPage)?.aspectRatio ?: 0.77f,
+            onDismiss = { cropping = false },
+            onCrop = { pages, margins ->
+                cropping = false
+                editPages(ViewerAction.Crop(pages, margins), then = selectedPages)
             },
         )
     }

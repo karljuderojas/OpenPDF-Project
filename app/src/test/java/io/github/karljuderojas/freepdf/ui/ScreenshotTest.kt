@@ -11,6 +11,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -22,6 +23,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
@@ -59,6 +61,7 @@ import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
 import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
+import io.github.karljuderojas.freepdf.ui.files.UnsavedCloseDialog
 import io.github.karljuderojas.freepdf.ui.sign.CertificatePasswordDialog
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.home.HomeContent
@@ -218,6 +221,16 @@ class ScreenshotTest {
         files(
             open = listOf(sampleRecent[0], DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * HOUR)),
             recent = sampleRecent,
+        )
+    }
+
+    @Test
+    fun filesCloseUnsaved() = capture("files_close_unsaved") {
+        files(
+            open = listOf(sampleRecent[0], DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * HOUR)),
+            recent = sampleRecent,
+            unsaved = setOf("content://b"),
+            closing = true,
         )
     }
 
@@ -833,6 +846,22 @@ class ScreenshotTest {
 
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
+    fun viewerPagesCrop() {
+        show { viewer(ViewerMode.Pages, sixPages, selectedPage = 1) }
+        composeRule.onNodeWithText("Crop").performScrollTo()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Crop").performClick()
+        composeRule.waitForIdle()
+        // Trim a bit off three edges so the sketch shows what stays.
+        for ((tag, amount) in listOf("crop-left" to 0.1f, "crop-top" to 0.2f, "crop-right" to 0.05f)) {
+            composeRule.onNodeWithTag(tag).performSemanticsAction(SemanticsActions.SetProgress) { it(amount) }
+        }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_crop.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
     fun viewerPagesSplitEvery() {
         // With the last page selected there is nothing to split after it, so the dialog opens in
         // "every few pages" mode. Its text field never lets Compose go idle (see viewerPasswordAdd),
@@ -1137,8 +1166,9 @@ class ScreenshotTest {
     )
 
     @Composable
-    private fun files(open: List<DocumentEntry>, recent: List<DocumentEntry>) = shell(MainTab.Files) {
-        FilesContent(open, recent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {}, modifier = it, now = now)
+    private fun files(open: List<DocumentEntry>, recent: List<DocumentEntry>, unsaved: Set<String> = emptySet(), closing: Boolean = false) = shell(MainTab.Files) {
+        FilesContent(open, recent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {}, modifier = it, unsaved = unsaved, now = now)
+        if (closing) UnsavedCloseDialog(onSave = {}, onDiscard = {}, onCancel = {})
     }
 
     /** A tab's screen inside the bottom tab bar, as the app shows it. */
