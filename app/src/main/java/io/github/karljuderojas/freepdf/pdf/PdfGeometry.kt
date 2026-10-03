@@ -39,3 +39,19 @@ fun displayToPdf(nx: Float, ny: Float, rotation: Int, cropBox: PdfRect): PdfPoin
     }
     return PdfPoint(cropBox.left + u * cropBox.width, cropBox.top - v * cropBox.height)
 }
+
+/**
+ * The reverse of [displayToPdf]: where a point in PDF user space appears on the page as
+ * displayed, as fractions across and down (origin top-left).
+ */
+fun pdfToDisplay(x: Float, y: Float, rotation: Int, cropBox: PdfRect): Pair<Float, Float> {
+    // (u, v): fractions across and down the unrotated page.
+    val u = (x - cropBox.left) / cropBox.width
+    val v = (cropBox.top - y) / cropBox.height
+    return when (((rotation % 360) + 360) % 360) {
+        90 -> 1f - v to u
+        180 -> 1f - u to 1f - v
+        270 -> v to 1f - u
+        else -> u to v
+    }
+}
