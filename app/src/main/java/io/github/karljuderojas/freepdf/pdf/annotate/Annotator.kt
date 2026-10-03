@@ -38,7 +38,8 @@ object Annotator {
 
     /**
      * Highlights, underlines or strikes out one or more line rectangles (one per text line).
-     * [lineWidth] is the thickness of an underline or strikeout; highlights ignore it.
+     * [lineWidth] is the thickness of an underline or strikeout; highlights ignore it. [comment]
+     * is shown as the mark's note in other viewers.
      */
     fun markText(
         document: PDDocument,
@@ -47,6 +48,7 @@ object Annotator {
         kind: TextMarkup = TextMarkup.Highlight,
         color: Rgb = Rgb.Yellow,
         lineWidth: Float = 1f,
+        comment: String? = null,
         author: String? = null,
     ) {
         require(lines.isNotEmpty())
@@ -57,6 +59,7 @@ object Annotator {
                 listOf(it.left, it.top, it.right, it.top, it.left, it.bottom, it.right, it.bottom)
             }.toFloatArray()
             if (kind != TextMarkup.Highlight) borderStyle = PDBorderStyleDictionary().apply { width = lineWidth }
+            if (comment != null) contents = comment
             this.color = color.toPdColor()
             stamp(author)
         }
