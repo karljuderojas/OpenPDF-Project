@@ -985,7 +985,7 @@ class ScreenshotTest {
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerLinkOpen() {
-        val linked = sample.copy(links = listOf(PageLink(0, DisplayRect(0.1f, 0.1f, 0.6f, 0.15f), LinkTarget.Web("https://example.com/terms"))))
+        val linked = sample.copy(links = listOf(PageLink(0, 0, DisplayRect(0.1f, 0.1f, 0.6f, 0.15f), LinkTarget.Web("https://example.com/terms"))))
         show { viewer(ViewerMode.Read, linked) }
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("link-0-0").performClick()

@@ -4,8 +4,11 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.displayToPdf
+import io.github.karljuderojas.freepdf.pdf.edit.CropMargins
+import io.github.karljuderojas.freepdf.pdf.edit.PageCrop
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -38,6 +41,21 @@ class PageTextTest {
         words.forEach {
             assertTrue("${it.text} lies on the page", it.left >= 0f && it.right <= 1f && it.top >= 0f && it.bottom <= 1f)
             assertTrue("${it.text} has a size", it.right > it.left && it.bottom > it.top)
+        }
+    }
+
+    @Test
+    fun wordsInACroppedAwayMarginAreLeftOut() {
+        sample().use { document ->
+            val before = PageText.words(document, 0)
+            // The title sits a tenth of the way down the page, so a crop of the top third takes it away.
+            PageCrop.crop(document, listOf(0), CropMargins(top = 0.33f))
+            val after = PageText.words(document, 0)
+            assertTrue("fewer words after the crop", after.size < before.size)
+            assertNotEquals("Service", after.first().text)
+            after.forEach {
+                assertTrue("${it.text} lies on the page", it.left >= 0f && it.right <= 1f && it.top >= 0f && it.bottom <= 1f)
+            }
         }
     }
 

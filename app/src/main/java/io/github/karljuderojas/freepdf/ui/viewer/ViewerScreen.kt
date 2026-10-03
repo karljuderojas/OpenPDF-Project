@@ -84,6 +84,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -1769,7 +1770,8 @@ internal fun PageImage(
     }
     val colorFilter = remember(pageColors) { pageColors.matrix?.let { ColorFilter.colorMatrix(ColorMatrix(it)) } }
     Box(
-        modifier.aspectRatio(size.aspectRatio).background(pageColors.paper),
+        // Overlays (links, selections, marks) stay within the page even where their boxes reach past it.
+        modifier.aspectRatio(size.aspectRatio).clipToBounds().background(pageColors.paper),
         contentAlignment = Alignment.Center,
     ) {
         bitmap?.let {
