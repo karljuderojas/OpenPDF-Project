@@ -426,6 +426,31 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_delete.png")
     }
 
+    // The dialogs' page fields keep Compose from going idle, so drive the clock by hand.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesExtract() {
+        show { viewer(ViewerMode.Pages, selectedPage = 1) }
+        composeRule.onNodeWithText("Extract").performScrollTo()
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Extract").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_extract.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesSplit() {
+        show { viewer(ViewerMode.Pages, selectedPage = 0) }
+        composeRule.onNodeWithText("Split").performScrollTo()
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Split").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_split.png")
+    }
+
     @Test
     fun viewerMore() = capture("viewer_more") { viewer(ViewerMode.More) }
 
