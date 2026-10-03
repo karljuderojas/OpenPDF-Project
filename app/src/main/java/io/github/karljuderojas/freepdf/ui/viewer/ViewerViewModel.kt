@@ -12,9 +12,11 @@ import android.util.LruCache
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.IntRect
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget
 import io.github.karljuderojas.freepdf.FreePdfApp
@@ -47,6 +49,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -149,6 +152,15 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     /** The user's saved signature and initials, if they have drawn them. */
     val savedSignatures: StateFlow<Map<SignatureStore.Kind, Bitmap>> = _savedSignatures.asStateFlow()
 
+    private val _stamps = MutableStateFlow<List<PlacedStamp>>(emptyList())
+    private var nextStampId = 1L
+
+    // Stamps already on their way into the PDF, so a second commit does not draw them twice.
+    private var committing = emptySet<Long>()
+
+    /** Sign-mode stamps that can still be moved or resized; see [commitStamps]. */
+    val stamps: StateFlow<List<PlacedStamp>> = _stamps.asStateFlow()
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             _savedSignatures.value = SignatureStore.Kind.entries.mapNotNull { kind ->
@@ -174,6 +186,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         openedAt = Instant.now()
                         editLog.clear()
                     }
+                    _stamps.value = emptyList()
                     firstLoadLocked()
                 }
             }.onSuccess { remember(uri) }.getOrElse { ViewerState.Failed(it.message) }
@@ -202,6 +215,17 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             if (index >= current.pageCount) return@withLock null
             cache.get(key) ?: current.renderPage(index, widthPx).also { cache.put(key, it) }
         }
+    }
+
+    /**
+     * The part of page [index] in [region], rendered as if the page were [fullWidthPx] wide.
+     * Not cached: it is only good for one zoom and scroll position, and it is at most a
+     * screenful of pixels, so a zoomed screen never holds much more than two screenfuls.
+     */
+    suspend fun pageRegion(index: Int, fullWidthPx: Int, region: IntRect): Bitmap? = lock.withLock {
+        val current = renderer ?: return@withLock null
+        if (index >= current.pageCount) return@withLock null
+        current.renderRegion(index, fullWidthPx, region)
     }
 
     fun rotatePage(index: Int) = edit { PageEditor.rotate(it, index, 90) }
@@ -260,24 +284,23 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun saveSignature(kind: SignatureStore.Kind, image: Bitmap) {
+    fun saveSignature(kind: SignatureStore.Kind, image: Bitmap, method: SignatureMethod) {
         _savedSignatures.value += kind to image
+        signingPrefs.edit().putString(methodKey(kind), method.name).apply()
         viewModelScope.launch(Dispatchers.IO) {
             // Still usable in this session if the Keystore refuses; it just is not remembered.
             runCatching { signatureStore.save(kind, image) }
         }
     }
 
-    /** Stamps the saved signature or initials so they sit on the line the user tapped. */
+    /**
+     * Puts the saved signature or initials on the line the user tapped. Like the other Sign
+     * stamps, it can be moved and resized until [commitStamps] writes it into the PDF.
+     */
     fun placeSignature(page: Int, at: Offset, kind: SignatureStore.Kind) {
         val image = _savedSignatures.value[kind] ?: return
-        val what = if (kind == SignatureStore.Kind.Initials) "initials" else "signature"
-        edit(event = AuditEvent(AuditEvent.Type.Signed, SIGNER, detail = "$what on page ${page + 1}")) { document ->
-            val point = displayMapper(document, page)(at)
-            val maxWidth = if (kind == SignatureStore.Kind.Initials) 60f else 160f
-            val maxHeight = if (kind == SignatureStore.Kind.Initials) 32f else 56f
-            SignatureStamper.stamp(document, page, image, point, maxWidth, maxHeight)
-        }
+        val size = pageSize(page) ?: return
+        addStamp(page, StampContent.Signature(kind, image), StampGeometry.signatureBox(at, image.width, image.height, kind, size))
     }
 
     fun addDate(page: Int, at: Offset) {
@@ -290,16 +313,100 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addText(page: Int, at: Offset, text: String) = placeText(page, at, text, "text")
 
-    private fun placeText(page: Int, at: Offset, text: String, what: String) = edit(event = filled(what, page)) { document ->
-        PageEditor.addText(document, page, text, displayMapper(document, page)(at), fontSize = 11f)
+    private fun placeText(page: Int, at: Offset, text: String, what: String) {
+        val size = pageSize(page) ?: return
+        val content = StampContent.Text(text, what)
+        addStamp(page, content, StampGeometry.textBox(at, content.lines, size, ::emWidth))
     }
 
-    fun addCheckmark(page: Int, at: Offset) = edit(event = filled("checkmark", page)) { document ->
-        PageEditor.addCheckmark(document, page, displayMapper(document, page)(at))
+    fun addCheckmark(page: Int, at: Offset) {
+        val size = pageSize(page) ?: return
+        addStamp(page, StampContent.Checkmark, StampGeometry.checkmarkBox(at, size))
     }
 
-    private fun filled(what: String, page: Int) =
-        AuditEvent(AuditEvent.Type.FieldFilled, SIGNER, detail = "$what on page ${page + 1}")
+    fun moveStamp(id: Long, dx: Float, dy: Float) = updateStamp(id) { it.copy(box = it.box.moved(dx, dy)) }
+
+    fun resizeStamp(id: Long, factor: Float) = updateStamp(id) { stamp ->
+        pageSize(stamp.page)?.let { stamp.copy(box = stamp.box.scaled(factor, it)) } ?: stamp
+    }
+
+    fun deleteStamp(id: Long) = _stamps.update { stamps -> stamps.filter { it.id != id } }
+
+    /**
+     * Writes every placed stamp into the PDF where it now sits, one undo step each. Called on
+     * leaving Sign mode and before finishing, after which they are part of the page.
+     */
+    fun commitStamps() {
+        val placed = _stamps.value.filter { it.id !in committing }
+        if (placed.isEmpty()) return
+        committing = committing + placed.map { it.id }
+        viewModelScope.launch {
+            lock.withLock {
+                var failed = false
+                withContext(Dispatchers.IO) {
+                    val current = session ?: return@withContext
+                    placed.forEach { stamp ->
+                        runCatching { current.edit { document -> drawStamp(document, stamp) } }
+                            .onSuccess { editLog += auditEventFor(stamp).copy(at = Instant.now()) }
+                            .onFailure { failed = true }
+                    }
+                }
+                _state.value = reloadLocked()
+                // Taken off only now, so they stay on screen until the page shows them drawn in.
+                val done = placed.map { it.id }.toSet()
+                _stamps.update { stamps -> stamps.filter { it.id !in done } }
+                committing = committing - done
+                if (failed) _effects.send(ViewerEffect.Message(R.string.edit_failed))
+            }
+        }
+    }
+
+    private fun addStamp(page: Int, content: StampContent, box: StampBox) {
+        _stamps.update { it + PlacedStamp(nextStampId++, page, content, box) }
+    }
+
+    private fun updateStamp(id: Long, change: (PlacedStamp) -> PlacedStamp) =
+        _stamps.update { stamps -> stamps.map { if (it.id == id) change(it) else it } }
+
+    private fun pageSize(page: Int) = (_state.value as? ViewerState.Ready)?.pageSizes?.getOrNull(page)
+
+    private fun drawStamp(document: PDDocument, stamp: PlacedStamp) {
+        val size = displaySize(document, stamp.page)
+        val toPdf = displayMapper(document, stamp.page)
+        val box = stamp.box
+        when (val content = stamp.content) {
+            is StampContent.Signature -> SignatureStamper.stamp(
+                document, stamp.page, content.image, toPdf(StampGeometry.signatureAnchor(box)),
+                maxWidth = box.width * size.widthPt, maxHeight = box.height * size.heightPt,
+            )
+            is StampContent.Text -> {
+                val fontSize = StampGeometry.fontSize(box, content.lines.size, size)
+                PageEditor.addText(document, stamp.page, content.text, toPdf(StampGeometry.textAnchor(box, fontSize, size)), fontSize)
+            }
+            StampContent.Checkmark -> PageEditor.addCheckmark(
+                document, stamp.page, toPdf(StampGeometry.checkmarkAnchor(box, size)), StampGeometry.checkmarkSize(box, size),
+            )
+        }
+    }
+
+    private fun auditEventFor(stamp: PlacedStamp): AuditEvent {
+        val where = "on page ${stamp.page + 1}"
+        return when (val content = stamp.content) {
+            is StampContent.Signature -> {
+                val what = if (content.kind == SignatureStore.Kind.Initials) "initials" else "signature"
+                AuditEvent(AuditEvent.Type.Signed, SIGNER, detail = "$what $where")
+            }
+            is StampContent.Text -> AuditEvent(AuditEvent.Type.FieldFilled, SIGNER, detail = "${content.what} $where")
+            StampContent.Checkmark -> AuditEvent(AuditEvent.Type.FieldFilled, SIGNER, detail = "checkmark $where")
+        }
+    }
+
+    /** The page's size in points as it is shown, that is turned by its /Rotate. */
+    private fun displaySize(document: PDDocument, page: Int): PageSize {
+        val pdfPage = document.getPage(page)
+        val crop = pdfPage.cropBox
+        return if (pdfPage.rotation % 180 == 0) PageSize(crop.width, crop.height) else PageSize(crop.height, crop.width)
+    }
 
     /**
      * Builds the signed copy: everything placed so far, a signing certificate page naming
@@ -308,6 +415,8 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun finishSigning(name: String, consentText: String, seal: Boolean) {
         val uri = openedUri ?: return
+        // Queued ahead of the signed copy on the lock, so everything placed is in it.
+        commitStamps()
         _signerName.value = name
         signingPrefs.edit().putString(KEY_SIGNER_NAME, name).apply()
         viewModelScope.launch {
@@ -330,7 +439,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                                 name = name,
                                 email = null,
                                 signedAt = now,
-                                method = SignatureMethod.Drawn,
+                                method = signatureMethod(),
                                 reason = null,
                                 device = "${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}",
                                 consentText = consentText,
@@ -385,6 +494,15 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
+
+    /** How the saved signature (or, failing that, the initials) was made, for the audit page. */
+    private fun signatureMethod(): SignatureMethod =
+        listOf(SignatureStore.Kind.Signature, SignatureStore.Kind.Initials)
+            .firstNotNullOfOrNull { kind ->
+                signingPrefs.getString(methodKey(kind), null)?.let { name -> SignatureMethod.entries.firstOrNull { it.name == name } }
+            } ?: SignatureMethod.Drawn
+
+    private fun methodKey(kind: SignatureStore.Kind) = "method_${kind.name}"
 
     fun cancelSignedCopy() {
         pendingSignedCopy?.delete()
@@ -485,7 +603,12 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         pendingSplit = null
     }
 
+    /** Takes back the last stamp still being placed, or else the last edit. */
     fun undo() {
+        if (_stamps.value.isNotEmpty()) {
+            _stamps.update { it.dropLast(1) }
+            return
+        }
         viewModelScope.launch {
             lock.withLock {
                 withContext(Dispatchers.IO) {
@@ -624,6 +747,10 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         cache.evictAll()
         pendingSignedCopy?.delete()
     }
+
+    /** The width of one line of text in ems, as Helvetica sets it; a rough guess for other scripts. */
+    private fun emWidth(line: String): Float =
+        runCatching { PDType1Font.HELVETICA.getStringWidth(line) / 1000f }.getOrElse { line.length * 0.55f }
 
     private companion object {
         // A quarter of the heap, capped: bitmaps are the bulk of the app's memory, and a fixed
