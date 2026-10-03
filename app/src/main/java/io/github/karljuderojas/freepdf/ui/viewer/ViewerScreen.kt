@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
@@ -30,6 +31,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -58,6 +61,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -78,6 +82,7 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** What the viewer asks its view model to do. Page numbers are zero-based. */
@@ -91,6 +96,7 @@ sealed interface ViewerAction {
     data class Move(val from: Int, val to: Int) : ViewerAction
     data object Merge : ViewerAction
     data object Share : ViewerAction
+    data class Search(val query: String) : ViewerAction
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
     data class Stroke(val page: Int, val tool: AnnotateTool, val points: List<Offset>) : ViewerAction
@@ -113,6 +119,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
     val state by viewModel.state.collectAsStateWithLifecycle()
     val savedSignatures by viewModel.savedSignatures.collectAsStateWithLifecycle()
     val signerName by viewModel.signerName.collectAsStateWithLifecycle()
+    val search by viewModel.search.collectAsStateWithLifecycle()
     val resources = LocalResources.current
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -145,6 +152,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
         loadPage = viewModel::page,
         savedSignatures = savedSignatures,
         signerName = signerName,
+        search = search,
         snackbarHostState = snackbarHostState,
         onAction = { action ->
             when (action) {
@@ -157,6 +165,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
                 ViewerAction.Merge -> mergePicker.launch(arrayOf("application/pdf"))
                 ViewerAction.Share -> viewModel.share()
+                is ViewerAction.Search -> viewModel.search(action.query)
                 is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.tool.rgb)
                 is ViewerAction.Box -> when (action.tool) {
                     AnnotateTool.Highlight -> Annotator.TextMarkup.Highlight
@@ -195,6 +204,8 @@ fun ViewerContent(
     initialTool: Int? = null,
     savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
     signerName: String = "",
+    search: SearchResults = SearchResults(),
+    initialSearchQuery: String? = null,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onAction: (ViewerAction) -> Unit = {},
 ) {
@@ -209,6 +220,13 @@ fun ViewerContent(
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
+    var searching by rememberSaveable { mutableStateOf(initialSearchQuery != null) }
+    var query by rememberSaveable { mutableStateOf(initialSearchQuery.orEmpty()) }
+    var currentMatch by rememberSaveable { mutableIntStateOf(0) }
+    val searchFocus = remember { FocusRequester() }
+    var focusSearch by remember { mutableStateOf(false) }
+    var goingToPage by remember { mutableStateOf(false) }
+    var showingOutline by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val resources = LocalResources.current
 
@@ -260,8 +278,40 @@ fun ViewerContent(
         selectedTool = null
     }
 
-    BackHandler(enabled = mode != ViewerMode.Read || ready?.hasUnsavedChanges == true) {
-        if (mode != ViewerMode.Read) backToReading() else leave()
+    fun closeSearch() {
+        searching = false
+        query = ""
+        onAction(ViewerAction.Search(""))
+    }
+
+    // Typing pauses briefly before searching, so each keystroke does not start a new search.
+    LaunchedEffect(query, searching) {
+        if (!searching) return@LaunchedEffect
+        if (query.isNotBlank()) delay(SEARCH_DELAY_MS)
+        if (query.trim() != search.query) onAction(ViewerAction.Search(query))
+    }
+    LaunchedEffect(searching) {
+        if (searching && focusSearch) searchFocus.requestFocus()
+        focusSearch = false
+    }
+    LaunchedEffect(search.query) { currentMatch = 0 }
+    // Bring the current match into view, about a third of the way down the screen.
+    val shownMatch = search.matches.getOrNull(currentMatch)
+    LaunchedEffect(shownMatch?.page, currentMatch, search.query) {
+        val match = shownMatch ?: return@LaunchedEffect
+        val size = ready?.pageSizes?.getOrNull(match.page) ?: return@LaunchedEffect
+        val viewport = listState.layoutInfo.viewportSize
+        val pageHeight = viewport.width / size.aspectRatio
+        val top = match.boxes.minOfOrNull { it.top } ?: 0f
+        listState.animateScrollToItem(match.page, (top * pageHeight - viewport.height / 3f).toInt().coerceAtLeast(0))
+    }
+
+    BackHandler(enabled = mode != ViewerMode.Read || searching || ready?.hasUnsavedChanges == true) {
+        when {
+            mode != ViewerMode.Read -> backToReading()
+            searching -> closeSearch()
+            else -> leave()
+        }
     }
 
     Scaffold(
@@ -269,23 +319,50 @@ fun ViewerContent(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        when {
-                            mode != ViewerMode.Read -> stringResource(mode.label)
-                            ready != null -> stringResource(R.string.page_of, currentPage + 1, pageCount)
-                            else -> stringResource(R.string.app_name)
-                        },
-                    )
+                    when {
+                        mode == ViewerMode.Read && searching -> SearchField(
+                            query = query,
+                            onQueryChange = { query = it },
+                            focusRequester = searchFocus,
+                        )
+                        mode != ViewerMode.Read -> Text(stringResource(mode.label))
+                        // Tapping "Page 3 of 12" asks which page to go to.
+                        ready != null -> Text(
+                            stringResource(R.string.page_of, currentPage + 1, pageCount),
+                            modifier = Modifier
+                                .clickable(onClickLabel = stringResource(R.string.go_to_page)) { goingToPage = true }
+                                .testTag("page-indicator"),
+                        )
+                        else -> Text(stringResource(R.string.app_name))
+                    }
                 },
                 navigationIcon = {
                     if (mode == ViewerMode.Read) {
-                        IconButton(onClick = { leave() }) {
+                        IconButton(onClick = { if (searching) closeSearch() else leave() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                         }
                     }
                 },
                 actions = {
-                    if (mode == ViewerMode.Read) {
+                    if (mode == ViewerMode.Read && searching) {
+                        SearchStepper(search, currentMatch) { step ->
+                            val count = search.matches.size
+                            if (count > 0) currentMatch = (currentMatch + step + count) % count
+                        }
+                    } else if (mode == ViewerMode.Read) {
+                        if (ready != null) {
+                            IconButton(onClick = {
+                                focusSearch = true
+                                searching = true
+                            }) {
+                                Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.search))
+                            }
+                            if (ready.outline.isNotEmpty()) {
+                                IconButton(onClick = { showingOutline = true }) {
+                                    Icon(Icons.Filled.Menu, contentDescription = stringResource(R.string.contents))
+                                }
+                            }
+                        }
                         if (ready?.hasUnsavedChanges == true) {
                             TextButton(onClick = { onAction(ViewerAction.Save) }) { Text(stringResource(R.string.save)) }
                         }
@@ -309,6 +386,7 @@ fun ViewerContent(
         bottomBar = {
             when {
                 ready == null -> Unit
+                mode == ViewerMode.Read && searching -> Unit
                 mode == ViewerMode.Read -> ModeBar(onModeSelected = {
                     mode = it
                     if (it == ViewerMode.Pages) selectedPage = currentPage
@@ -368,6 +446,10 @@ fun ViewerContent(
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
                     val signTool = SignTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Sign }
                     PageList(ready.pageSizes, ready.revision, loadPage, listState) { page ->
+                        if (mode == ViewerMode.Read && searching) {
+                            val onPage = search.matches.withIndex().filter { it.value.page == page }
+                            if (onPage.isNotEmpty()) SearchHighlights(onPage, currentMatch)
+                        }
                         if (signTool != null) {
                             TapLayer(page) { at ->
                                 val kind = signTool.signatureKind
@@ -396,6 +478,28 @@ fun ViewerContent(
                 }
             }
         }
+    }
+
+    if (goingToPage) {
+        GoToPageDialog(
+            pageCount = pageCount,
+            onDismiss = { goingToPage = false },
+            onGo = {
+                goingToPage = false
+                returnToPage = it
+            },
+        )
+    }
+
+    if (showingOutline && ready != null) {
+        OutlineDialog(
+            outline = ready.outline,
+            onDismiss = { showingOutline = false },
+            onGo = {
+                showingOutline = false
+                returnToPage = it
+            },
+        )
     }
 
     if (confirmDelete) {
@@ -586,5 +690,7 @@ private fun TextEntryDialog(@StringRes title: Int, @StringRes hint: Int, onDismi
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
+
+private const val SEARCH_DELAY_MS = 300L
 
 private val AnnotateTool.rgb get() = Annotator.Rgb(color.red, color.green, color.blue)

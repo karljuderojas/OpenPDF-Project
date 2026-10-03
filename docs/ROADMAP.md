@@ -9,7 +9,8 @@ Goal: the features people use in PDFGear and Xodo, free, offline and open source
 - ✅ Continuous vertical scroll with PDFium rendering and a bitmap cache
 - ✅ Pinch to zoom (basic: scales the whole list)
 - ⬜ Proper zoom and pan with sharp re-rendering at high zoom (tiled rendering)
-- ⬜ Text search, outline/bookmarks, go to page, page thumbnails
+- ✅ Text search with highlighted matches and previous/next, the outline (Contents), go to page (tap "Page 3 of 12")
+- ⬜ Page thumbnails while reading
 - ⬜ Text selection with a Highlight / Underline / Note popup
 - ✅ Files tab: documents open this session on top, recent history grouped by Today / Yesterday / Earlier, "Open file" through Android's file picker (stored on the device only)
 - ⬜ Switcher between open documents, tab style

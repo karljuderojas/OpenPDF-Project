@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -20,11 +21,15 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.DocumentEntry
+import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
+import io.github.karljuderojas.freepdf.pdf.render.PageBox
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
+import io.github.karljuderojas.freepdf.ui.viewer.SearchResults
+import io.github.karljuderojas.freepdf.ui.viewer.TextMatch
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerContent
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerMode
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerState
@@ -91,6 +96,47 @@ class ScreenshotTest {
     @Test
     fun viewerUnsaved() = capture("viewer_read_unsaved") {
         viewer(ViewerMode.Read, sample.copy(canUndo = true, hasUnsavedChanges = true))
+    }
+
+    @Test
+    fun viewerSearch() = capture("viewer_search") {
+        // Where "Client" sits in the sample, from pdftotext -bbox, in points from the top left.
+        fun match(page: Int, left: Float, top: Float, right: Float, bottom: Float) =
+            TextMatch(page, listOf(PageBox(left / 612f, top / 792f, right / 612f, bottom / 792f)))
+        val results = SearchResults(
+            query = "Client",
+            matches = listOf(
+                match(0, 93.0f, 165.5f, 118.0f, 175.2f),
+                match(0, 202.7f, 293.5f, 229.6f, 303.2f),
+                match(0, 424.5f, 350.5f, 451.4f, 360.2f),
+                match(0, 170.6f, 407.5f, 197.5f, 417.2f),
+                match(1, 396.5f, 138.5f, 423.3f, 148.2f),
+                match(1, 72.0f, 343.2f, 96.3f, 352.0f),
+            ),
+        )
+        viewer(ViewerMode.Read, search = results, searchQuery = "Client")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerGoToPage() {
+        show { viewer(ViewerMode.Read) }
+        composeRule.onNodeWithTag("page-indicator").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_go_to_page.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerOutline() {
+        val outline = listOf(OutlineItem("Service Agreement", 0, 0)) +
+            listOf("1. Services", "2. Timeline", "3. Fees and payment", "4. Changes", "5. Ownership")
+                .map { OutlineItem(it, 0, 1) } +
+            listOf("6. Confidentiality", "7. Termination", "Signatures").map { OutlineItem(it, 1, 1) }
+        show { viewer(ViewerMode.Read, sample.copy(outline = outline)) }
+        composeRule.onNodeWithContentDescription("Contents").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_outline.png")
     }
 
     @Test
@@ -207,6 +253,8 @@ class ScreenshotTest {
         tool: Int? = null,
         savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
         signerName: String = "",
+        search: SearchResults = SearchResults(),
+        searchQuery: String? = null,
     ) {
         ViewerContent(
             state = state,
@@ -217,6 +265,8 @@ class ScreenshotTest {
             initialTool = tool,
             savedSignatures = savedSignatures,
             signerName = signerName,
+            search = search,
+            initialSearchQuery = searchQuery,
         )
     }
 
