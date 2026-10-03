@@ -7,6 +7,7 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import io.github.karljuderojas.freepdf.R
 import java.io.File
+import java.util.UUID
 
 /** Sends a PDF to any app through Android's share sheet. Nothing goes through a FreePDF server. */
 object Sharing {
@@ -67,14 +68,21 @@ object Sharing {
     }
 
     /**
-     * The empty folder that files being shared go in. One share at a time: older files are only
-     * useful until the share completes.
+     * A new, empty folder for the files of one share, under cache/shared (which file_paths.xml
+     * covers, subfolders included). Each share gets its own so a share sheet or receiving app
+     * still reading an earlier share's file does not lose it; folders older than [MAX_SHARED_AGE_MS]
+     * are cleared out here, as by then the share is over.
      */
-    fun sharedFolder(context: Context): File {
-        val dir = File(context.cacheDir, "shared")
-        dir.deleteRecursively()
-        return dir.apply { mkdirs() }
+    fun sharedFolder(context: Context, now: Long = System.currentTimeMillis()): File {
+        val root = File(context.cacheDir, "shared")
+        root.listFiles()?.forEach { entry ->
+            if (now - entry.lastModified() > MAX_SHARED_AGE_MS) entry.deleteRecursively()
+        }
+        return File(root, "$now-${UUID.randomUUID().toString().take(8)}").apply { mkdirs() }
     }
+
+    /** How long a shared copy stays in the cache: long enough for any share sheet to finish with it. */
+    const val MAX_SHARED_AGE_MS = 60 * 60 * 1000L
 
     /** [name] without characters that file systems refuse. */
     fun safeName(name: String): String = name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
