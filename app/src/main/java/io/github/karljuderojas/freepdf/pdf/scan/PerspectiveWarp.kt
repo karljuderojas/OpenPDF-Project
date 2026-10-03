@@ -20,16 +20,16 @@ object PerspectiveWarp {
         return max(1, (width * scale).toInt()) to max(1, (height * scale).toInt())
     }
 
-    /** Cuts [quad] out of [photo] and stretches it to fill a new opaque bitmap. */
+    /**
+     * Cuts [quad] out of [photo] and stretches it to fill a new opaque bitmap. A quad no matrix can
+     * map (collapsed or twisted; [Quad.isUsable] is false for it) gives the whole photo instead of
+     * a corner of it drawn at 1:1.
+     */
     fun warp(photo: Bitmap, quad: Quad, maxSide: Int): Bitmap {
-        val (w, h) = outputSize(quad, photo.width, photo.height, maxSide)
-        val source = FloatArray(8)
-        quad.corners.forEachIndexed { i, c ->
-            source[i * 2] = c.x * photo.width
-            source[i * 2 + 1] = c.y * photo.height
-        }
-        val target = floatArrayOf(0f, 0f, w.toFloat(), 0f, w.toFloat(), h.toFloat(), 0f, h.toFloat())
-        val matrix = Matrix().apply { setPolyToPoly(source, 0, target, 0, 4) }
+        val matrix = Matrix()
+        val shape = if (matrix.setPolyToPoly(polygonOf(quad, photo), 0, targetOf(quad, photo, maxSide), 0, 4)) quad else Quad.inset(0f)
+        if (shape !== quad) matrix.setPolyToPoly(polygonOf(shape, photo), 0, targetOf(shape, photo, maxSide), 0, 4)
+        val (w, h) = outputSize(shape, photo.width, photo.height, maxSide)
         val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         Canvas(out).apply {
             drawColor(Color.WHITE)
@@ -38,5 +38,21 @@ object PerspectiveWarp {
         // Opaque, so the PDF stores it as a compact JPEG rather than lossless.
         out.setHasAlpha(false)
         return out
+    }
+
+    /** [quad]'s corners in [photo]'s pixels, as x, y pairs. */
+    private fun polygonOf(quad: Quad, photo: Bitmap): FloatArray {
+        val source = FloatArray(8)
+        quad.corners.forEachIndexed { i, c ->
+            source[i * 2] = c.x * photo.width
+            source[i * 2 + 1] = c.y * photo.height
+        }
+        return source
+    }
+
+    /** The corners of the output bitmap for [quad], as x, y pairs. */
+    private fun targetOf(quad: Quad, photo: Bitmap, maxSide: Int): FloatArray {
+        val (w, h) = outputSize(quad, photo.width, photo.height, maxSide)
+        return floatArrayOf(0f, 0f, w.toFloat(), 0f, w.toFloat(), h.toFloat(), 0f, h.toFloat())
     }
 }

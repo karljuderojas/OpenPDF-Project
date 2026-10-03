@@ -6,6 +6,8 @@ import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationMarkup
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
 import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.displayToPdf
+import io.github.karljuderojas.freepdf.pdf.edit.CropMargins
+import io.github.karljuderojas.freepdf.pdf.edit.PageCrop
 import io.github.karljuderojas.freepdf.pdf.text.PageText
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -50,6 +52,17 @@ class MarksTest {
         marks.forEach {
             assertTrue(it.left < it.right && it.top < it.bottom)
             assertTrue(it.modified != null)
+        }
+    }
+
+    @Test
+    fun aMarkInACroppedAwayMarginIsNotListed() {
+        marked().use { document ->
+            // The note on page 2 sits at y = 500pt, just over a third of the way down an 11in page.
+            assertEquals(1, Marks.list(document).count { it.page == 1 })
+            PageCrop.crop(document, listOf(1), CropMargins(top = 0.45f))
+            assertTrue(Marks.list(document).none { it.page == 1 })
+            assertEquals(2, Marks.list(document).count { it.page == 0 })
         }
     }
 

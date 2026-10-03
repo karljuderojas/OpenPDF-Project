@@ -520,6 +520,11 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     /** Adds a link over [box] on [page] (fractions of the page as shown) that leads to [target]. */
     fun addLink(page: Int, box: DisplayRect, target: LinkTarget) = edit { PageLinks.add(it, page, box, target) }
 
+    /** Points the link at [index] in [page]'s annotations (see [PageLink.index]) at [target] instead. */
+    fun changeLink(page: Int, index: Int, target: LinkTarget) = edit { PageLinks.update(it, page, index, target) }
+
+    fun removeLink(page: Int, index: Int) = edit { PageLinks.remove(it, page, index) }
+
     fun deletePages(pages: Set<Int>) {
         val pageCount = (_state.value as? ViewerState.Ready)?.pageSizes?.size ?: return
         if (pages.size >= pageCount) {
