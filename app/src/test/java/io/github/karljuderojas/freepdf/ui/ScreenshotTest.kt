@@ -204,6 +204,7 @@ class ScreenshotTest {
         // so drive the clock by hand from here.
         composeRule.mainClock.autoAdvance = false
         composeRule.mainClock.advanceTimeBy(1_000)
+        composeRule.onNodeWithTag("form-field-input").assertExists()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_fill_form_text.png")
     }
 
