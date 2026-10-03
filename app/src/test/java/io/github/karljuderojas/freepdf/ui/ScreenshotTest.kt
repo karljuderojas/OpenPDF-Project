@@ -222,6 +222,17 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerReflow() = capture("viewer_reflow") { viewer(ViewerMode.Read, reflow = true) }
+
+    @Test
+    fun viewerReflowNightLarge() = capture("viewer_reflow_night_large") {
+        viewer(ViewerMode.Read, reflow = true, pageColors = PageColors.Night, readingTextSize = 26)
+    }
+
+    @Test
+    fun viewerReflowSepia() = capture("viewer_reflow_sepia") { viewer(ViewerMode.Read, reflow = true, pageColors = PageColors.Sepia) }
+
+    @Test
     fun filesCloseUnsaved() = capture("files_close_unsaved") {
         files(
             open = listOf(sampleRecent[0], DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * HOUR)),
@@ -1179,6 +1190,8 @@ class ScreenshotTest {
         openDocuments: List<DocumentEntry> = emptyList(),
         unsavedDocuments: Set<String> = emptySet(),
         pageColors: PageColors = PageColors.Normal,
+        reflow: Boolean = false,
+        readingTextSize: Int = 18,
         tip: Int? = null,
         stamps: List<PlacedStamp> = emptyList(),
         selectedStamp: Long? = null,
@@ -1215,6 +1228,8 @@ class ScreenshotTest {
             unsavedDocuments = unsavedDocuments,
             currentUri = openDocuments.firstOrNull()?.uri,
             pageColors = pageColors,
+            initialReflow = reflow,
+            readingTextSize = readingTextSize,
             tip = tip,
             stamps = stamps,
             initialSelectedStamp = selectedStamp,
