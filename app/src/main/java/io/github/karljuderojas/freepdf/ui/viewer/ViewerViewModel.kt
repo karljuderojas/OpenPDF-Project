@@ -29,13 +29,19 @@ import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.render.PdfRenderer
 import io.github.karljuderojas.freepdf.pdf.sign.AuditEvent
 import io.github.karljuderojas.freepdf.pdf.sign.AuditTrail
+import io.github.karljuderojas.freepdf.pdf.sign.CertificateInfo
+import io.github.karljuderojas.freepdf.pdf.sign.CertificateStore
 import io.github.karljuderojas.freepdf.pdf.sign.DocumentHash
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureReport
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStamper
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureVerifier
 import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
 import io.github.karljuderojas.freepdf.pdf.sign.SignerRecord
 import io.github.karljuderojas.freepdf.pdf.sign.SigningIdentity
+import io.github.karljuderojas.freepdf.pdf.sign.TimestampClient
+import io.github.karljuderojas.freepdf.pdf.sign.info
 import io.github.karljuderojas.freepdf.share.Sharing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -49,6 +55,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.security.cert.CertificateExpiredException
+import java.security.cert.CertificateNotYetValidException
 import java.text.DateFormat
 import java.time.Instant
 import java.util.Date
@@ -61,6 +69,7 @@ sealed interface ViewerState {
     /**
      * [revision] changes after every edit, so pages already on screen are rendered again.
      * [hasSignature] is true once a signature or initials are placed, which offers Finish.
+     * [signatures] are the digital signatures the file had when it was opened.
      */
     data class Ready(
         val pageSizes: List<PageSize>,
@@ -68,6 +77,7 @@ sealed interface ViewerState {
         val canUndo: Boolean = false,
         val hasUnsavedChanges: Boolean = false,
         val hasSignature: Boolean = false,
+        val signatures: List<SignatureReport> = emptyList(),
     ) : ViewerState
 
     data class Failed(val message: String?) : ViewerState
@@ -104,6 +114,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     private var openedAt = Instant.now()
     private val editLog = ArrayList<AuditEvent?>()
 
+    /** What [SignatureVerifier] found in the file as opened. */
+    private var signatures: List<SignatureReport> = emptyList()
+
     /** The finished signed copy, in the cache, waiting for the user to pick where it goes. */
     private var pendingSignedCopy: File? = null
 
@@ -112,6 +125,15 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     /** The name typed at the last Finish, to fill in next time. */
     val signerName: StateFlow<String> = _signerName.asStateFlow()
+
+    private val certificates = CertificateStore(signingPrefs)
+    private val _certificate = MutableStateFlow<CertificateInfo?>(null)
+
+    /** The imported certificate that seals signed copies; null for this phone's own. */
+    val certificate: StateFlow<CertificateInfo?> = _certificate.asStateFlow()
+
+    private val _timestampsOn = MutableStateFlow(certificates.timestampsOn)
+    val timestampsOn: StateFlow<Boolean> = _timestampsOn.asStateFlow()
 
     // Guards the renderer and the working copy: PDFium renders one page at a time, and an edit
     // swaps both the file and the renderer underneath any page that is mid-render.
@@ -135,6 +157,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             _savedSignatures.value = SignatureStore.Kind.entries.mapNotNull { kind ->
                 runCatching { signatureStore.load(kind) }.getOrNull()?.let { kind to it }
             }.toMap()
+            _certificate.value = certificates.imported()?.info()
         }
     }
 
@@ -154,6 +177,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         originalSha256 = newSession.workingFile.inputStream().use { DocumentHash.sha256(it) }
                         openedAt = Instant.now()
                         editLog.clear()
+                        signatures = SignatureVerifier().verify(newSession.workingFile)
                     }
                     reloadLocked()
                 }
@@ -268,10 +292,47 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     private fun filled(what: String, page: Int) =
         AuditEvent(AuditEvent.Type.FieldFilled, SIGNER, detail = "$what on page ${page + 1}")
 
+    /** Imports a .p12/.pfx certificate to seal signed copies with, replacing any earlier one. */
+    fun importCertificate(uri: Uri, password: CharArray) {
+        viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("Cannot read $uri")
+                    certificates.import(bytes, password).info()
+                }
+            }
+            password.fill(' ')
+            result.onSuccess { _certificate.value = it }
+            _effects.send(
+                ViewerEffect.Message(
+                    when (result.exceptionOrNull()) {
+                        null -> R.string.certificate_imported
+                        is CertificateExpiredException, is CertificateNotYetValidException -> R.string.certificate_expired
+                        else -> R.string.certificate_import_failed
+                    },
+                ),
+            )
+        }
+    }
+
+    fun removeCertificate() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { certificates.remove() }
+            _certificate.value = null
+            _effects.send(ViewerEffect.Message(R.string.certificate_removed))
+        }
+    }
+
+    fun setTimestamps(on: Boolean) {
+        certificates.timestampsOn = on
+        _timestampsOn.value = on
+    }
+
     /**
      * Builds the signed copy: everything placed so far, a signing certificate page naming
-     * [name] with the [consentText] they agreed to, and, if [seal], a digital signature from a
-     * key kept in this phone's Keystore. The user then picks where to save it.
+     * [name] with the [consentText] they agreed to, and, if [seal], a digital signature from the
+     * imported certificate or else a key made in this phone's Keystore, timestamped if the user
+     * turned that on. The user then picks where to save it.
      */
     fun finishSigning(name: String, consentText: String, seal: Boolean) {
         val uri = openedUri ?: return
@@ -303,24 +364,28 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                                 consentText = consentText,
                             ),
                         )
-                        // One key per name, so the certificate always names whoever is signing.
+                        // One device key per name, so its certificate always names whoever is signing.
                         val identity = if (seal) {
-                            SigningIdentity.deviceIdentity(name, "freepdf-signing-" + DocumentHash.sha256(name.toByteArray()).take(16))
+                            certificates.imported()
+                                ?: SigningIdentity.deviceIdentity(name, "freepdf-signing-" + DocumentHash.sha256(name.toByteArray()).take(16))
                         } else {
                             null
                         }
+                        val timestamps = TimestampClient().takeIf { seal && certificates.timestampsOn }
                         val out = File(context.cacheDir, "signed/${UUID.randomUUID()}.pdf").apply { parentFile?.mkdirs() }
-                        out.outputStream().use { output ->
-                            SignedCopy.write(current.workingFile, trail, name, identity, output, File(out.path + ".tmp"))
+                        val timestamped = out.outputStream().use { output ->
+                            SignedCopy.write(current.workingFile, trail, name, identity, output, File(out.path + ".tmp"), timestamps)
                         }
                         pendingSignedCopy?.delete()
                         pendingSignedCopy = out
-                        SignedCopy.suggestedName(documentName)
+                        SignedCopy.suggestedName(documentName) to (timestamps != null && !timestamped)
                     }
                 }
             }
-            copy.onSuccess { _effects.send(ViewerEffect.SaveSigned(it)) }
-                .onFailure { _effects.send(ViewerEffect.Message(R.string.sign_failed)) }
+            copy.onSuccess { (suggestedName, timestampMissing) ->
+                if (timestampMissing) _effects.send(ViewerEffect.Message(R.string.timestamp_skipped))
+                _effects.send(ViewerEffect.SaveSigned(suggestedName))
+            }.onFailure { _effects.send(ViewerEffect.Message(R.string.sign_failed)) }
         }
     }
 
@@ -479,7 +544,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         val next = PdfRenderer.open(context, Uri.fromFile(current.workingFile))
         renderer = next
         val hasSignature = editLog.any { it?.type == AuditEvent.Type.Signed }
-        return ViewerState.Ready(next.pageSizes, revision, current.canUndo, current.hasUnsavedChanges, hasSignature)
+        return ViewerState.Ready(next.pageSizes, revision, current.canUndo, current.hasUnsavedChanges, hasSignature, signatures)
     }
 
     /** Lists [uri] in the Files tab; in the history too if the app can reopen it later. */

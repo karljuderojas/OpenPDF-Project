@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+        DigiCert's public timestamp server, the fallback for signing timestamps, only speaks plain
+        HTTP. That is safe for RFC 3161: the reply is signed by DigiCert and checked before use.
+    -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">timestamp.digicert.com</domain>
+    </domain-config>
+</network-security-config>

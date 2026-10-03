@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import io.github.karljuderojas.freepdf.R
+import io.github.karljuderojas.freepdf.pdf.sign.CertificateInfo
 
 /**
  * The last step of signing: the signer's name, the digital seal, and consent to sign
@@ -38,6 +39,7 @@ import io.github.karljuderojas.freepdf.R
 @Composable
 fun FinishSigningDialog(
     initialName: String,
+    certificate: CertificateInfo? = null,
     onDismiss: () -> Unit,
     onFinish: (name: String, consentText: String, seal: Boolean) -> Unit,
 ) {
@@ -63,7 +65,8 @@ fun FinishSigningDialog(
                     Column {
                         Text(stringResource(R.string.finish_seal), style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            stringResource(R.string.finish_seal_detail),
+                            if (certificate == null) stringResource(R.string.finish_seal_detail)
+                            else stringResource(R.string.finish_seal_detail_imported, certificate.name, certificate.issuer),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

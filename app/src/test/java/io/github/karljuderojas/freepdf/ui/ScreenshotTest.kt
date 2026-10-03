@@ -21,7 +21,10 @@ import com.github.takahirom.roborazzi.captureScreenRoboImage
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
+import io.github.karljuderojas.freepdf.pdf.sign.CertificateInfo
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureReport
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
+import io.github.karljuderojas.freepdf.pdf.sign.TimestampReport
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
@@ -33,6 +36,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.time.Instant
 import java.util.Calendar
 
 /**
@@ -191,6 +195,73 @@ class ScreenshotTest {
     @Test
     fun viewerMore() = capture("viewer_more") { viewer(ViewerMode.More) }
 
+    @Test
+    fun viewerReadSigned() = capture("viewer_read_signed") {
+        viewer(ViewerMode.Read, sample.copy(signatures = listOf(signedByDana)))
+    }
+
+    @Test
+    fun viewerReadSignedThenChanged() = capture("viewer_read_signed_changed") {
+        viewer(ViewerMode.Read, sample.copy(signatures = listOf(signedByDana.copy(coversWholeFile = false))))
+    }
+
+    @Test
+    fun viewerSignatureDetails() {
+        val issued = signedByDana.copy(
+            signer = "Sam Ortiz",
+            issuer = "Example Trust CA",
+            trust = SignatureReport.Trust.Trusted,
+            timestamp = TimestampReport(Instant.parse("2026-10-03T16:20:05Z"), "Free TSA", valid = true),
+        )
+        show {
+            viewer(
+                ViewerMode.Read,
+                sample.copy(signatures = listOf(signedByDana.copy(coversWholeFile = false), issued)),
+                showSignatures = true,
+            )
+        }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_signature_details.png")
+    }
+
+    @Test
+    fun viewerSignCertificate() {
+        show { viewer(ViewerMode.Sign, showCertificate = true) }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_certificate.png")
+    }
+
+    @Test
+    fun viewerSignCertificateImported() {
+        val expires = Calendar.getInstance().apply { set(2028, Calendar.MARCH, 31) }.time
+        show {
+            viewer(
+                ViewerMode.Sign,
+                certificate = CertificateInfo("Dana Whitfield", "Example Trust CA", expires),
+                timestampsOn = true,
+                showCertificate = true,
+            )
+        }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_certificate_imported.png")
+    }
+
+    /** A signature made with FreePDF's device certificate, checked and unchanged. */
+    private val signedByDana = SignatureReport(
+        fieldName = "Signature1",
+        claimedSigner = "Dana Whitfield",
+        claimedTime = Instant.parse("2026-10-03T15:04:00Z"),
+        reason = "Signed with FreePDF",
+        location = null,
+        kind = SignatureReport.Kind.Pkcs7Detached,
+        integrity = SignatureReport.Integrity.Intact,
+        coversWholeFile = true,
+        signer = "Dana Whitfield",
+        issuer = "Dana Whitfield",
+        signingTime = Instant.parse("2026-10-03T15:04:00Z"),
+        trust = SignatureReport.Trust.SelfSigned,
+    )
+
     // 3 Oct 2026, 15:00 on the test machine's clock, so Today and Yesterday group the same way everywhere.
     private val now = Calendar.getInstance().apply { set(2026, Calendar.OCTOBER, 3, 15, 0, 0) }.timeInMillis
 
@@ -207,6 +278,10 @@ class ScreenshotTest {
         tool: Int? = null,
         savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
         signerName: String = "",
+        certificate: CertificateInfo? = null,
+        timestampsOn: Boolean = false,
+        showCertificate: Boolean = false,
+        showSignatures: Boolean = false,
     ) {
         ViewerContent(
             state = state,
@@ -217,6 +292,10 @@ class ScreenshotTest {
             initialTool = tool,
             savedSignatures = savedSignatures,
             signerName = signerName,
+            certificate = certificate,
+            timestampsOn = timestampsOn,
+            initialShowCertificate = showCertificate,
+            initialShowSignatures = showSignatures,
         )
     }
 

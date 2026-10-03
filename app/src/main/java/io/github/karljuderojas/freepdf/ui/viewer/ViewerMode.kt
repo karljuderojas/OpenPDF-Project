@@ -27,7 +27,7 @@ enum class ViewerMode(@StringRes val label: Int, val icon: ImageVector?, val too
     Sign(
         R.string.mode_sign, Icons.Filled.Edit,
         listOf(R.string.tool_signature, R.string.tool_initials, R.string.tool_date, R.string.tool_text,
-            R.string.tool_checkmark),
+            R.string.tool_checkmark, R.string.tool_certificate),
     ),
     // Hidden until its first tools (add text, add image) ship.
     Edit(R.string.mode_edit, Icons.Filled.Build, emptyList()),

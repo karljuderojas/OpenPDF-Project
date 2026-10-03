@@ -31,13 +31,14 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ✅ Signature and initials: draw once on a pad (black or blue ink; too-simple drawings are refused), saved encrypted on the device, then tap the line to place
 - ✅ Date, text and checkmark: tap where they go
 - ⬜ Move and resize a placed signature (for now: Undo and tap again)
-- 🧱 Digital signature with an on-device or imported certificate (`DigitalSigner`, `SigningIdentity`)
+- ✅ Digital signature with the phone's own certificate or an imported .p12/.pfx (Sign → Certificate)
 - 🧱 Audit trail, SHA-256 fingerprints and audit page
 - ⬜ Type or photograph a signature instead of drawing it
 - ⬜ Field detection and the guided next-field walk
 - ⬜ Fill AcroForm fields
-- ⬜ Verify banner for signed PDFs
-- ⬜ RFC 3161 timestamps, LTV
+- ✅ Verify banner for signed PDFs, with per-signature details (`SignatureVerifier`)
+- ✅ RFC 3161 timestamps from FreeTSA, DigiCert as fallback (opt-in, Sign → Certificate)
+- ⬜ Long-term validation (LTV)
 
 ## Editing (Edit and Pages modes)
 - ✅ Pages mode: thumbnail grid; rotate, move, insert blank, delete and merge the selected page

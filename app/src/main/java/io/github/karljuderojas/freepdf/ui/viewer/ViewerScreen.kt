@@ -75,7 +75,12 @@ import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.share.Sharing
+import io.github.karljuderojas.freepdf.pdf.sign.CertificateInfo
+import io.github.karljuderojas.freepdf.ui.sign.CertificateDialog
+import io.github.karljuderojas.freepdf.ui.sign.CertificatePasswordDialog
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
+import io.github.karljuderojas.freepdf.ui.sign.SignatureBanner
+import io.github.karljuderojas.freepdf.ui.sign.SignatureDetailsDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
 import kotlinx.coroutines.launch
 
@@ -104,6 +109,11 @@ sealed interface ViewerAction {
     data class AddText(val page: Int, val at: Offset, val text: String) : ViewerAction
     data class AddCheckmark(val page: Int, val at: Offset) : ViewerAction
     data class FinishSigning(val name: String, val consentText: String, val seal: Boolean) : ViewerAction
+
+    /** Certificate actions. */
+    data object ImportCertificate : ViewerAction
+    data object RemoveCertificate : ViewerAction
+    data class SetTimestamps(val on: Boolean) : ViewerAction
 }
 
 @Composable
@@ -112,6 +122,9 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
     val state by viewModel.state.collectAsStateWithLifecycle()
     val savedSignatures by viewModel.savedSignatures.collectAsStateWithLifecycle()
     val signerName by viewModel.signerName.collectAsStateWithLifecycle()
+    val certificate by viewModel.certificate.collectAsStateWithLifecycle()
+    val timestampsOn by viewModel.timestampsOn.collectAsStateWithLifecycle()
+    var certificateFile by remember { mutableStateOf<Uri?>(null) }
     val resources = LocalResources.current
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -124,6 +137,9 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
     }
     val mergePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
         if (it != null) viewModel.merge(it)
+    }
+    val certificatePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
+        certificateFile = it
     }
 
     LaunchedEffect(viewModel) {
@@ -144,6 +160,8 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
         loadPage = viewModel::page,
         savedSignatures = savedSignatures,
         signerName = signerName,
+        certificate = certificate,
+        timestampsOn = timestampsOn,
         snackbarHostState = snackbarHostState,
         onAction = { action ->
             when (action) {
@@ -177,9 +195,23 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.AddText -> viewModel.addText(action.page, action.at, action.text)
                 is ViewerAction.AddCheckmark -> viewModel.addCheckmark(action.page, action.at)
                 is ViewerAction.FinishSigning -> viewModel.finishSigning(action.name, action.consentText, action.seal)
+                // Some file managers label .p12 files as octet-stream, so allow any file.
+                ViewerAction.ImportCertificate -> certificatePicker.launch(arrayOf("application/x-pkcs12", "application/octet-stream", "*/*"))
+                ViewerAction.RemoveCertificate -> viewModel.removeCertificate()
+                is ViewerAction.SetTimestamps -> viewModel.setTimestamps(action.on)
             }
         },
     )
+
+    certificateFile?.let { file ->
+        CertificatePasswordDialog(
+            onDismiss = { certificateFile = null },
+            onImport = { password ->
+                certificateFile = null
+                viewModel.importCertificate(file, password)
+            },
+        )
+    }
 }
 
 /** Stateless viewer UI, so it can be previewed and screenshot-tested without a real PDF. */
@@ -194,6 +226,10 @@ fun ViewerContent(
     initialTool: Int? = null,
     savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
     signerName: String = "",
+    certificate: CertificateInfo? = null,
+    timestampsOn: Boolean = false,
+    initialShowCertificate: Boolean = false,
+    initialShowSignatures: Boolean = false,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onAction: (ViewerAction) -> Unit = {},
 ) {
@@ -208,6 +244,8 @@ fun ViewerContent(
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
+    var showCertificate by remember { mutableStateOf(initialShowCertificate) }
+    var showSignatures by remember { mutableStateOf(initialShowSignatures) }
 
     val ready = state as? ViewerState.Ready
     val pageCount = ready?.pageSizes?.size ?: 0
@@ -325,6 +363,7 @@ fun ViewerContent(
                     ToolStrip(mode, selectedTool, onToolSelected = { label ->
                         val tool = SignTool.forLabel(label)
                         when {
+                            label == R.string.tool_certificate -> showCertificate = true
                             tool == null -> Unit
                             selectedTool == label -> selectedTool = null
                             else -> {
@@ -386,7 +425,26 @@ fun ViewerContent(
                     }
                 }
             }
+            // Over a signed PDF: who signed it and whether it changed since.
+            if (mode == ViewerMode.Read && ready != null && ready.signatures.isNotEmpty()) {
+                SignatureBanner(ready.signatures, onClick = { showSignatures = true }, modifier = Modifier.align(Alignment.TopCenter))
+            }
         }
+    }
+
+    if (showSignatures && ready != null) {
+        SignatureDetailsDialog(ready.signatures, onDismiss = { showSignatures = false })
+    }
+
+    if (showCertificate) {
+        CertificateDialog(
+            certificate = certificate,
+            timestampsOn = timestampsOn,
+            onImport = { onAction(ViewerAction.ImportCertificate) },
+            onRemove = { onAction(ViewerAction.RemoveCertificate) },
+            onTimestampsChange = { onAction(ViewerAction.SetTimestamps(it)) },
+            onDismiss = { showCertificate = false },
+        )
     }
 
     if (confirmDelete) {
@@ -420,6 +478,7 @@ fun ViewerContent(
     if (finishing) {
         FinishSigningDialog(
             initialName = signerName,
+            certificate = certificate,
             onDismiss = { finishing = false },
             onFinish = { name, consentText, seal ->
                 finishing = false

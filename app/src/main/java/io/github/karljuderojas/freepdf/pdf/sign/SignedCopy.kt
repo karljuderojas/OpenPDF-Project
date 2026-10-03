@@ -11,25 +11,33 @@ import java.io.OutputStream
  */
 object SignedCopy {
 
-    /** What the audit page says the record does and does not prove. */
-    fun notes(sealed: Boolean): List<String> = buildList {
+    /** What the audit page says the record does and does not prove, for a seal by [identity]. */
+    fun notes(identity: SigningIdentity?): List<String> = buildList {
         add(
             "This record was made on the signer's own device by FreePDF. The signer's identity was not " +
                 "checked by email, phone or ID.",
         )
         add("Original SHA-256 is the fingerprint of the file before it was signed.")
-        if (sealed) {
-            add(
+        val issuer = identity?.issuer
+        when {
+            identity == null -> Unit
+            issuer == null -> add(
                 "This file carries a digital signature from a certificate created on the signer's device. " +
                     "Any change to the file after signing makes that signature show as invalid. Other apps " +
                     "may list the certificate as not verified, because no certificate authority issued it.",
+            )
+            else -> add(
+                "This file carries a digital signature from a certificate issued to ${identity.name} by $issuer. " +
+                    "Any change to the file after signing makes that signature show as invalid.",
             )
         }
     }
 
     /**
      * Writes [source] plus the audit page for [trail] to [output]. When [identity] is given, the
-     * result is signed by it in [signerName]'s name. [scratch] is a file this may overwrite.
+     * result is signed by it in [signerName]'s name, with a trusted timestamp if [timestamps] is
+     * given and reachable. [scratch] is a file this may overwrite. Returns whether the signature
+     * got a timestamp.
      */
     fun write(
         source: File,
@@ -38,19 +46,22 @@ object SignedCopy {
         identity: SigningIdentity?,
         output: OutputStream,
         scratch: File,
-    ) {
+        timestamps: TimestampClient? = null,
+    ): Boolean {
         PDDocument.load(source).use { document ->
-            AuditPageWriter.append(document, trail, notes(sealed = identity != null))
+            AuditPageWriter.append(document, trail, notes(identity))
             document.save(scratch)
         }
         try {
             if (identity == null) {
                 scratch.inputStream().use { it.copyTo(output) }
-            } else {
-                // Signing appends an incremental update, so PdfBox must read from a file.
-                PDDocument.load(scratch).use { document ->
-                    DigitalSigner(identity).sign(document, output, signerName, reason = "Signed with FreePDF")
-                }
+                return false
+            }
+            // Signing appends an incremental update, so PdfBox must read from a file.
+            return PDDocument.load(scratch).use { document ->
+                val signer = DigitalSigner(identity, timestamps)
+                signer.sign(document, output, signerName, reason = "Signed with FreePDF")
+                signer.timestamped
             }
         } finally {
             scratch.delete()
