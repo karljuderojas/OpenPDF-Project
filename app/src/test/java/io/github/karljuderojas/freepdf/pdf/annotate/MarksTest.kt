@@ -2,6 +2,7 @@ package io.github.karljuderojas.freepdf.pdf.annotate
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationMarkup
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
 import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.displayToPdf
@@ -86,6 +87,56 @@ class MarksTest {
         assertEquals("Call Dana first", box.comment)
         assertEquals(24f, box.width, 0.01f)
         assertEquals(Annotator.Rgb.Blue.b, box.color!!.b, 0.001f)
+    }
+
+    @Test
+    fun recolouringAStampRedrawsIt() {
+        val (before, after, mark) = marked().use { document ->
+            val stamp = Stamps.add(document, 1, PdfPoint(300f, 300f), Stamps.Kind.Draft)
+            val before = String(stamp.normalAppearanceStream.contentStream.toByteArray(), Charsets.ISO_8859_1)
+            val index = Marks.list(document).single { it.kind == Mark.Kind.Stamp }.index
+            Marks.edit(document, 1, index, color = Annotator.Rgb.Red)
+            val after = String(stamp.normalAppearanceStream.contentStream.toByteArray(), Charsets.ISO_8859_1)
+            Triple(before, after, Marks.list(document).single { it.kind == Mark.Kind.Stamp })
+        }
+        assertTrue(before != after)
+        assertTrue(after, after.contains("(DRAFT) Tj"))
+        assertEquals(Annotator.Rgb.Red.r, mark.color!!.r, 0.001f)
+    }
+
+    @Test
+    fun wordsAreOnlyAskedForPagesWithMarkedText() {
+        val asked = ArrayList<Int>()
+        marked().use { document ->
+            Marks.list(document) { page -> asked += page; PageText.words(document, page) }
+        }
+        // The highlight is on the first page; the note on the second needs no words.
+        assertEquals(listOf(0), asked)
+    }
+
+    @Test
+    fun aDotStrokeIsDrawnAsASmallRing() {
+        sample().use { document ->
+            Annotator.ink(document, 0, listOf(listOf(PdfPoint(100f, 100f))), lineWidth = 4f)
+            Annotator.ink(document, 0, listOf(listOf(PdfPoint(200f, 200f), PdfPoint(200.1f, 200f))), lineWidth = 4f)
+            val inks = document.getPage(0).annotations.filter { it.subtype == PDAnnotationMarkup.SUB_TYPE_INK }.map { it as PDAnnotationMarkup }
+            assertEquals(2, inks.size)
+            inks.forEach { ink ->
+                val path = ink.inkList.single()
+                // A closed ring of several points around the tap, spanning less than the pen width.
+                assertTrue(path.size >= 2 * 5)
+                assertEquals(path[0], path[path.size - 2], 0.001f)
+                assertEquals(path[1], path[path.size - 1], 0.001f)
+                val xs = (path.indices step 2).map { path[it] }
+                assertTrue(xs.max() - xs.min() in 0.5f..4f)
+                val content = String(ink.normalAppearanceStream.contentStream.toByteArray(), Charsets.ISO_8859_1)
+                assertTrue(content, content.contains(" l\n") || content.contains(" l "))
+            }
+            // A real stroke is kept as drawn.
+            Annotator.ink(document, 0, listOf(listOf(PdfPoint(10f, 10f), PdfPoint(50f, 60f))), lineWidth = 4f)
+            val line = document.getPage(0).annotations.last() as PDAnnotationMarkup
+            assertEquals(listOf(10f, 10f, 50f, 60f), line.inkList.single().toList())
+        }
     }
 
     @Test

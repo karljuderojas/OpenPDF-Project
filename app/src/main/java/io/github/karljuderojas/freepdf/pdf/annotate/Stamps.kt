@@ -1,9 +1,11 @@
 package io.github.karljuderojas.freepdf.pdf.annotate
 
+import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotation
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationRubberStamp
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
 import io.github.karljuderojas.freepdf.pdf.annotate.Appearances.stamp
@@ -51,19 +53,51 @@ object Stamps {
     ): PDAnnotationRubberStamp {
         val page = document.getPage(pageIndex)
         val rotation = Appearances.normalizedRotation(page.rotation)
-        val text = kind.label.uppercase(Locale.ROOT)
-        val width = FONT.getStringWidth(text) / 1000f * FONT_SIZE + 2 * PADDING_X
-        val height = CAP_HEIGHT + 2 * PADDING_Y
+        val (width, height) = sizeOf(kind)
 
         val annotation = PDAnnotationRubberStamp().apply {
             name = kind.pdfName
             contents = kind.label
-            color = kind.color.toPdColor()
             rectangle = Appearances.rectAround(center, width, height, rotation).toPdRectangle()
             stamp(author)
         }
+        draw(document, annotation, kind, kind.color, rotation)
+        page.annotations.add(annotation)
+        return annotation
+    }
+
+    /**
+     * The kind of stamp [annotation] is, when it is one made by [add]; null for any other stamp.
+     *
+     * Only the /Name is checked: a comment added to a stamp later replaces its /Contents, and the
+     * stamp must still be recognised (and recolourable) afterwards.
+     */
+    fun kindOf(annotation: PDAnnotation): Kind? {
+        if (annotation.subtype != PDAnnotationRubberStamp.SUB_TYPE) return null
+        val name = annotation.cosObject.getNameAsString(COSName.NAME)
+        return Kind.entries.firstOrNull { it.pdfName == name }
+    }
+
+    /**
+     * Redraws a stamp made by [add] in [color], keeping its place, size and turn. Returns false
+     * and changes nothing for a stamp made elsewhere, whose look this cannot reproduce.
+     */
+    fun restyle(document: PDDocument, annotation: PDAnnotation, color: Annotator.Rgb): Boolean {
+        val kind = kindOf(annotation) ?: return false
+        draw(document, annotation, kind, color, Appearances.rotationOf(annotation))
+        return true
+    }
+
+    private fun sizeOf(kind: Kind): Pair<Float, Float> {
+        val text = kind.label.uppercase(Locale.ROOT)
+        return (FONT.getStringWidth(text) / 1000f * FONT_SIZE + 2 * PADDING_X) to (CAP_HEIGHT + 2 * PADDING_Y)
+    }
+
+    private fun draw(document: PDDocument, annotation: PDAnnotation, kind: Kind, color: Annotator.Rgb, rotation: Int) {
+        val text = kind.label.uppercase(Locale.ROOT)
+        val (width, height) = sizeOf(kind)
+        annotation.color = color.toPdColor()
         Appearances.set(document, annotation, width, height, rotation) {
-            val color = kind.color
             // Faint fill, then the outline at full strength. The outline is inset by half its
             // width so it is not clipped by the BBox.
             saveGraphicsState()
@@ -85,8 +119,6 @@ object Stamps {
             showText(text)
             endText()
         }
-        page.annotations.add(annotation)
-        return annotation
     }
 
     /** A closed rectangle path with corners of radius [r], drawn with Bézier quarter circles. */

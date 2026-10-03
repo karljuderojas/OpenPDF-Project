@@ -48,5 +48,48 @@ object PdfText {
     /** Splits on line breaks and drops a trailing empty line left by a final Enter. */
     fun lines(text: String): List<String> = text.split('\n').dropLastWhile { it.isBlank() }.ifEmpty { listOf("") }
 
+    /** The width of [text] set in [font] at [fontSize], in points. */
+    fun widthOf(text: String, font: PDFont, fontSize: Float): Float = font.getStringWidth(text) / 1000f * fontSize
+
+    /**
+     * [lines] of [text], each then wrapped at spaces so no line is wider than [maxWidth] points
+     * in [font] at [fontSize]. A single word wider than that is broken between letters. [text]
+     * must already be [printable] in [font].
+     */
+    fun wrap(text: String, font: PDFont, fontSize: Float, maxWidth: Float): List<String> = lines(text).flatMap { line ->
+        wrapLine(line, font, fontSize, maxWidth)
+    }
+
+    private fun wrapLine(line: String, font: PDFont, fontSize: Float, maxWidth: Float): List<String> {
+        if (line.isEmpty() || widthOf(line, font, fontSize) <= maxWidth) return listOf(line)
+        val out = ArrayList<String>()
+        var current = ""
+        fun flush() {
+            if (current.isNotEmpty()) out += current
+            current = ""
+        }
+        line.split(' ').forEach { word ->
+            val candidate = if (current.isEmpty()) word else "$current $word"
+            when {
+                widthOf(candidate, font, fontSize) <= maxWidth -> current = candidate
+                widthOf(word, font, fontSize) <= maxWidth -> {
+                    flush()
+                    current = word
+                }
+                else -> {
+                    // Too long for a line on its own: take as many letters as fit, line by line.
+                    flush()
+                    word.codePoints().forEach { cp ->
+                        val letter = String(Character.toChars(cp))
+                        if (current.isNotEmpty() && widthOf(current + letter, font, fontSize) > maxWidth) flush()
+                        current += letter
+                    }
+                }
+            }
+        }
+        flush()
+        return out.ifEmpty { listOf("") }
+    }
+
     private fun PDFont.canShow(text: String) = runCatching { encode(text) }.isSuccess
 }

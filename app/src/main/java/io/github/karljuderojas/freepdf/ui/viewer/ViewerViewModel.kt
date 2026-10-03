@@ -233,7 +233,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     private val context get() = getApplication<Application>()
 
-    // Text positions per page for the current revision, read with PdfBox from the working copy.
+    // Text positions per page, read with PdfBox from the working copy, for selecting text and for
+    // the text a highlight covers. Reading them is slow, so they are kept across edits that only
+    // add, change or remove marks (the pages' own text stays as it was) and dropped on any other.
     private val wordCache = HashMap<Int, List<PageWord>>()
     private var textDocument: PDDocument? = null
 
@@ -410,13 +412,13 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         PdfDocuments.load(context, other).use { PageEditor.append(document, it) }
     }
 
-    fun ink(page: Int, strokes: List<List<Offset>>, style: ToolStyle) = edit { document ->
+    fun ink(page: Int, strokes: List<List<Offset>>, style: ToolStyle) = mark { document ->
         val toPdf = displayMapper(document, page)
         Annotator.ink(document, page, strokes.map { stroke -> stroke.map(toPdf) }, style.rgb, style.width)
     }
 
     fun markText(page: Int, start: Offset, end: Offset, kind: Annotator.TextMarkup, style: ToolStyle) =
-        edit { document ->
+        mark { document ->
             Annotator.markText(document, page, listOf(boxOf(document, page, start, end)), kind, style.rgb, style.width)
         }
 
@@ -425,7 +427,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
      * becomes the mark's note.
      */
     fun markLines(page: Int, lines: List<Rect>, kind: Annotator.TextMarkup, style: ToolStyle, comment: String? = null) =
-        edit { document ->
+        mark { document ->
             val boxes = lines.map { boxOf(document, page, it.topLeft, it.bottomRight) }
             Annotator.markText(document, page, boxes, kind, style.rgb, style.width, comment)
         }
@@ -436,11 +438,11 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     val marks: StateFlow<List<Mark>> = _marks.asStateFlow()
 
     /** Changes a mark's colour, line width or comment; null leaves that part alone. */
-    fun editMark(page: Int, index: Int, color: Annotator.Rgb?, width: Float?, comment: String?) = edit { document ->
+    fun editMark(page: Int, index: Int, color: Annotator.Rgb?, width: Float?, comment: String?) = mark { document ->
         Marks.edit(document, page, index, color, width, comment)
     }
 
-    fun deleteMark(page: Int, index: Int) = edit { document -> Marks.delete(document, page, index) }
+    fun deleteMark(page: Int, index: Int) = mark { document -> Marks.delete(document, page, index) }
 
     /** The words on [page] and where they are, for selecting text. Empty for scanned pages. */
     suspend fun words(page: Int): List<PageWord> = lock.withLock {
@@ -452,21 +454,21 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         }.also { wordCache[page] = it }
     }
 
-    fun shape(page: Int, start: Offset, end: Offset, style: ToolStyle) = edit { document ->
+    fun shape(page: Int, start: Offset, end: Offset, style: ToolStyle) = mark { document ->
         Annotator.shape(document, page, boxOf(document, page, start, end), color = style.rgb, lineWidth = style.width)
     }
 
-    fun note(page: Int, at: Offset, text: String, style: ToolStyle) = edit { document ->
+    fun note(page: Int, at: Offset, text: String, style: ToolStyle) = mark { document ->
         Annotator.note(document, page, displayMapper(document, page)(at), text, style.rgb)
     }
 
     /** Places a [kind] stamp centred where the user tapped. */
-    fun stamp(page: Int, at: Offset, kind: Stamps.Kind) = edit { document ->
+    fun stamp(page: Int, at: Offset, kind: Stamps.Kind) = mark { document ->
         Stamps.add(document, page, displayMapper(document, page)(at), kind)
     }
 
     /** Adds a text box whose top-left corner is at [at]; [style]'s width is the font size. */
-    fun textBox(page: Int, at: Offset, text: String, style: ToolStyle) = edit { document ->
+    fun textBox(page: Int, at: Offset, text: String, style: ToolStyle) = mark { document ->
         TextBoxes.add(document, page, displayMapper(document, page)(at), text, style.rgb, fontSize = style.width)
     }
 
@@ -493,7 +495,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
      * placed in Sign mode are left alone (signatures are taken back with Undo there).
      */
     fun erase(page: Int, at: Offset) {
-        edit(onNoChange = R.string.nothing_to_erase) { document ->
+        mark(onNoChange = R.string.nothing_to_erase) { document ->
             val point = displayMapper(document, page)(at)
             val index = Marks.indexAt(document, page, point.x, point.y) ?: throw NothingChanged()
             Marks.delete(document, page, index)
@@ -1133,12 +1135,20 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         change: (PDDocument) -> Unit,
     ) = update(onNoChange, event, movesPages = movesPages) { it.edit(change) }
 
+    /**
+     * [edit] for a change that only adds, alters or removes marks, so the pages' text is as it
+     * was and the words already read from them need not be read again.
+     */
+    private fun mark(@StringRes onNoChange: Int? = null, change: (PDDocument) -> Unit) =
+        update(onNoChange, keepsText = true) { it.edit(change) }
+
     /** Makes one undo step through [step], like [edit] does, then shows [done] if given. */
     private fun update(
         @StringRes onNoChange: Int? = null,
         event: AuditEvent? = null,
         @StringRes done: Int? = null,
         movesPages: Boolean = false,
+        keepsText: Boolean = false,
         step: (EditSession) -> Unit,
     ) {
         viewModelScope.launch {
@@ -1149,7 +1159,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         editLog += event?.copy(at = Instant.now())
                         redoLog.clear()
                         if (movesPages) signFields = null
-                        _state.value = reloadOrFail(pageEdit = movesPages)
+                        _state.value = reloadOrFail(pageEdit = movesPages, keepText = keepsText)
                         done?.let { _effects.send(ViewerEffect.Message(it)) }
                     }
                     is NothingChanged -> {
@@ -1197,11 +1207,11 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * [reloadLocked], but a working copy PDFium refuses (a merged file it cannot parse, say) is
      * taken back with undo instead of crashing the app from inside a coroutine. [pageEdit] says
-     * the edit being shown moved pages, so taking it back counts as a failed page edit. Call with
-     * [lock] held.
+     * the edit being shown moved pages, so taking it back counts as a failed page edit. [keepText]
+     * is passed on to [reloadLocked]. Call with [lock] held.
      */
-    private suspend fun reloadOrFail(pageEdit: Boolean = false): ViewerState =
-        runCatching { reloadLocked() }.getOrElse { first ->
+    private suspend fun reloadOrFail(pageEdit: Boolean = false, keepText: Boolean = false): ViewerState =
+        runCatching { reloadLocked(keepText) }.getOrElse { first ->
             val current = session
             if (current?.canUndo == true) {
                 runCatching {
@@ -1216,21 +1226,31 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-    /** Re-opens the working copy in PDFium. Call with [lock] held. */
-    private suspend fun reloadLocked(): ViewerState {
+    /**
+     * Re-opens the working copy in PDFium. Call with [lock] held. [keepText] is true after an edit
+     * that left the pages' text alone, so the words already read from them are still good.
+     */
+    private suspend fun reloadLocked(keepText: Boolean = false): ViewerState {
         val current = session ?: return ViewerState.Failed(null)
         renderer?.close()
         renderer = null
         cache.evictAll()
         textDocument?.close()
         textDocument = null
-        wordCache.clear()
+        if (!keepText) wordCache.clear()
         searchJob?.cancel()
         _search.value = SearchResults()
         revision++
         val next = PdfRenderer.open(context, Uri.fromFile(current.workingFile), current.password.ifEmpty { null })
         _marks.value = withContext(Dispatchers.IO) {
-            runCatching { PDDocument.load(current.workingFile, current.password).use { Marks.list(it) } }.getOrDefault(emptyList())
+            runCatching {
+                PDDocument.load(current.workingFile, current.password).use { document ->
+                    // Only pages with marked text are asked for, and each is read at most once per text change.
+                    Marks.list(document) { page ->
+                        wordCache.getOrPut(page) { runCatching { PageText.words(document, page) }.getOrDefault(emptyList()) }
+                    }
+                }
+            }.getOrDefault(emptyList())
         }
         renderer = next
         val hasSignature = editLog.any { it?.type == AuditEvent.Type.Signed }

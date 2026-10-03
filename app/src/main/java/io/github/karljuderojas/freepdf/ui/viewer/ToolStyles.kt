@@ -63,7 +63,12 @@ internal val FontSizes = listOf(10f, 12f, 16f, 24f)
  * is kept per tool, so the pen can stay thin and black while highlights stay yellow.
  */
 @Composable
-fun StyleBar(tool: AnnotateTool, style: ToolStyle, onStyleChange: (ToolStyle) -> Unit) {
+fun StyleBar(tool: AnnotateTool, style: ToolStyle, onStyleChange: (ToolStyle) -> Unit) =
+    StyleBar(tool.palette, tool.widths, style, onStyleChange)
+
+/** [StyleBar] for any choice of colours and sizes, such as those a picked mark can change to. */
+@Composable
+fun StyleBar(palette: List<Color>, widths: List<Float>, style: ToolStyle, onStyleChange: (ToolStyle) -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh) {
         Row(
             modifier = Modifier
@@ -75,19 +80,19 @@ fun StyleBar(tool: AnnotateTool, style: ToolStyle, onStyleChange: (ToolStyle) ->
             // Sized so six colours and four sizes fit across a phone without scrolling.
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            tool.palette.forEachIndexed { index, color ->
+            palette.forEachIndexed { index, color ->
                 val label = stringResource(R.string.style_colour, index + 1)
                 Swatch(selected = color == style.color, label = label, onClick = { onStyleChange(style.copy(color = color)) }) {
                     Box(Modifier.size(22.dp).background(color, CircleShape).border(1.dp, Color.Black.copy(alpha = 0.15f), CircleShape))
                 }
             }
-            if (tool.widths.isNotEmpty()) {
+            if (widths.isNotEmpty()) {
                 VerticalDivider(Modifier.height(28.dp).padding(horizontal = 4.dp))
-                tool.widths.forEachIndexed { index, width ->
+                widths.forEachIndexed { index, width ->
                     val label = stringResource(R.string.style_size, index + 1)
                     Swatch(selected = width == style.width, label = label, onClick = { onStyleChange(style.copy(width = width)) }) {
                         // Dots grow with the line they draw, from 5dp for the thinnest to 20dp.
-                        val dot = 5.dp + 15.dp * index / (tool.widths.size - 1).coerceAtLeast(1)
+                        val dot = 5.dp + 15.dp * index / (widths.size - 1).coerceAtLeast(1)
                         Box(Modifier.size(dot).background(style.color, CircleShape))
                     }
                 }
