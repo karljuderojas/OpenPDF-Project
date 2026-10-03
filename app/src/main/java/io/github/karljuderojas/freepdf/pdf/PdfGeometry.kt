@@ -59,6 +59,16 @@ fun pdfToDisplay(x: Float, y: Float, rotation: Int, cropBox: PdfRect): Pair<Floa
 /** A box on a page as displayed, in fractions (0..1 across and down, origin top-left). */
 data class DisplayRect(val left: Float, val top: Float, val right: Float, val bottom: Float)
 
+/**
+ * This box cut down to the page as shown (0..1 both ways), or null when none of it is on the
+ * page, as with a link or a word in a margin that a crop has taken away. Overlays built from it
+ * then never reach into the gap between pages or over the next one.
+ */
+fun DisplayRect.onPage(): DisplayRect? {
+    if (right <= 0f || bottom <= 0f || left >= 1f || top >= 1f) return null
+    return DisplayRect(left.coerceIn(0f, 1f), top.coerceIn(0f, 1f), right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f))
+}
+
 /** Where [rect], in the page's unrotated PDF space, appears on the page as displayed. */
 fun pdfToDisplay(rect: PdfRect, rotation: Int, cropBox: PdfRect): DisplayRect {
     val a = pdfToDisplay(rect.left, rect.bottom, rotation, cropBox)

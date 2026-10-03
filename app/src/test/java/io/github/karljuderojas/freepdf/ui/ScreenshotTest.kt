@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
@@ -78,9 +79,12 @@ import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.home.HomeContent
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
 import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
+import io.github.karljuderojas.freepdf.ui.create.DiscardPagesDialog
 import io.github.karljuderojas.freepdf.ui.create.ImagesToPdfContent
 import io.github.karljuderojas.freepdf.ui.create.ScannerContent
+import io.github.karljuderojas.freepdf.ui.create.moved
 import io.github.karljuderojas.freepdf.ui.create.thumbKey
+import io.github.karljuderojas.freepdf.pdf.scan.Corner
 import io.github.karljuderojas.freepdf.pdf.scan.PageDetector
 import io.github.karljuderojas.freepdf.pdf.scan.PerspectiveWarp
 import io.github.karljuderojas.freepdf.pdf.scan.Quad
@@ -91,6 +95,7 @@ import io.github.karljuderojas.freepdf.pdf.scan.SyntheticPhoto
 import io.github.karljuderojas.freepdf.pdf.create.PageFit
 import androidx.compose.ui.graphics.asImageBitmap
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
+import io.github.karljuderojas.freepdf.ui.viewer.AddLinkDialog
 import io.github.karljuderojas.freepdf.ui.viewer.DocumentInfoDialog
 import io.github.karljuderojas.freepdf.ui.viewer.AnnotateTool
 import io.github.karljuderojas.freepdf.ui.viewer.ToolStyle
@@ -197,6 +202,26 @@ class ScreenshotTest {
         ImagesToPdfContent(photos, thumbs, PageFit.Picture, 2, false, {}, { _, _ -> }, {}, {}, {}, {})
     }
 
+    // One picture the phone could not decode: its row says so, and Create waits until it is removed.
+    @Test
+    fun imagesToPdfUnreadable() {
+        val start = listOf("content://a", "content://b", "content://c")
+        val thumbs = mapOf("content://a" to samplePages[0].asImageBitmap(), "content://c" to samplePages[1].asImageBitmap())
+        show {
+            var photos by remember { mutableStateOf(start) }
+            ImagesToPdfContent(photos, thumbs, PageFit.A4, null, false, {}, { from, to -> photos = photos.moved(from, to) }, {}, {}, {}, {}, unreadable = setOf("content://b"))
+        }
+        composeRule.onNodeWithTag("images-create").assertIsNotEnabled()
+        composeRule.onNodeWithText("Page 2 could not be read").assertExists()
+        captureRoot("images_to_pdf_unreadable")
+        // The mark follows the picture when it is moved, not the slot it was in.
+        composeRule.onNodeWithContentDescription("Move page 2 earlier").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Page 1 could not be read").assertExists()
+        composeRule.onNodeWithText("Page 2 could not be read").assertDoesNotExist()
+        composeRule.onNodeWithTag("images-create").assertIsNotEnabled()
+    }
+
     // A skewed photo of the sample page on a desk, with the corners the app's own detector finds in it.
     private val deskPhoto by lazy { SyntheticPhoto.make(samplePages[0]) }
     private val detectedQuad by lazy { PageDetector.detect(deskPhoto) ?: Quad.inset(0.04f) }
@@ -226,6 +251,41 @@ class ScreenshotTest {
     fun scannerAdjustEdges() = capture("scanner_adjust_edges") {
         val pages = listOf(ScanPage(1, "a", detectedQuad))
         ScannerContent(pages, emptyMap(), ScanFilter.Color, 0, true, deskPhoto.asImageBitmap(), false, null, false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {})
+    }
+
+    // Corners dragged into a bow tie: the hint turns into a warning and Done waits.
+    @Test
+    fun scannerAdjustTwisted() {
+        val bowTie = Quad(Corner(0.1f, 0.1f), Corner(0.9f, 0.9f), Corner(0.9f, 0.1f), Corner(0.1f, 0.9f))
+        val pages = listOf(ScanPage(1, "a", bowTie))
+        show {
+            ScannerContent(pages, emptyMap(), ScanFilter.Color, 0, true, deskPhoto.asImageBitmap(), false, null, false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {})
+        }
+        composeRule.onNodeWithTag("scan-adjust-done").assertIsNotEnabled()
+        composeRule.onNodeWithTag("scan-adjust-hint").assertTextContains("The corners cross", substring = true)
+        captureRoot("scanner_adjust_twisted")
+    }
+
+    @Test
+    fun scannerAdjustDoneIsEnabledForAProperPage() {
+        val pages = listOf(ScanPage(1, "a", detectedQuad))
+        show {
+            ScannerContent(pages, emptyMap(), ScanFilter.Color, 0, true, deskPhoto.asImageBitmap(), false, null, false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {})
+        }
+        composeRule.onNodeWithTag("scan-adjust-done").assertIsEnabled()
+    }
+
+    // Back with pages that were never saved asks first.
+    @Test
+    fun scannerDiscard() {
+        val pages = listOf(ScanPage(1, "a", detectedQuad), ScanPage(2, "b", detectedQuad), ScanPage(3, "c", detectedQuad))
+        show {
+            ScannerContent(pages, scanThumbs(pages, ScanFilter.Color), ScanFilter.Color, null, false, null, false, null, false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {})
+            DiscardPagesDialog(count = pages.size, onDiscard = {}, onDismiss = {})
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Discard 3 pages?").assertExists()
+        captureScreenRoboImage("build/outputs/roborazzi/scanner_discard.png")
     }
 
     @Test
@@ -1009,12 +1069,56 @@ class ScreenshotTest {
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerLinkOpen() {
-        val linked = sample.copy(links = listOf(PageLink(0, DisplayRect(0.1f, 0.1f, 0.6f, 0.15f), LinkTarget.Web("https://example.com/terms"))))
+        val linked = sample.copy(links = listOf(PageLink(0, 0, DisplayRect(0.1f, 0.1f, 0.6f, 0.15f), LinkTarget.Web("https://example.com/terms"))))
         show { viewer(ViewerMode.Read, linked) }
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("link-0-0").performClick()
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_link_open.png")
+    }
+
+    // The sample with a web link over its title and a page link over the first heading.
+    private val linked by lazy {
+        sample.copy(
+            links = listOf(
+                PageLink(0, 0, DisplayRect(0.1f, 0.1f, 0.6f, 0.15f), LinkTarget.Web("https://example.com/terms")),
+                PageLink(0, 1, DisplayRect(0.1f, 0.3f, 0.4f, 0.34f), LinkTarget.Page(1)),
+            ),
+        )
+    }
+
+    // In Edit's Add link, the links a page already has are outlined.
+    @Test
+    fun viewerEditLinks() = capture("viewer_edit_links") { viewer(ViewerMode.Edit, linked, tool = R.string.tool_add_link) }
+
+    // A tap on one of them offers to change where it leads, or to remove it.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerEditLinkChange() {
+        show { viewer(ViewerMode.Edit, linked, tool = R.string.tool_add_link) }
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("edit-link-0-0").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_edit_link_change.png")
+    }
+
+    // The link dialog with "Page in this PDF" chosen, for a page the PDF no longer has (6 of 2),
+    // so the page field shows its error and Change is off. Opened like viewerGoToPage.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerLinkToPage() {
+        val open = mutableStateOf(false)
+        show {
+            viewer(ViewerMode.Edit, linked, tool = R.string.tool_add_link)
+            if (open.value) AddLinkDialog(pageCount = 2, onDismiss = {}, onAdd = {}, existing = LinkTarget.Page(5), onRemove = {})
+        }
+        composeRule.mainClock.autoAdvance = false
+        open.value = true
+        composeRule.mainClock.advanceTimeBy(500)
+        shadowOf(Looper.getMainLooper()).idle()
+        composeRule.mainClock.advanceTimeBy(500)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_link_to_page.png")
     }
 
     @Test

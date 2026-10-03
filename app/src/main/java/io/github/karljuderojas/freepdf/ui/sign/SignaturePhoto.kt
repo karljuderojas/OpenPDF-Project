@@ -87,6 +87,9 @@ fun SignaturePhotoPane(
     // Wait a moment after each drag so the cut-out is not redone for every pixel moved.
     LaunchedEffect(source, crop, ink) {
         val photo = source ?: return@LaunchedEffect
+        // The previous crop's cut-out must not be saved while this one is still being worked out.
+        looked = false
+        onResult(null)
         delay(150)
         val cut = withContext(Dispatchers.Default) {
             runCatching {

@@ -1,7 +1,9 @@
 package io.github.karljuderojas.freepdf.pdf.links
 
+import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.interactive.action.PDAction
 import com.tom_roush.pdfbox.pdmodel.interactive.action.PDActionGoTo
 import com.tom_roush.pdfbox.pdmodel.interactive.action.PDActionURI
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink
@@ -13,6 +15,7 @@ import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.destination.P
 import io.github.karljuderojas.freepdf.pdf.DisplayRect
 import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.displayToPdf
+import io.github.karljuderojas.freepdf.pdf.onPage
 import io.github.karljuderojas.freepdf.pdf.pdfToDisplay
 
 /** Where a link leads: out to a web address (or mail or phone link), or to a page of this PDF. */
@@ -23,10 +26,14 @@ sealed interface LinkTarget {
     data class Page(val index: Int) : LinkTarget
 }
 
-/** A tappable area of [page] (zero-based), as it is shown, with where it leads. */
-data class PageLink(val page: Int, val box: DisplayRect, val target: LinkTarget)
+/**
+ * A tappable area of [page] (zero-based), as it is shown, with where it leads. [index] is its
+ * place in the page's annotation list, which is how [PageLinks.remove] and [PageLinks.update]
+ * find it again.
+ */
+data class PageLink(val page: Int, val index: Int, val box: DisplayRect, val target: LinkTarget)
 
-/** Reading the links a PDF already has, and adding new ones. */
+/** Reading the links a PDF already has, adding new ones, and changing or removing them. */
 object PageLinks {
 
     /** The only kinds of address a tap will open. A PDF cannot make the app open files or run scripts. */
@@ -56,14 +63,22 @@ object PageLinks {
         return if (scheme == "http" || scheme == "https") rest.removePrefix("//").isNotBlank() else rest.isNotBlank()
     }
 
-    /** Every link in [document] that goes somewhere the app can open or show, in page order. */
-    fun read(document: PDDocument): List<PageLink> = document.pages.flatMapIndexed { index, page ->
+    /**
+     * Every link in [document] that goes somewhere the app can open or show, in page order. A
+     * link that lies in a part of the page a crop has taken away is left out, and one that
+     * crosses the edge is cut down to the page, so no tappable area ever sits off the page.
+     */
+    fun read(document: PDDocument): List<PageLink> = document.pages.flatMapIndexed { pageIndex, page ->
         val crop = page.cropBox.let { PdfRect(it.lowerLeftX, it.lowerLeftY, it.upperRightX, it.upperRightY) }
-        page.annotations.filterIsInstance<PDAnnotationLink>().mapNotNull { link ->
-            val rect = link.rectangle ?: return@mapNotNull null
-            val target = targetOf(document, link) ?: return@mapNotNull null
-            val area = PdfRect(rect.lowerLeftX, rect.lowerLeftY, rect.upperRightX, rect.upperRightY)
-            PageLink(index, pdfToDisplay(area, page.rotation, crop), target)
+        page.annotations.mapIndexedNotNull { index, annotation ->
+            val link = annotation as? PDAnnotationLink ?: return@mapIndexedNotNull null
+            // One link PdfBox cannot make sense of is left out on its own, not with every other link.
+            runCatching {
+                val rect = link.rectangle ?: return@runCatching null
+                val target = targetOf(document, link) ?: return@runCatching null
+                val area = PdfRect(rect.lowerLeftX, rect.lowerLeftY, rect.upperRightX, rect.upperRightY)
+                pdfToDisplay(area, page.rotation, crop).onPage()?.let { PageLink(pageIndex, index, it, target) }
+            }.getOrNull()
         }
     }
 
@@ -72,10 +87,7 @@ object PageLinks {
      * down). A web [LinkTarget] must pass [isOpenable]; a page target must name a page that exists.
      */
     fun add(document: PDDocument, pageIndex: Int, box: DisplayRect, target: LinkTarget) {
-        when (target) {
-            is LinkTarget.Web -> require(isOpenable(target.uri)) { "Cannot link to ${target.uri}" }
-            is LinkTarget.Page -> require(target.index in 0 until document.numberOfPages) { "No page ${target.index}" }
-        }
+        checkTarget(document, target)
         val page = document.getPage(pageIndex)
         val crop = page.cropBox.let { PdfRect(it.lowerLeftX, it.lowerLeftY, it.upperRightX, it.upperRightY) }
         val a = displayToPdf(box.left, box.top, page.rotation, crop)
@@ -86,14 +98,41 @@ object PageLinks {
             rectangle = PDRectangle(left, bottom, maxOf(a.x, b.x) - left, maxOf(a.y, b.y) - bottom)
             // No frame around it: the link is the words under it.
             borderStyle = PDBorderStyleDictionary().apply { width = 0f }
-            action = when (target) {
-                is LinkTarget.Web -> PDActionURI().apply { uri = target.uri }
-                is LinkTarget.Page -> PDActionGoTo().apply {
-                    destination = PDPageFitDestination().apply { this.page = document.getPage(target.index) }
-                }
-            }
+            action = actionFor(document, target)
         }
         page.annotations = page.annotations + link
+    }
+
+    /** Points the link at [index] in page [pageIndex]'s annotation list (see [PageLink.index]) at [target] instead. */
+    fun update(document: PDDocument, pageIndex: Int, index: Int, target: LinkTarget) {
+        checkTarget(document, target)
+        val link = document.getPage(pageIndex).annotations.getOrNull(index) as? PDAnnotationLink
+        require(link != null) { "No link at $index" }
+        // A link leads by its action or by a plain destination, so an old destination must not linger.
+        link.cosObject.removeItem(COSName.DEST)
+        link.action = actionFor(document, target)
+    }
+
+    /** Takes the link at [index] in page [pageIndex]'s annotation list (see [PageLink.index]) off the page. */
+    fun remove(document: PDDocument, pageIndex: Int, index: Int) {
+        val page = document.getPage(pageIndex)
+        val annotations = page.annotations
+        require(annotations.getOrNull(index) is PDAnnotationLink) { "No link at $index" }
+        page.annotations = annotations.filterIndexed { i, _ -> i != index }
+    }
+
+    private fun checkTarget(document: PDDocument, target: LinkTarget) {
+        when (target) {
+            is LinkTarget.Web -> require(isOpenable(target.uri)) { "Cannot link to ${target.uri}" }
+            is LinkTarget.Page -> require(target.index in 0 until document.numberOfPages) { "No page ${target.index}" }
+        }
+    }
+
+    private fun actionFor(document: PDDocument, target: LinkTarget): PDAction = when (target) {
+        is LinkTarget.Web -> PDActionURI().apply { uri = target.uri }
+        is LinkTarget.Page -> PDActionGoTo().apply {
+            destination = PDPageFitDestination().apply { this.page = document.getPage(target.index) }
+        }
     }
 
     private fun targetOf(document: PDDocument, link: PDAnnotationLink): LinkTarget? {
