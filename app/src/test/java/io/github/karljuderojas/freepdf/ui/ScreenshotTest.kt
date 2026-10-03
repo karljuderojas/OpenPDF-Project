@@ -222,12 +222,13 @@ class ScreenshotTest {
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerSignFinishEditable() {
+        // As in viewerSignFinish, the name field's cursor never lets Compose go idle, and here the
+        // dialog is up from the start, so the clock is driven by hand before anything is shown.
+        composeRule.mainClock.autoAdvance = false
         show {
             viewer(ViewerMode.Sign, sample.copy(hasSignature = true))
             FinishSigningDialog(initialName = "Dana Whitfield", initialLock = false, onDismiss = {}, onFinish = { _, _, _ -> })
         }
-        // As in viewerSignFinish, the name field's cursor never lets Compose go idle.
-        composeRule.mainClock.autoAdvance = false
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_finish_editable.png")
     }
