@@ -34,7 +34,10 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -90,10 +93,12 @@ fun SignaturePadDialog(
     val context = LocalContext.current
     val initials = kind == SignatureStore.Kind.Initials
     var tab by rememberSaveable { mutableStateOf(PadTab.Draw) }
-    val strokes = remember { mutableStateListOf<List<Offset>>() }
+    // Strokes and the ink survive the dialog being rebuilt on rotation, like the typed name does.
+    val strokes = rememberSaveable(saver = StrokesSaver) { mutableStateListOf<List<Offset>>() }
     val current = remember { mutableStateListOf<Offset>() }
     var size by remember { mutableStateOf(IntSize.Zero) }
-    var ink by remember { mutableStateOf(InkColors.first().second) }
+    var inkIndex by rememberSaveable { mutableIntStateOf(0) }
+    val ink = InkColors[inkIndex].second
     var tooSimple by remember { mutableStateOf(false) }
     var typed by rememberSaveable { mutableStateOf(if (initials) TypedSignature.initialsOf(typedName) else typedName) }
     var font by rememberSaveable { mutableIntStateOf(ScriptFonts.first()) }
@@ -216,8 +221,8 @@ fun SignaturePadDialog(
                 }
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    InkColors.forEach { (label, color) ->
-                        FilterChip(selected = ink == color, onClick = { ink = color }, label = { Text(stringResource(label)) })
+                    InkColors.forEachIndexed { index, (label, _) ->
+                        FilterChip(selected = inkIndex == index, onClick = { inkIndex = index }, label = { Text(stringResource(label)) })
                     }
                 }
                 Spacer(Modifier.height(12.dp))
@@ -248,6 +253,19 @@ fun SignaturePadDialog(
         }
     }
 }
+
+/**
+ * Saves the pad's strokes in the instance state as one float array per stroke (x, y, x, y, ...),
+ * the only form a Bundle takes, and restores them into a list the pad can keep drawing on.
+ */
+val StrokesSaver: Saver<SnapshotStateList<List<Offset>>, Any> = listSaver(
+    save = { strokes -> strokes.map { stroke -> FloatArray(stroke.size * 2) { i -> if (i % 2 == 0) stroke[i / 2].x else stroke[i / 2].y } } },
+    restore = { saved ->
+        mutableStateListOf<List<Offset>>().apply {
+            saved.forEach { points -> add(List(points.size / 2) { i -> Offset(points[2 * i], points[2 * i + 1]) }) }
+        }
+    },
+)
 
 /** Sets a typed name in a script font as a tightly cropped image with a transparent background. */
 object TypedSignature {
