@@ -61,6 +61,7 @@ sealed interface ViewerState {
     /**
      * [revision] changes after every edit, so pages already on screen are rendered again.
      * [hasSignature] is true once a signature or initials are placed, which offers Finish.
+     * [isProtected] is true while the PDF needs a password to open.
      */
     data class Ready(
         val pageSizes: List<PageSize>,
@@ -68,6 +69,7 @@ sealed interface ViewerState {
         val canUndo: Boolean = false,
         val hasUnsavedChanges: Boolean = false,
         val hasSignature: Boolean = false,
+        val isProtected: Boolean = false,
     ) : ViewerState
 
     /** The PDF is password protected; [wrongPassword] after a password that did not open it. */
@@ -392,6 +394,16 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** Locks the PDF with [password], or takes its password off when [password] is empty. One undo step. */
+    fun setPassword(password: String) {
+        val done = when {
+            password.isEmpty() -> R.string.password_removed
+            (_state.value as? ViewerState.Ready)?.isProtected == true -> R.string.password_changed
+            else -> R.string.password_added
+        }
+        update(done = done) { it.setPassword(password) }
+    }
+
     fun undo() {
         viewModelScope.launch {
             lock.withLock {
@@ -456,14 +468,24 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     private class NothingChanged : Exception()
 
     /** Applies [change] as one undo step. [event] goes on the audit page if the user finishes signing. */
-    private fun edit(@StringRes onNoChange: Int? = null, event: AuditEvent? = null, change: (PDDocument) -> Unit) {
+    private fun edit(@StringRes onNoChange: Int? = null, event: AuditEvent? = null, change: (PDDocument) -> Unit) =
+        update(onNoChange, event) { it.edit(change) }
+
+    /** Makes one undo step through [step], like [edit] does, then shows [done] if given. */
+    private fun update(
+        @StringRes onNoChange: Int? = null,
+        event: AuditEvent? = null,
+        @StringRes done: Int? = null,
+        step: (EditSession) -> Unit,
+    ) {
         viewModelScope.launch {
             lock.withLock {
-                val result = runCatching { withContext(Dispatchers.IO) { session?.edit(change) } }
+                val result = runCatching { withContext(Dispatchers.IO) { session?.let(step) } }
                 when (val error = result.exceptionOrNull()) {
                     null -> {
                         editLog += event?.copy(at = Instant.now())
                         _state.value = reloadLocked()
+                        done?.let { _effects.send(ViewerEffect.Message(it)) }
                     }
                     is NothingChanged -> onNoChange?.let { _effects.send(ViewerEffect.Message(it)) }
                     else -> _effects.send(ViewerEffect.Message(R.string.edit_failed))
@@ -505,7 +527,10 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         val next = PdfRenderer.open(context, Uri.fromFile(current.workingFile), current.password.ifEmpty { null })
         renderer = next
         val hasSignature = editLog.any { it?.type == AuditEvent.Type.Signed }
-        return ViewerState.Ready(next.pageSizes, revision, current.canUndo, current.hasUnsavedChanges, hasSignature)
+        return ViewerState.Ready(
+            next.pageSizes, revision, current.canUndo, current.hasUnsavedChanges, hasSignature,
+            isProtected = current.password.isNotEmpty(),
+        )
     }
 
     /** Lists [uri] in the Files tab; in the history too if the app can reopen it later. */

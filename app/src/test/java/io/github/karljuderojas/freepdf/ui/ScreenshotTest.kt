@@ -206,6 +206,28 @@ class ScreenshotTest {
     @Test
     fun viewerMore() = capture("viewer_more") { viewer(ViewerMode.More) }
 
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPasswordAdd() {
+        show { viewer(ViewerMode.More) }
+        composeRule.onNodeWithText("Password").performClick()
+        // Typing focuses the fields, whose blinking cursor never lets Compose go idle.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("new-password-field").performTextInput("lease2026")
+        composeRule.onNodeWithTag("confirm-password-field").performTextInput("lease2025")
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_password_add.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPasswordLocked() {
+        show { viewer(ViewerMode.More, sample.copy(isProtected = true)) }
+        composeRule.onNodeWithText("Password").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_password_locked.png")
+    }
+
     // 3 Oct 2026, 15:00 on the test machine's clock, so Today and Yesterday group the same way everywhere.
     private val now = Calendar.getInstance().apply { set(2026, Calendar.OCTOBER, 3, 15, 0, 0) }.timeInMillis
 

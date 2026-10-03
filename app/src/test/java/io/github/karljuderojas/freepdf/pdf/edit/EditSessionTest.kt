@@ -114,5 +114,91 @@ class EditSessionTest {
         }
     }
 
+    @Test
+    fun addingAPasswordLocksTheFileWithAes256() {
+        session.setPassword("lease2026")
+
+        assertEquals("lease2026", session.password)
+        assertTrue(session.hasUnsavedChanges)
+        assertFalse(PdfDocuments.opens(session.workingFile, ""))
+        PDDocument.load(session.workingFile, "lease2026").use {
+            assertTrue(it.isEncrypted)
+            assertEquals(256, it.encryption.length)
+            assertTrue(it.currentAccessPermission.isOwnerPermission)
+            assertEquals(2, it.numberOfPages)
+        }
+
+        // Later edits keep it locked with the new password.
+        session.edit { PageEditor.rotate(it, 0, 90) }
+        assertFalse(PdfDocuments.opens(session.workingFile, ""))
+        PDDocument.load(session.workingFile, "lease2026").use { assertEquals(90, it.getPage(0).rotation) }
+    }
+
+    @Test
+    fun undoingAnAddedPasswordUnlocksTheFileAgain() {
+        session.setPassword("lease2026")
+        session.undo()
+
+        assertEquals("", session.password)
+        assertFalse(session.canUndo)
+        PDDocument.load(session.workingFile).use { assertFalse(it.isEncrypted) }
+    }
+
+    @Test
+    fun aPasswordCanBeChangedAndRemoved() {
+        session.setPassword("lease2026")
+        session.setPassword("renewal2027")
+
+        assertEquals("renewal2027", session.password)
+        assertFalse(PdfDocuments.opens(session.workingFile, "lease2026"))
+        assertTrue(PdfDocuments.opens(session.workingFile, "renewal2027"))
+
+        session.setPassword("")
+        assertEquals("", session.password)
+        PDDocument.load(session.workingFile).use { assertFalse(it.isEncrypted) }
+
+        // Undo steps back through each password in turn.
+        session.undo()
+        assertEquals("renewal2027", session.password)
+        assertTrue(PdfDocuments.opens(session.workingFile, "renewal2027"))
+        session.undo()
+        assertEquals("lease2026", session.password)
+        assertTrue(PdfDocuments.opens(session.workingFile, "lease2026"))
+    }
+
+    @Test
+    fun aPasswordAddedToARestrictedPdfKeepsItsRestrictions() {
+        // Locked with only an owner password: it opens without one, but printing is not allowed.
+        val restricted = File(dir, "restricted.pdf")
+        PDDocument.load(session.workingFile).use { document ->
+            val permissions = AccessPermission().apply { setCanPrint(false) }
+            document.protect(StandardProtectionPolicy("owner-secret", "", permissions).apply { encryptionKeyLength = 128 })
+            document.save(restricted)
+        }
+        val restrictedSession = EditSession(File(dir, "restricted-session"), restricted.inputStream())
+        try {
+            assertFalse(restrictedSession.needsPassword())
+            assertEquals("", restrictedSession.password)
+
+            restrictedSession.setPassword("lease2026")
+
+            assertFalse(PdfDocuments.opens(restrictedSession.workingFile, ""))
+            PDDocument.load(restrictedSession.workingFile, "lease2026").use {
+                assertEquals(256, it.encryption.length)
+                assertFalse(it.currentAccessPermission.isOwnerPermission)
+                assertFalse(it.currentAccessPermission.canPrint())
+            }
+
+            // Taking the password off again still leaves printing restricted.
+            restrictedSession.setPassword("")
+            PDDocument.load(restrictedSession.workingFile).use {
+                assertTrue(it.isEncrypted)
+                assertFalse(it.currentAccessPermission.canPrint())
+            }
+        } finally {
+            restrictedSession.close()
+        }
+    }
+
     private fun pageCount() = PDDocument.load(session.workingFile).use { it.numberOfPages }
 }

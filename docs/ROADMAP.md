@@ -51,7 +51,7 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 ## More
 - ✅ Share: send the current PDF, unsaved changes included, to any app through Android's share sheet; also from a Recent row's menu
 - ⬜ Print
-- ⬜ Password protect / remove password
+- ✅ Password: add a password (AES-256) to a PDF, or change or remove the one it has; undo puts the old one back, and Save keeps the change
 - ⬜ Document info
 
 ## Not planned for now

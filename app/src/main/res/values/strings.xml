@@ -106,4 +106,18 @@
     <string name="forget_recent">Remove from recent</string>
     <string name="share_title">Share %1$s</string>
     <string name="share_failed">Could not prepare this PDF for sharing.</string>
+    <string name="password_add_title">Add a password</string>
+    <string name="password_add_body">Anyone opening this PDF will need this password. FreePDF can\'t recover it if you forget it.</string>
+    <string name="password_add_confirm">Add password</string>
+    <string name="password_change_title">Change password</string>
+    <string name="password_confirm_label">Type it again</string>
+    <string name="password_too_short">Use at least 4 characters.</string>
+    <string name="password_mismatch">The two passwords do not match.</string>
+    <string name="password_locked_body">Anyone opening this PDF needs its password. You can change it or take it off.</string>
+    <string name="password_remove">Remove password</string>
+    <string name="password_remove_title">Remove the password?</string>
+    <string name="password_remove_body">Once you save, anyone can open this PDF without a password.</string>
+    <string name="password_added">Password added. Save to keep it.</string>
+    <string name="password_changed">Password changed. Save to keep it.</string>
+    <string name="password_removed">Password removed. Save to keep it.</string>
 </resources>
