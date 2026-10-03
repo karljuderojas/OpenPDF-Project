@@ -16,6 +16,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -100,6 +101,20 @@ class ScreenshotTest {
     @Test
     fun viewerUnsaved() = capture("viewer_read_unsaved") {
         viewer(ViewerMode.Read, sample.copy(canUndo = true, hasUnsavedChanges = true))
+    }
+
+    @Test
+    fun viewerPassword() = capture("viewer_password") { viewer(ViewerMode.Read, ViewerState.Locked()) }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPasswordWrong() {
+        show { viewer(ViewerMode.Read, ViewerState.Locked(wrongPassword = true)) }
+        // Typing focuses the field, whose blinking cursor never lets Compose go idle.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("password-field").performTextInput("lease2026")
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_password_wrong.png")
     }
 
     @Test
