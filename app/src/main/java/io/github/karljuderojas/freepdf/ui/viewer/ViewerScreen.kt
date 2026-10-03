@@ -112,7 +112,6 @@ import io.github.karljuderojas.freepdf.pdf.annotate.Mark
 import io.github.karljuderojas.freepdf.pdf.annotate.Stamps
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
-import io.github.karljuderojas.freepdf.pdf.DisplayRect
 import io.github.karljuderojas.freepdf.pdf.sign.SignField
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureFields
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
