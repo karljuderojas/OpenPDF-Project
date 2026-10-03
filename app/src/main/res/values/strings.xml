@@ -226,7 +226,7 @@
     <string name="verify_added_after">The file was changed after this signature was applied.</string>
     <string name="verify_trusted">Certificate issued by %1$s, which this phone trusts.</string>
     <string name="verify_self_signed">The signer made this certificate themselves, so no one has checked their name.</string>
-    <string name="verify_unknown_issuer">Certificate issued by %1$s, which this phone doesn\'t recognise. Acrobat may still trust it.</string>
+    <string name="verify_unknown_issuer">Certificate issued by %1$s, which this phone doesn\'t recognise. Other PDF readers may still trust it.</string>
     <string name="verify_expired">The certificate was not valid at the time of signing.</string>
     <string name="verify_signed_at">Signed %1$s, by the signer\'s own clock.</string>
     <string name="verify_timestamp">Timestamp from %1$s: %2$s.</string>
