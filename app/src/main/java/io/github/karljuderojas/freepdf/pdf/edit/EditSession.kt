@@ -63,6 +63,7 @@ class EditSession(private val dir: File, source: InputStream) {
         try {
             PDDocument.load(workingFile, password).use { document ->
                 change(document)
+                PdfDocuments.keepProtection(document, password)
                 document.save(next)
             }
         } catch (e: Throwable) {
