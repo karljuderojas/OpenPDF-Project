@@ -3,6 +3,7 @@ package io.github.karljuderojas.freepdf.ui.files
 import android.content.Intent
 import android.net.Uri
 import android.text.format.DateUtils
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -70,13 +71,11 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit) {
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            // Keep access across restarts so the file can appear in Recent.
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                )
-            }
+            // Keep access across restarts so the file can appear in Recent. Some providers only
+            // grant read access, in which case asking for write as well would lose both.
+            val read = Intent.FLAG_GRANT_READ_URI_PERMISSION
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, read or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+                .recoverCatching { context.contentResolver.takePersistableUriPermission(uri, read) }
             onOpenPdf(uri)
         }
     }
@@ -87,7 +86,11 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit) {
         onOpenFile = { picker.launch(arrayOf("application/pdf")) },
         onOpen = { onOpenPdf(Uri.parse(it.uri)) },
         onClose = { documents.close(it.uri) },
-        onShare = { Sharing.shareUri(context, Uri.parse(it.uri), it.name) },
+        onShare = { entry ->
+            // The file may be gone or the grant revoked since it was last opened.
+            runCatching { Sharing.shareUri(context, Uri.parse(entry.uri), entry.name) }
+                .onFailure { Toast.makeText(context, R.string.share_failed, Toast.LENGTH_SHORT).show() }
+        },
         onForget = { documents.forget(it.uri) },
     )
 }

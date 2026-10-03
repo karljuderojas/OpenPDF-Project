@@ -5,7 +5,7 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
-import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
+import com.tom_roush.pdfbox.util.Matrix
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
 
 /** Page-level and content edits. All indexes are zero-based. */
@@ -40,7 +40,10 @@ object PageEditor {
         PDFMergerUtility().appendDocument(target, other)
     }
 
-    /** Draws plain text onto a page, on top of the existing content. */
+    /**
+     * Draws plain text onto a page, on top of the existing content, upright as the page is shown.
+     * Line breaks start a new line below; characters no font here can show become "?".
+     */
     fun addText(
         document: PDDocument,
         pageIndex: Int,
@@ -49,12 +52,20 @@ object PageEditor {
         fontSize: Float = 12f,
     ) {
         val page = document.getPage(pageIndex)
+        val font = PdfText.fontFor(document, text)
+        val lines = PdfText.lines(PdfText.printable(text, font))
         PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true, true).use { stream ->
-            stream.beginText()
-            stream.setFont(PDType1Font.HELVETICA, fontSize)
-            stream.newLineAtOffset(at.x, at.y)
-            stream.showText(text)
-            stream.endText()
+            stream.uprightAt(page, at) {
+                beginText()
+                setFont(font, fontSize)
+                setLeading(fontSize * 1.2f)
+                newLineAtOffset(0f, 0f)
+                lines.forEachIndexed { i, line ->
+                    if (i > 0) newLine()
+                    showText(line)
+                }
+                endText()
+            }
         }
     }
 
@@ -62,13 +73,29 @@ object PageEditor {
     fun addCheckmark(document: PDDocument, pageIndex: Int, at: PdfPoint, size: Float = 10f) {
         val page = document.getPage(pageIndex)
         PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true, true).use { stream ->
-            stream.setLineWidth(size / 6)
-            stream.setLineCapStyle(1)
-            stream.setLineJoinStyle(1)
-            stream.moveTo(at.x - size * 0.4f, at.y + size * 0.4f)
-            stream.lineTo(at.x, at.y)
-            stream.lineTo(at.x + size * 0.6f, at.y + size)
-            stream.stroke()
+            stream.uprightAt(page, at) {
+                setLineWidth(size / 6)
+                setLineCapStyle(1)
+                setLineJoinStyle(1)
+                moveTo(-size * 0.4f, size * 0.4f)
+                lineTo(0f, 0f)
+                lineTo(size * 0.6f, size)
+                stroke()
+            }
         }
+    }
+
+    /**
+     * Runs [draw] with the origin at [at] and the axes turned so that what it draws is upright
+     * when the page is shown. Content is stored in the page's unrotated space, so on a page with
+     * /Rotate 90 (common for scans) text drawn the plain way comes out sideways.
+     */
+    internal fun PDPageContentStream.uprightAt(page: PDPage, at: PdfPoint, draw: PDPageContentStream.() -> Unit) {
+        saveGraphicsState()
+        transform(Matrix.getTranslateInstance(at.x, at.y))
+        val rotation = ((page.rotation % 360) + 360) % 360
+        if (rotation != 0) transform(Matrix.getRotateInstance(Math.toRadians(rotation.toDouble()), 0f, 0f))
+        draw()
+        restoreGraphicsState()
     }
 }
