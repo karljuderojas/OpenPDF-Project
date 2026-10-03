@@ -1,13 +1,15 @@
 package io.github.karljuderojas.freepdf.files
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import java.io.File
 
 /** What happened when a file was renamed from the Files tab. */
 sealed interface RenameResult {
-    data class Renamed(val uri: Uri, val name: String) : RenameResult
+    /** [persisted]: the app holds a lasting grant on the new [uri], so it still opens after a restart. */
+    data class Renamed(val uri: Uri, val name: String, val persisted: Boolean = true) : RenameResult
     /** The provider (or file) cannot be renamed; the name in the list is left alone. */
     data object Unsupported : RenameResult
     /** Something else is already called that, or the provider refused. */
@@ -55,11 +57,31 @@ object FileActions {
             "content" -> {
                 if (!canRename(context, uri)) return RenameResult.Unsupported
                 val renamed = DocumentsContract.renameDocument(context.contentResolver, uri, newName)
-                if (renamed != null) RenameResult.Renamed(renamed, newName) else RenameResult.Failed
+                if (renamed != null) RenameResult.Renamed(renamed, newName, persistGrant(context, uri, renamed)) else RenameResult.Failed
             }
             else -> RenameResult.Unsupported
         }
     }.getOrDefault(RenameResult.Failed)
+
+    /**
+     * A rename can give the document a new URI, and the lasting grant the app holds is for the old
+     * one: take one for [new] (writable if possible) and let the old one go. False if the provider
+     * would not grant it, in which case the new URI will not reopen after a restart.
+     */
+    private fun persistGrant(context: Context, old: Uri, new: Uri): Boolean {
+        if (new == old) return true
+        val resolver = context.contentResolver
+        val read = Intent.FLAG_GRANT_READ_URI_PERMISSION
+        val taken = runCatching { resolver.takePersistableUriPermission(new, read or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+            .recoverCatching { resolver.takePersistableUriPermission(new, read) }
+            .isSuccess
+        if (taken) {
+            val flags = resolver.persistedUriPermissions.firstOrNull { it.uri == old }
+                ?.let { (if (it.isReadPermission) read else 0) or (if (it.isWritePermission) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0) }
+            if (flags != null && flags != 0) runCatching { resolver.releasePersistableUriPermission(old, flags) }
+        }
+        return taken
+    }
 
     fun delete(context: Context, uri: Uri): DeleteResult = runCatching {
         when (uri.scheme) {

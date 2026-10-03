@@ -155,6 +155,8 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
                                 // Sessions are keyed by URI, and this one has nothing unsaved: let it go, the new URI starts fresh.
                                 sessions.close(entry.uri)
                                 documents.renamed(entry.uri, result.uri.toString(), result.name)
+                                // Without a lasting grant it would not reopen after a restart, so it stays out of the history.
+                                if (!result.persisted) documents.forget(result.uri.toString())
                                 Toast.makeText(context, context.getString(R.string.renamed_toast, result.name), Toast.LENGTH_SHORT).show()
                             }
                             RenameResult.Unsupported -> error = R.string.rename_unsupported
