@@ -27,6 +27,8 @@ import io.github.karljuderojas.freepdf.pdf.edit.EditSession
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import io.github.karljuderojas.freepdf.pdf.edit.PdfText
+import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
+import io.github.karljuderojas.freepdf.pdf.render.PageBox
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.render.PdfRenderer
 import io.github.karljuderojas.freepdf.pdf.sign.AuditEvent
@@ -40,6 +42,7 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignerRecord
 import io.github.karljuderojas.freepdf.pdf.sign.SigningIdentity
 import io.github.karljuderojas.freepdf.share.Sharing
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -64,6 +67,7 @@ sealed interface ViewerState {
     /**
      * [revision] changes after every edit, so pages already on screen are rendered again.
      * [hasSignature] is true once a signature or initials are placed, which offers Finish.
+     * [outline] is the PDF's table of contents, empty if it has none.
      */
     data class Ready(
         val pageSizes: List<PageSize>,
@@ -71,6 +75,7 @@ sealed interface ViewerState {
         val canUndo: Boolean = false,
         val hasUnsavedChanges: Boolean = false,
         val hasSignature: Boolean = false,
+        val outline: List<OutlineItem> = emptyList(),
     ) : ViewerState
 
     /** The PDF is password protected; [wrongPassword] after a password that did not open it. */
@@ -78,6 +83,12 @@ sealed interface ViewerState {
 
     data class Failed(val message: String?) : ViewerState
 }
+
+/** One place the search text was found: its page, and boxes covering it on that page. */
+data class TextMatch(val page: Int, val boxes: List<PageBox>)
+
+/** Matches for [query] so far, in page order; [finished] once every page has been searched. */
+data class SearchResults(val query: String = "", val matches: List<TextMatch> = emptyList(), val finished: Boolean = true)
 
 /** One-off things the screen does for the view model: messages, the Save As picker, leaving. */
 sealed interface ViewerEffect {
@@ -130,6 +141,12 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     private val context get() = getApplication<Application>()
 
+    private val _search = MutableStateFlow(SearchResults())
+
+    /** Results of the last [search]. Cleared whenever the document changes. */
+    val search: StateFlow<SearchResults> = _search.asStateFlow()
+    private var searchJob: Job? = null
+
     private val signatureStore = SignatureStore(File(application.filesDir, "signatures"))
     private val _savedSignatures = MutableStateFlow<Map<SignatureStore.Kind, Bitmap>>(emptyMap())
 
@@ -174,6 +191,34 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                     firstLoadLocked()
                 }
             }.onSuccess { remember(uri) }.getOrElse { ViewerState.Failed(it.message) }
+        }
+    }
+
+    /** Searches every page for [query], publishing matches page by page. A blank query clears. */
+    fun search(query: String) {
+        searchJob?.cancel()
+        val text = query.trim()
+        if (text.isEmpty()) {
+            _search.value = SearchResults()
+            return
+        }
+        _search.value = SearchResults(text, finished = false)
+        searchJob = viewModelScope.launch {
+            val found = ArrayList<TextMatch>()
+            var index = 0
+            while (true) {
+                // One page per turn of the lock, so pages keep rendering while a long PDF is searched.
+                val onPage = lock.withLock {
+                    val current = renderer ?: return@withLock null
+                    if (index >= current.pageCount) null else runCatching { current.find(index, text) }.getOrDefault(emptyList())
+                } ?: break
+                if (onPage.isNotEmpty()) {
+                    onPage.forEach { found += TextMatch(index, it) }
+                    _search.value = SearchResults(text, found.toList(), finished = false)
+                }
+                index++
+            }
+            _search.value = SearchResults(text, found.toList(), finished = true)
         }
     }
 
@@ -624,11 +669,14 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         renderer?.close()
         renderer = null
         cache.evictAll()
+        searchJob?.cancel()
+        _search.value = SearchResults()
         revision++
         val next = PdfRenderer.open(context, Uri.fromFile(current.workingFile), current.password.ifEmpty { null })
         renderer = next
         val hasSignature = editLog.any { it?.type == AuditEvent.Type.Signed }
-        return ViewerState.Ready(next.pageSizes, revision, current.canUndo, current.hasUnsavedChanges, hasSignature)
+        val outline = runCatching { next.outline() }.getOrDefault(emptyList())
+        return ViewerState.Ready(next.pageSizes, revision, current.canUndo, current.hasUnsavedChanges, hasSignature, outline)
     }
 
     /** Lists [uri] in the Files tab; in the history too if the app can reopen it later. */
