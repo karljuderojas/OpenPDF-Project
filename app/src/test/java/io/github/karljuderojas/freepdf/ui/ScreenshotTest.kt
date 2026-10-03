@@ -49,6 +49,7 @@ import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
 import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
+import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.home.HomeContent
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
 import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
@@ -503,6 +504,24 @@ class ScreenshotTest {
         composeRule.onNodeWithText("Finish").performClick()
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_finish.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerSignFinishEditable() {
+        var finishing by mutableStateOf(false)
+        show {
+            viewer(ViewerMode.Sign, sample.copy(hasSignature = true))
+            if (finishing) {
+                FinishSigningDialog(initialName = "Dana Whitfield", initialLock = false, onDismiss = {}, onFinish = { _, _, _ -> })
+            }
+        }
+        // As in viewerSignFinish, the dialog's name field never lets Compose go idle, so it opens
+        // only once the clock is driven by hand.
+        composeRule.mainClock.autoAdvance = false
+        finishing = true
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_finish_editable.png")
     }
 
     @Test

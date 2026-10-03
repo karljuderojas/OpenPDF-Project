@@ -13,12 +13,15 @@ import java.io.OutputStream
 object SignedCopy {
 
     /** What the audit page says the record does and does not prove. */
-    fun notes(sealed: Boolean): List<String> = buildList {
+    fun notes(sealed: Boolean, locked: Boolean = true): List<String> = buildList {
         add(
             "This record was made on the signer's own device by FreePDF. The signer's identity was not " +
                 "checked by email, phone or ID.",
         )
         add("Original SHA-256 is the fingerprint of the file before it was signed.")
+        if (!locked) {
+            add("The signer chose to keep the signatures editable, so they can still be moved or removed in a PDF app.")
+        }
         if (sealed) {
             add(
                 "This file carries a digital signature from a certificate created on the signer's device. " +
@@ -30,7 +33,8 @@ object SignedCopy {
 
     /**
      * Writes [source] plus the audit page for [trail] to [output]. When [identity] is given, the
-     * result is signed by it in [signerName]'s name. [scratch] is a file this may overwrite.
+     * result is signed by it in [signerName]'s name. With [lock], signatures placed as annotations
+     * are drawn into their pages first (see [SignatureAnnotation]). [scratch] is a file this may overwrite.
      * A locked [source] opens with [password] and the copy stays locked with it.
      */
     fun write(
@@ -41,9 +45,11 @@ object SignedCopy {
         output: OutputStream,
         scratch: File,
         password: String = "",
+        lock: Boolean = true,
     ) {
         PDDocument.load(source, password).use { document ->
-            AuditPageWriter.append(document, trail, notes(sealed = identity != null))
+            if (lock) SignatureAnnotation.lock(document)
+            AuditPageWriter.append(document, trail, notes(sealed = identity != null, locked = lock))
             PdfDocuments.keepProtection(document, password)
             document.save(scratch)
         }

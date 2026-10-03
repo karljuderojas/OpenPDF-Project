@@ -158,7 +158,13 @@
     <string name="finish_seal_detail">Anyone can then see if the file changes after you sign. Other apps may call the certificate not verified, because it was made on this phone.</string>
     <string name="finish_consent">I agree to sign this document electronically, and my electronic signature is as binding as my handwritten one.</string>
     <string name="finish_record">A signing certificate page with your name, the time and the file\'s fingerprint is added at the end. The signed copy is saved separately, so the original stays as it is.</string>
-    <string name="finish_confirm">Sign and save</string>
+    <string name="finish_lock">Lock signatures (recommended)</string>
+    <string name="finish_lock_detail">They become part of the page and can\'t be moved or removed. Best for sending.</string>
+    <string name="finish_editable">Keep signatures editable</string>
+    <string name="finish_editable_detail">They stay separate marks that can still be moved or deleted later in a PDF app.</string>
+    <string name="finish_seal_needs_lock">Only for locked signatures, because moving one later would break the seal.</string>
+    <string name="finish_save">Save</string>
+    <string name="finish_save_share">Save &amp; share</string>
     <string name="sign_failed">Could not finish signing.</string>
     <string name="signed_copy_saved">Signed copy saved</string>
     <string name="files_title">Files</string>
