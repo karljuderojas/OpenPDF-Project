@@ -219,6 +219,9 @@ if __name__ == "__main__":
     pdf.write_bytes(build_pdf([page_one(), page_two()]))
     # 1080 px wide matches the Pixel 7 screenshot width.
     subprocess.run(["pdftoppm", "-png", "-scale-to-x", "1080", "-scale-to-y", "-1", str(pdf), str(OUT / "page")], check=True)
+    # Page 1 again at 2.5x, for the sharp part of the zoomed-viewer screenshot.
+    subprocess.run(["pdftoppm", "-png", "-f", "1", "-l", "1", "-scale-to-x", "2700", "-scale-to-y", "-1", "-singlefile",
+                    str(pdf), str(OUT / "page-1-large")], check=True)
     form = OUT / "form.pdf"
     form.write_bytes(form_pdf())
     subprocess.run(["pdftoppm", "-png", "-scale-to-x", "1080", "-scale-to-y", "-1", "-singlefile", str(form), str(OUT / "form-page")], check=True)
