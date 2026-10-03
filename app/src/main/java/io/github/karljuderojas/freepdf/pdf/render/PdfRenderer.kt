@@ -82,11 +82,12 @@ class PdfRenderer private constructor(
     companion object {
         private val core by lazy { PdfiumCoreKt(Dispatchers.IO) }
 
-        suspend fun open(context: Context, uri: Uri): PdfRenderer {
+        /** Opens [uri], unlocking it with [password] if it is protected. */
+        suspend fun open(context: Context, uri: Uri, password: String? = null): PdfRenderer {
             val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
                 ?: error("Cannot open $uri")
             // The PDFium document owns the descriptor from here on and closes it with the document.
-            val document = core.newDocument(descriptor)
+            val document = if (password == null) core.newDocument(descriptor) else core.newDocument(descriptor, password)
             val sizes = (0 until document.getPageCount()).map { index ->
                 val page = document.openPage(index) ?: error("Page $index could not be opened")
                 page.use { PageSize(it.getPageWidthPoint().toFloat(), it.getPageHeightPoint().toFloat()) }

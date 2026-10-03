@@ -75,6 +75,9 @@ sealed interface ViewerState {
         val outline: List<OutlineItem> = emptyList(),
     ) : ViewerState
 
+    /** The PDF is password protected; [wrongPassword] after a password that did not open it. */
+    data class Locked(val wrongPassword: Boolean = false) : ViewerState
+
     data class Failed(val message: String?) : ViewerState
 }
 
@@ -172,7 +175,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         openedAt = Instant.now()
                         editLog.clear()
                     }
-                    reloadLocked()
+                    firstLoadLocked()
                 }
             }.onSuccess { remember(uri) }.getOrElse { ViewerState.Failed(it.message) }
         }
@@ -203,6 +206,20 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 index++
             }
             _search.value = SearchResults(text, found.toList(), finished = true)
+        }
+    }
+
+    /** Tries [password] on a [ViewerState.Locked] PDF. */
+    fun unlock(password: String) {
+        viewModelScope.launch {
+            _state.value = lock.withLock {
+                val current = session ?: return@withLock ViewerState.Failed(null)
+                if (withContext(Dispatchers.IO) { current.unlock(password) }) {
+                    runCatching { reloadLocked() }.getOrElse { ViewerState.Failed(it.message) }
+                } else {
+                    ViewerState.Locked(wrongPassword = true)
+                }
+            }
         }
     }
 
@@ -356,7 +373,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         }
                         val out = File(context.cacheDir, "signed/${UUID.randomUUID()}.pdf").apply { parentFile?.mkdirs() }
                         out.outputStream().use { output ->
-                            SignedCopy.write(current.workingFile, trail, name, identity, output, File(out.path + ".tmp"))
+                            SignedCopy.write(current.workingFile, trail, name, identity, output, File(out.path + ".tmp"), current.password)
                         }
                         pendingSignedCopy?.delete()
                         pendingSignedCopy = out
@@ -514,6 +531,15 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         return PdfRect(minOf(a.x, b.x), minOf(a.y, b.y), maxOf(a.x, b.x), maxOf(a.y, b.y))
     }
 
+    /** Loads a newly opened PDF, or asks for its password if it is locked. Call with [lock] held. */
+    private suspend fun firstLoadLocked(): ViewerState = try {
+        reloadLocked()
+    } catch (e: Exception) {
+        // PDFium only says it could not open the file; PdfBox can tell whether a password is why.
+        val locked = session?.let { withContext(Dispatchers.IO) { runCatching { it.needsPassword() }.getOrDefault(false) } }
+        if (locked == true) ViewerState.Locked() else throw e
+    }
+
     /** Re-opens the working copy in PDFium. Call with [lock] held. */
     private suspend fun reloadLocked(): ViewerState {
         val current = session ?: return ViewerState.Failed(null)
@@ -523,7 +549,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         searchJob?.cancel()
         _search.value = SearchResults()
         revision++
-        val next = PdfRenderer.open(context, Uri.fromFile(current.workingFile))
+        val next = PdfRenderer.open(context, Uri.fromFile(current.workingFile), current.password.ifEmpty { null })
         renderer = next
         val hasSignature = editLog.any { it?.type == AuditEvent.Type.Signed }
         val outline = runCatching { next.outline() }.getOrDefault(emptyList())
