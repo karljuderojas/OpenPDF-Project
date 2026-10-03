@@ -256,8 +256,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun saveSignature(kind: SignatureStore.Kind, image: Bitmap) {
+    fun saveSignature(kind: SignatureStore.Kind, image: Bitmap, method: SignatureMethod) {
         _savedSignatures.value += kind to image
+        signingPrefs.edit().putString(methodKey(kind), method.name).apply()
         viewModelScope.launch(Dispatchers.IO) {
             // Still usable in this session if the Keystore refuses; it just is not remembered.
             runCatching { signatureStore.save(kind, image) }
@@ -326,7 +327,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                                 name = name,
                                 email = null,
                                 signedAt = now,
-                                method = SignatureMethod.Drawn,
+                                method = signatureMethod(),
                                 reason = null,
                                 device = "${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}",
                                 consentText = consentText,
@@ -381,6 +382,15 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
+
+    /** How the saved signature (or, failing that, the initials) was made, for the audit page. */
+    private fun signatureMethod(): SignatureMethod =
+        listOf(SignatureStore.Kind.Signature, SignatureStore.Kind.Initials)
+            .firstNotNullOfOrNull { kind ->
+                signingPrefs.getString(methodKey(kind), null)?.let { name -> SignatureMethod.entries.firstOrNull { it.name == name } }
+            } ?: SignatureMethod.Drawn
+
+    private fun methodKey(kind: SignatureStore.Kind) = "method_${kind.name}"
 
     fun cancelSignedCopy() {
         pendingSignedCopy?.delete()

@@ -85,6 +85,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
@@ -113,7 +114,7 @@ sealed interface ViewerAction {
     data class Erase(val page: Int, val at: Offset) : ViewerAction
 
     /** Sign actions. */
-    data class SaveSignature(val kind: SignatureStore.Kind, val image: Bitmap) : ViewerAction
+    data class SaveSignature(val kind: SignatureStore.Kind, val image: Bitmap, val method: SignatureMethod) : ViewerAction
     data class PlaceSignature(val page: Int, val at: Offset, val kind: SignatureStore.Kind) : ViewerAction
     data class AddDate(val page: Int, val at: Offset) : ViewerAction
     data class AddText(val page: Int, val at: Offset, val text: String) : ViewerAction
@@ -188,7 +189,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 }
                 is ViewerAction.Note -> viewModel.note(action.page, action.at, action.text)
                 is ViewerAction.Erase -> viewModel.erase(action.page, action.at)
-                is ViewerAction.SaveSignature -> viewModel.saveSignature(action.kind, action.image)
+                is ViewerAction.SaveSignature -> viewModel.saveSignature(action.kind, action.image, action.method)
                 is ViewerAction.PlaceSignature -> viewModel.placeSignature(action.page, action.at, action.kind)
                 is ViewerAction.AddDate -> viewModel.addDate(action.page, action.at)
                 is ViewerAction.AddText -> viewModel.addText(action.page, action.at, action.text)
@@ -432,10 +433,11 @@ fun ViewerContent(
     padFor?.let { kind ->
         SignaturePadDialog(
             kind = kind,
+            typedName = signerName,
             onDismiss = { padFor = null },
-            onSave = {
+            onSave = { image, method ->
                 padFor = null
-                onAction(ViewerAction.SaveSignature(kind, it))
+                onAction(ViewerAction.SaveSignature(kind, image, method))
             },
         )
     }
