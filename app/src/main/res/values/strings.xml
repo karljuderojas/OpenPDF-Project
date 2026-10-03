@@ -101,6 +101,7 @@
     <string name="discard">Discard</string>
     <string name="saved">Saved</string>
     <string name="save_failed">Could not save this PDF.</string>
+    <string name="save_open_to_finish">This PDF has stamps that are not placed yet. Open it and tap Done to finish them.</string>
     <string name="save_failed_open_to_save_a_copy">Could not save here. Open the PDF and use Save As.</string>
     <string name="edit_failed">That change could not be made to this PDF.</string>
     <string name="cannot_delete_last_page">A PDF needs at least one page.</string>
