@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.toOffset
 import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.zIndex
 import kotlinx.coroutines.flow.first
+import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 
@@ -77,6 +78,7 @@ fun PageGrid(
     onSelectionToggled: (Int) -> Unit,
     onPageMoved: (from: Int, to: Int) -> Unit,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
+    pageColors: PageColors = PageColors.Normal,
 ) {
     val gridState = rememberLazyGridState()
     LaunchedEffect(Unit) { gridState.scrollToItem(selectedPages.minOrNull() ?: 0) }
@@ -149,7 +151,8 @@ fun PageGrid(
                 ) {
                     PageImage(
                         page, pageSizes[page], revision, thumbWidthPx, loadPage,
-                        Modifier
+                        pageColors = pageColors,
+                        modifier = Modifier
                             .fillMaxWidth()
                             .clip(shape)
                             .border(

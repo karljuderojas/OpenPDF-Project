@@ -28,11 +28,19 @@ class PdfRenderer private constructor(
 
     val pageCount: Int get() = pageSizes.size
 
-    /** Renders [pageIndex] at [targetWidthPx] wide, keeping the page's aspect ratio. */
+    /**
+     * Renders [pageIndex] at [targetWidthPx] wide, keeping the page's aspect ratio. A very tall
+     * page (a receipt, a long scroll) is rendered narrower so the bitmap stays within what the
+     * heap and the GPU can take; the zoom detail layer sharpens it where the user looks.
+     */
     suspend fun renderPage(pageIndex: Int, targetWidthPx: Int): Bitmap {
         val size = pageSizes[pageIndex]
-        val width = targetWidthPx.coerceAtLeast(1)
-        val height = (width / size.aspectRatio).roundToInt().coerceAtLeast(1)
+        var width = targetWidthPx.coerceAtLeast(1)
+        var height = (width / size.aspectRatio).roundToInt().coerceAtLeast(1)
+        if (height > MAX_PAGE_HEIGHT_PX) {
+            width = (width * MAX_PAGE_HEIGHT_PX.toFloat() / height).roundToInt().coerceAtLeast(1)
+            height = MAX_PAGE_HEIGHT_PX
+        }
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val page = document.openPage(pageIndex) ?: error("Page $pageIndex could not be opened")
         page.use {
@@ -99,6 +107,9 @@ class PdfRenderer private constructor(
     }
 
     companion object {
+        /** The tallest page bitmap worth making: beyond this a 1080-px-wide page passes 70 MB. */
+        private const val MAX_PAGE_HEIGHT_PX = 4096
+
         private val core by lazy { PdfiumCoreKt(Dispatchers.IO) }
 
         /** Opens [uri], unlocking it with [password] if it is protected. */

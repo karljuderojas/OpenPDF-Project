@@ -466,9 +466,9 @@ fun ViewerContent(
     // Pages mode's selection; never empty, so the tools always have something to act on.
     var selectedPages by rememberSaveable(stateSaver = PageSetSaver) { mutableStateOf(initialSelectedPages) }
     val selectedPage = selectedPages.minOrNull() ?: 0
-    var confirmDelete by remember { mutableStateOf(false) }
-    var extracting by remember { mutableStateOf(false) }
-    var splitting by remember { mutableStateOf(false) }
+    var confirmDelete by rememberSaveable { mutableStateOf(false) }
+    var extracting by rememberSaveable { mutableStateOf(false) }
+    var splitting by rememberSaveable { mutableStateOf(false) }
     // What to do once the reader settles unsaved changes; non-null while the dialog shows.
     var leaveThen by remember { mutableStateOf<(() -> Unit)?>(null) }
     var showSwitcher by rememberSaveable { mutableStateOf(false) }
@@ -477,17 +477,17 @@ fun ViewerContent(
     var stampKind by rememberSaveable { mutableStateOf(Stamps.Kind.Approved) }
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var editingField by remember { mutableStateOf<FormField?>(null) }
-    var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
-    var finishing by remember { mutableStateOf(false) }
-    var showCertificate by remember { mutableStateOf(initialShowCertificate) }
-    var showSignatures by remember { mutableStateOf(initialShowSignatures) }
+    var padFor by rememberSaveable { mutableStateOf<SignatureStore.Kind?>(null) }
+    var finishing by rememberSaveable { mutableStateOf(false) }
+    var showCertificate by rememberSaveable { mutableStateOf(initialShowCertificate) }
+    var showSignatures by rememberSaveable { mutableStateOf(initialShowSignatures) }
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     // The place to sign Next field last went to, and the one waiting for the signature to be drawn.
     var currentField by rememberSaveable { mutableStateOf(initialSignField) }
     var pendingField by remember { mutableStateOf<Int?>(null) }
-    var sharing by remember { mutableStateOf(false) }
-    var choosingPassword by remember { mutableStateOf(false) }
+    var sharing by rememberSaveable { mutableStateOf(false) }
+    var choosingPassword by rememberSaveable { mutableStateOf(false) }
     // Chosen here so the page preview follows at once; the view model remembers them for next time.
     var styles by remember { mutableStateOf(toolStyles) }
     LaunchedEffect(toolStyles) { styles = styles + toolStyles }
@@ -501,15 +501,15 @@ fun ViewerContent(
     var pickedMark by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val selectedMark = pickedMark?.let { (page, index) -> marks.firstOrNull { it.page == page && it.index == index } }
         ?.takeIf { mode == ViewerMode.Read || (mode == ViewerMode.Annotate && AnnotateTool.forLabel(selectedTool) == null) }
-    var showComments by remember { mutableStateOf(false) }
+    var showComments by rememberSaveable { mutableStateOf(false) }
     var commentFor by remember { mutableStateOf<Mark?>(null) }
     var searching by rememberSaveable { mutableStateOf(initialSearchQuery != null) }
     var query by rememberSaveable { mutableStateOf(initialSearchQuery.orEmpty()) }
     var currentMatch by rememberSaveable { mutableIntStateOf(0) }
     val searchFocus = remember { FocusRequester() }
     var focusSearch by remember { mutableStateOf(false) }
-    var goingToPage by remember { mutableStateOf(false) }
-    var showingOutline by remember { mutableStateOf(false) }
+    var goingToPage by rememberSaveable { mutableStateOf(false) }
+    var showingOutline by rememberSaveable { mutableStateOf(false) }
     var selectedStamp by remember { mutableStateOf(initialSelectedStamp) }
     // A newly placed stamp starts out selected, so its handles show right away.
     var newestStamp by remember { mutableStateOf(stamps.maxOfOrNull { it.id } ?: 0L) }
@@ -580,7 +580,8 @@ fun ViewerContent(
     }
 
     fun leave(then: () -> Unit = onBack) {
-        if (ready?.hasUnsavedChanges == true) leaveThen = then else then()
+        // Stamps still on screen (placed, or being written in after Done) are changes too.
+        if (ready?.hasUnsavedChanges == true || stamps.isNotEmpty()) leaveThen = then else then()
     }
 
     fun onPagesTool(tool: Int) {
@@ -634,7 +635,8 @@ fun ViewerContent(
     }
 
     // Typing pauses briefly before searching, so each keystroke does not start a new search.
-    LaunchedEffect(query, searching) {
+    // Keyed on the results too, since an edit clears them and the query must run again.
+    LaunchedEffect(query, searching, search.query) {
         if (!searching) return@LaunchedEffect
         if (query.isNotBlank()) delay(SEARCH_DELAY_MS)
         if (query.trim() != search.query) onAction(ViewerAction.Search(query))
@@ -730,10 +732,10 @@ fun ViewerContent(
                         }
                         if (ready != null) PageColorsButton(pageColors, onPageColors)
                     } else {
-                        IconButton(onClick = { onAction(ViewerAction.Undo) }, enabled = canUndo) {
+                        IconButton(onClick = { pickedMark = null; onAction(ViewerAction.Undo) }, enabled = canUndo) {
                             Icon(EditIcons.Undo, contentDescription = stringResource(R.string.undo))
                         }
-                        IconButton(onClick = { onAction(ViewerAction.Redo) }, enabled = ready?.canRedo == true) {
+                        IconButton(onClick = { pickedMark = null; onAction(ViewerAction.Redo) }, enabled = ready?.canRedo == true) {
                             Icon(EditIcons.Redo, contentDescription = stringResource(R.string.redo))
                         }
                         TextButton(onClick = { backToReading() }) {
@@ -756,13 +758,12 @@ fun ViewerContent(
                     mark = selectedMark,
                     onStyle = { style ->
                         val tool = selectedMark.kind.tool
-                        onAction(
-                            ViewerAction.EditMark(
-                                selectedMark.page, selectedMark.index,
-                                color = style.rgb.takeIf { style.color != selectedMark.displayColor },
-                                width = style.width.takeIf { tool?.widths?.isNotEmpty() == true && it != selectedMark.width },
-                            ),
-                        )
+                        val color = style.rgb.takeIf { style.color != selectedMark.displayColor }
+                        val width = style.width.takeIf { tool?.widths?.isNotEmpty() == true && it != selectedMark.width }
+                        // Tapping the swatch already in use changes nothing, so it costs no undo step.
+                        if (color != null || width != null) {
+                            onAction(ViewerAction.EditMark(selectedMark.page, selectedMark.index, color = color, width = width))
+                        }
                     },
                     onComment = { commentFor = selectedMark },
                     onDelete = {
@@ -876,6 +877,7 @@ fun ViewerContent(
                         selectedPages = setOf(to)
                     },
                     loadPage = loadPage,
+                    pageColors = pageColors,
                 )
                 else -> {
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
@@ -1136,17 +1138,6 @@ fun ViewerContent(
             onAdd = { text ->
                 pendingText = null
                 onAction(if (mode == ViewerMode.Edit) ViewerAction.AddEditText(page, at, text) else ViewerAction.AddText(page, at, text))
-            },
-        )
-    }
-
-    editingField?.let { field ->
-        FormFieldDialog(
-            field = field,
-            onDismiss = { editingField = null },
-            onSet = { value ->
-                editingField = null
-                if (value != field.value) onAction(ViewerAction.FillField(field, value))
             },
         )
     }

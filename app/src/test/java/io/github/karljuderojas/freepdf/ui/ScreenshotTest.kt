@@ -615,6 +615,11 @@ class ScreenshotTest {
         viewer(ViewerMode.Pages, sample.copy(canUndo = true, hasUnsavedChanges = true), selectedPage = 1)
     }
 
+    @Test
+    fun viewerPagesNight() = capture("viewer_pages_night") {
+        viewer(ViewerMode.Pages, selectedPage = 1, pageColors = PageColors.Night)
+    }
+
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerPagesDelete() {
