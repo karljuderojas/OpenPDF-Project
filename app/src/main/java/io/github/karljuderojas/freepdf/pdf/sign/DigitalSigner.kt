@@ -29,12 +29,14 @@ import java.util.Calendar
  *
  * With a [timestamps] client, the signature also carries an RFC 3161 timestamp, which proves when
  * it was made independently of the phone's clock. If no timestamp server can be reached the file
- * is still signed, without one, and [timestamped] says so. Long-term validation is planned; see
- * docs/signing-design.md.
+ * is still signed, without one, and [timestamped] says so. [onTimestampRequest] is called, on the
+ * signing thread, just before the server is asked, so progress can say what is being waited for.
+ * Long-term validation is planned; see docs/signing-design.md.
  */
 class DigitalSigner(
     private val identity: SigningIdentity,
     private val timestamps: TimestampClient? = null,
+    private val onTimestampRequest: () -> Unit = {},
 ) : SignatureInterface {
 
     /** After [sign]: whether the signature got a timestamp. */
@@ -89,6 +91,7 @@ class DigitalSigner(
         val signed = generator.generate(CMSProcessableByteArray(content.readBytes()), false)
         timestamped = false
         val client = timestamps ?: return signed.encoded
+        onTimestampRequest()
         return runCatching { withTimestamp(signed, client) }
             .onSuccess { timestamped = true }
             .getOrDefault(signed)
