@@ -43,6 +43,8 @@ enum class AnnotateTool(
     Underline(R.string.tool_underline, Gesture.Box, InkColors, LineWidths, ToolStyle(InkColors[1], 1f)),
     StrikeOut(R.string.tool_strikeout, Gesture.Box, InkColors, LineWidths, ToolStyle(InkColors[2], 1f)),
     Pen(R.string.tool_pen, Gesture.Draw, InkColors, PenWidths, ToolStyle(InkColors[1], 2f)),
+    TextBox(R.string.tool_text_box, Gesture.Tap, InkColors, FontSizes, ToolStyle(InkColors[0], 12f)),
+    Stamp(R.string.tool_stamp, Gesture.Tap, emptyList(), emptyList(), ToolStyle(Color.Gray, 0f)),
     Shapes(R.string.tool_shapes, Gesture.Box, InkColors, PenWidths, ToolStyle(InkColors[2], 2f)),
     Note(R.string.tool_note, Gesture.Tap, HighlightColors, emptyList(), ToolStyle(HighlightColors[0], 0f)),
     Eraser(R.string.tool_eraser, Gesture.Tap, emptyList(), emptyList(), ToolStyle(Color.Gray, 0f));

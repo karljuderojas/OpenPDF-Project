@@ -22,7 +22,7 @@ enum class ViewerMode(@StringRes val label: Int, val icon: ImageVector?, val too
     Annotate(
         R.string.mode_annotate, Icons.Filled.Create,
         listOf(R.string.tool_highlight, R.string.tool_underline, R.string.tool_strikeout, R.string.tool_pen,
-            R.string.tool_note, R.string.tool_shapes, R.string.tool_eraser),
+            R.string.tool_text_box, R.string.tool_note, R.string.tool_stamp, R.string.tool_shapes, R.string.tool_eraser, R.string.tool_comments),
     ),
     Sign(
         R.string.mode_sign, Icons.Filled.Edit,
@@ -38,7 +38,7 @@ enum class ViewerMode(@StringRes val label: Int, val icon: ImageVector?, val too
     ),
     More(
         R.string.mode_more, Icons.Filled.MoreVert,
-        listOf(R.string.tool_share, R.string.tool_print, R.string.tool_info, R.string.tool_password),
+        listOf(R.string.tool_share, R.string.tool_print, R.string.tool_info, R.string.tool_password, R.string.tool_comments),
     );
 
     companion object {
