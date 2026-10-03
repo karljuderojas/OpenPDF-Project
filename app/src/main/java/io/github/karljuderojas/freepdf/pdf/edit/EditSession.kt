@@ -10,8 +10,8 @@ import java.nio.file.StandardCopyOption
 /**
  * A private working copy of the open PDF. Edits are applied to the copy with PdfBox and the viewer
  * re-renders it, so nothing touches the user's file until [writeTo]. Every edit keeps a snapshot
- * of the copy before it, which is what [undo] restores; an undone edit can be put back with [redo]
- * until the next new edit.
+ * of the copy before it, and the password then in effect, which is what [undo] restores; an
+ * undone edit can be put back with [redo] until the next new edit.
  *
  * Not thread-safe: the caller serialises edits (the viewer does them under its render lock).
  */
@@ -19,8 +19,8 @@ class EditSession(private val dir: File, source: InputStream) {
 
     val workingFile = File(dir, "working.pdf")
 
-    /** A saved copy of the document and which version of it that was. */
-    private class Snapshot(val file: File, val version: Int)
+    /** A saved copy of the document, which version of it that was, and the password that opens it. */
+    private class Snapshot(val file: File, val version: Int, val password: String)
 
     private val undoStack = ArrayDeque<Snapshot>()
     private val redoStack = ArrayDeque<Snapshot>()
@@ -52,12 +52,23 @@ class EditSession(private val dir: File, source: InputStream) {
     val hasUnsavedChanges: Boolean get() = version != savedVersion
 
     /** Applies [change] to the working copy. If it throws, the copy is left as it was. */
-    fun edit(change: (PDDocument) -> Unit) {
+    fun edit(change: (PDDocument) -> Unit) = commit(password) { document ->
+        change(document)
+        PdfDocuments.keepProtection(document, password)
+    }
+
+    /**
+     * Locks the working copy with [newPassword] from now on, or removes its password when
+     * [newPassword] is empty, as one undoable edit. See [PdfDocuments.setProtection].
+     */
+    fun setPassword(newPassword: String) = commit(newPassword) { PdfDocuments.setProtection(it, newPassword) }
+
+    /** Saves [change] as the new working copy, which [nextPassword] opens, and records an undo step. */
+    private fun commit(nextPassword: String, change: (PDDocument) -> Unit) {
         val next = File(dir, "next.pdf")
         try {
             PDDocument.load(workingFile, password).use { document ->
                 change(document)
-                PdfDocuments.keepProtection(document, password)
                 document.save(next)
             }
         } catch (e: Throwable) {
@@ -66,6 +77,7 @@ class EditSession(private val dir: File, source: InputStream) {
         }
         undoStack.addLast(stash())
         moveOver(next, workingFile)
+        password = nextPassword
         version = ++versionCount
         redoStack.forEach { it.file.delete() }
         redoStack.clear()
@@ -98,12 +110,13 @@ class EditSession(private val dir: File, source: InputStream) {
     private fun stash(): Snapshot {
         val file = File(dir, "snapshot-${snapshotCount++}.pdf")
         moveOver(workingFile, file)
-        return Snapshot(file, version)
+        return Snapshot(file, version, password)
     }
 
     private fun restore(snapshot: Snapshot) {
         moveOver(snapshot.file, workingFile)
         version = snapshot.version
+        password = snapshot.password
     }
 
     private fun moveOver(from: File, to: File) {

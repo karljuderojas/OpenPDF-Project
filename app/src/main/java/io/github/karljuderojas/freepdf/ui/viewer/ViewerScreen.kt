@@ -1,7 +1,10 @@
 package io.github.karljuderojas.freepdf.ui.viewer
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -40,6 +43,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -67,6 +71,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -74,6 +79,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -91,9 +97,11 @@ import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
+import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.settings.Tip
+import io.github.karljuderojas.freepdf.print.Printing
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
@@ -112,15 +120,32 @@ sealed interface ViewerAction {
     data class InsertBlank(val afterPage: Int) : ViewerAction
     data class Move(val from: Int, val to: Int) : ViewerAction
     data object Merge : ViewerAction
-    data object Share : ViewerAction
+    data class Share(val option: ShareOption, val pages: List<Int>) : ViewerAction
+    data class Extract(val pages: List<Int>) : ViewerAction
+    data class Split(val parts: List<List<Int>>) : ViewerAction
+    data object ShowInfo : ViewerAction
+    data object Print : ViewerAction
     data class Search(val query: String) : ViewerAction
     data class Unlock(val password: String) : ViewerAction
+
+    /** Locks the PDF with [password], or takes its password off when it is empty. */
+    data class SetPassword(val password: String) : ViewerAction
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
     data class Stroke(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val points: List<Offset>) : ViewerAction
     data class Box(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val start: Offset, val end: Offset) : ViewerAction
     data class Note(val page: Int, val style: ToolStyle, val at: Offset, val text: String) : ViewerAction
     data class SetToolStyle(val tool: AnnotateTool, val style: ToolStyle) : ViewerAction
+
+    /** Marks text with a markup [tool], one box per line; see [TextSelectionLayer]. */
+    data class MarkLines(
+        val page: Int,
+        val tool: AnnotateTool,
+        val style: ToolStyle,
+        val lines: List<Rect>,
+        val comment: String? = null,
+    ) : ViewerAction
+    data class Copy(val text: String) : ViewerAction
     data class Erase(val page: Int, val at: Offset) : ViewerAction
 
     /** Sign actions. */
@@ -157,6 +182,11 @@ fun ViewerScreen(
     val resources = LocalResources.current
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    var shownInfo by remember { mutableStateOf<ViewerEffect.ShowInfo?>(null) }
+    val scope = rememberCoroutineScope()
+    fun launchMessage(@StringRes text: Int) {
+        scope.launch { snackbarHostState.showSnackbar(resources.getString(text)) }
+    }
 
     // The tip for the mode just entered, if it was not shown before; see Tips for the rules.
     val tips = remember(context) { (context.applicationContext as FreePdfApp).tips }
@@ -171,15 +201,29 @@ fun ViewerScreen(
     val mergePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
         if (it != null) viewModel.merge(it)
     }
+    val extractPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) {
+        if (it != null) viewModel.saveExtract(it) else viewModel.cancelExtract()
+    }
+    val splitFolderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) {
+        if (it != null) viewModel.splitInto(it) else viewModel.cancelSplit()
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { effect ->
             when (effect) {
                 is ViewerEffect.Message -> launch { snackbarHostState.showSnackbar(resources.getString(effect.text)) }
+                is ViewerEffect.CountMessage -> launch {
+                    snackbarHostState.showSnackbar(resources.getQuantityString(effect.text, effect.count, effect.count))
+                }
                 is ViewerEffect.SaveAs -> saveAsPicker.launch(effect.suggestedName)
                 ViewerEffect.Close -> onBack()
                 is ViewerEffect.Share -> Sharing.shareFile(context, effect.file)
+                is ViewerEffect.ShareImages -> Sharing.shareImages(context, effect.files, effect.title)
+                is ViewerEffect.Print -> Printing.print(context, effect.file, effect.name, effect.pageCount)
                 is ViewerEffect.SaveSigned -> signedCopyPicker.launch(effect.suggestedName)
+                is ViewerEffect.SaveExtract -> extractPicker.launch(effect.suggestedName)
+                ViewerEffect.PickSplitFolder -> splitFolderPicker.launch(null)
+                is ViewerEffect.ShowInfo -> shownInfo = effect
             }
         }
     }
@@ -188,6 +232,7 @@ fun ViewerScreen(
         state = state,
         onBack = onBack,
         loadPage = viewModel::page,
+        loadWords = viewModel::words,
         loadRegion = viewModel::pageRegion,
         initialMode = initialMode,
         initialTool = initialTool,
@@ -214,16 +259,16 @@ fun ViewerScreen(
                 is ViewerAction.InsertBlank -> viewModel.insertBlankPage(action.afterPage)
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
                 ViewerAction.Merge -> mergePicker.launch(arrayOf("application/pdf"))
-                ViewerAction.Share -> viewModel.share()
+                is ViewerAction.Share -> viewModel.share(action.option, action.pages)
+                is ViewerAction.Extract -> viewModel.extract(action.pages)
+                is ViewerAction.Split -> viewModel.split(action.parts)
+                ViewerAction.ShowInfo -> viewModel.documentInfo()
+                ViewerAction.Print -> viewModel.print()
                 is ViewerAction.Search -> viewModel.search(action.query)
                 is ViewerAction.Unlock -> viewModel.unlock(action.password)
+                is ViewerAction.SetPassword -> viewModel.setPassword(action.password)
                 is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.style)
-                is ViewerAction.Box -> when (action.tool) {
-                    AnnotateTool.Highlight -> Annotator.TextMarkup.Highlight
-                    AnnotateTool.Underline -> Annotator.TextMarkup.Underline
-                    AnnotateTool.StrikeOut -> Annotator.TextMarkup.StrikeOut
-                    else -> null
-                }.let { kind ->
+                is ViewerAction.Box -> action.tool.markup.let { kind ->
                     if (kind != null) {
                         viewModel.markText(action.page, action.start, action.end, kind, action.style)
                     } else {
@@ -232,6 +277,17 @@ fun ViewerScreen(
                 }
                 is ViewerAction.Note -> viewModel.note(action.page, action.at, action.text, action.style)
                 is ViewerAction.SetToolStyle -> viewModel.setToolStyle(action.tool, action.style)
+                is ViewerAction.MarkLines -> action.tool.markup?.let {
+                    viewModel.markLines(action.page, action.lines, it, action.style, action.comment)
+                }
+                is ViewerAction.Copy -> {
+                    context.getSystemService(ClipboardManager::class.java)
+                        ?.setPrimaryClip(ClipData.newPlainText(resources.getString(R.string.selection_copy), action.text))
+                    // Android 13 and later confirm a copy themselves.
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                        launchMessage(R.string.copied)
+                    }
+                }
                 is ViewerAction.Erase -> viewModel.erase(action.page, action.at)
                 is ViewerAction.SaveSignature -> viewModel.saveSignature(action.kind, action.image, action.method)
                 is ViewerAction.PlaceSignature -> viewModel.placeSignature(action.page, action.at, action.kind)
@@ -246,6 +302,8 @@ fun ViewerScreen(
             }
         },
     )
+
+    shownInfo?.let { DocumentInfoDialog(it.name, it.info, onDismiss = { shownInfo = null }) }
 }
 
 /** Stateless viewer UI, so it can be previewed and screenshot-tested without a real PDF. */
@@ -255,6 +313,7 @@ fun ViewerContent(
     state: ViewerState,
     onBack: () -> Unit,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
+    loadWords: suspend (page: Int) -> List<PageWord> = { emptyList() },
     loadRegion: LoadRegion = { _, _, _ -> null },
     initialMode: ViewerMode = ViewerMode.Read,
     initialSelectedPage: Int = 0,
@@ -278,15 +337,23 @@ fun ViewerContent(
     var selectedTool by rememberSaveable { mutableStateOf(initialTool) }
     var selectedPage by rememberSaveable { mutableIntStateOf(initialSelectedPage) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var extracting by remember { mutableStateOf(false) }
+    var splitting by remember { mutableStateOf(false) }
     var confirmLeave by remember { mutableStateOf(false) }
     var pendingNote by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(false) }
+    var choosingPassword by remember { mutableStateOf(false) }
     // Chosen here so the page preview follows at once; the view model remembers them for next time.
     var styles by remember { mutableStateOf(toolStyles) }
     LaunchedEffect(toolStyles) { styles = styles + toolStyles }
     fun styleOf(tool: AnnotateTool) = styles[tool] ?: tool.defaultStyle
+
+    // Selected text, and the lines of a selection waiting for its note to be typed.
+    var selection by remember { mutableStateOf<TextSelection?>(null) }
+    var pendingTextNote by remember { mutableStateOf<Pair<Int, List<Rect>>?>(null) }
 
     var searching by rememberSaveable { mutableStateOf(initialSearchQuery != null) }
     var query by rememberSaveable { mutableStateOf(initialSearchQuery.orEmpty()) }
@@ -311,6 +378,7 @@ fun ViewerContent(
     // Stamps still being placed count as changes, for Undo and for offering Finish.
     val canUndo = ready?.canUndo == true || stamps.isNotEmpty()
     val hasSignature = ready?.hasSignature == true || stamps.any { it.content is StampContent.Signature }
+    LaunchedEffect(mode, selectedTool, ready?.revision) { selection = null }
     LaunchedEffect(pageCount) {
         if (pageCount > 0 && selectedPage >= pageCount) selectedPage = pageCount - 1
     }
@@ -342,7 +410,9 @@ fun ViewerContent(
                 selectedPage++
             }
             R.string.tool_delete -> confirmDelete = true
+            R.string.tool_extract -> extracting = true
             R.string.tool_merge -> onAction(ViewerAction.Merge)
+            R.string.tool_split -> splitting = true
         }
     }
 
@@ -441,6 +511,9 @@ fun ViewerContent(
                             }) {
                                 Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.search))
                             }
+                            IconButton(onClick = { sharing = true }) {
+                                Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.tool_share))
+                            }
                             if (ready.outline.isNotEmpty()) {
                                 IconButton(onClick = { showingOutline = true }) {
                                     Icon(Icons.Filled.Menu, contentDescription = stringResource(R.string.contents))
@@ -517,7 +590,12 @@ fun ViewerContent(
                     })
                 }
                 else -> ToolStrip(mode, selectedTool = null, onToolSelected = {
-                    if (it == R.string.tool_share) onAction(ViewerAction.Share)
+                    when (it) {
+                        R.string.tool_share -> sharing = true
+                        R.string.tool_password -> choosingPassword = true
+                        R.string.tool_info -> onAction(ViewerAction.ShowInfo)
+                        R.string.tool_print -> onAction(ViewerAction.Print)
+                    }
                 })
             }
         },
@@ -550,6 +628,29 @@ fun ViewerContent(
                             if (onPage.isNotEmpty()) SearchHighlights(onPage, currentMatch)
                         }
                         val pageStamps = if (mode == ViewerMode.Sign) stamps.filter { it.page == page } else emptyList()
+                        val words by produceState(emptyList<PageWord>(), page, ready.revision) { value = loadWords(page) }
+                        // Text can be selected while reading, or in Annotate before a tool is picked.
+                        if (mode == ViewerMode.Read || (mode == ViewerMode.Annotate && tool == null)) {
+                            TextSelectionLayer(
+                                page = page,
+                                words = words,
+                                selection = selection,
+                                onSelect = { selection = it },
+                                onAction = { action ->
+                                    val range = selection?.range ?: return@TextSelectionLayer
+                                    val lines = words.lineBoxes(range)
+                                    fun mark(markTool: AnnotateTool) = onAction(ViewerAction.MarkLines(page, markTool, styleOf(markTool), lines))
+                                    when (action) {
+                                        SelectionAction.Highlight -> mark(AnnotateTool.Highlight)
+                                        SelectionAction.Underline -> mark(AnnotateTool.Underline)
+                                        SelectionAction.StrikeOut -> mark(AnnotateTool.StrikeOut)
+                                        SelectionAction.Note -> pendingTextNote = page to lines
+                                        SelectionAction.Copy -> onAction(ViewerAction.Copy(words.textOf(range)))
+                                    }
+                                    selection = null
+                                },
+                            )
+                        }
                         if (signTool != null || (selectedStamp != null && pageStamps.isNotEmpty())) {
                             TapLayer(page) { at ->
                                 val kind = signTool?.signatureKind
@@ -587,6 +688,8 @@ fun ViewerContent(
                                 pageWidthPt = ready.pageSizes[page].widthPt,
                                 onStroke = { onAction(ViewerAction.Stroke(page, tool, style, it)) },
                                 onBox = { start, end -> onAction(ViewerAction.Box(page, tool, style, start, end)) },
+                                words = words,
+                                onLines = { onAction(ViewerAction.MarkLines(page, tool, style, it)) },
                                 onTap = { at ->
                                     if (tool == AnnotateTool.Note) pendingNote = page to at
                                     else onAction(ViewerAction.Erase(page, at))
@@ -641,6 +744,30 @@ fun ViewerContent(
         )
     }
 
+    if (extracting) {
+        ExtractPagesDialog(
+            pageCount = pageCount,
+            selectedPage = selectedPage,
+            onDismiss = { extracting = false },
+            onExtract = {
+                extracting = false
+                onAction(ViewerAction.Extract(it))
+            },
+        )
+    }
+
+    if (splitting) {
+        SplitDialog(
+            pageCount = pageCount,
+            selectedPage = selectedPage,
+            onDismiss = { splitting = false },
+            onSplit = {
+                splitting = false
+                onAction(ViewerAction.Split(it))
+            },
+        )
+    }
+
     padFor?.let { kind ->
         SignaturePadDialog(
             kind = kind,
@@ -665,6 +792,29 @@ fun ViewerContent(
         )
     }
 
+    if (sharing && ready != null) {
+        ShareSheet(
+            pageCount = pageCount,
+            currentPage = currentPage,
+            onDismiss = { sharing = false },
+            onShare = { option, pages ->
+                sharing = false
+                onAction(ViewerAction.Share(option, pages))
+            },
+        )
+    }
+
+    if (choosingPassword) {
+        PasswordDialog(
+            isProtected = ready?.isProtected == true,
+            onDismiss = { choosingPassword = false },
+            onSetPassword = {
+                choosingPassword = false
+                onAction(ViewerAction.SetPassword(it))
+            },
+        )
+    }
+
     pendingText?.let { (page, at) ->
         TextEntryDialog(
             title = R.string.text_title,
@@ -685,6 +835,19 @@ fun ViewerContent(
             onAdd = { text ->
                 pendingNote = null
                 onAction(ViewerAction.Note(page, styleOf(AnnotateTool.Note), at, text))
+            },
+        )
+    }
+
+    pendingTextNote?.let { (page, lines) ->
+        TextEntryDialog(
+            title = R.string.note_title,
+            hint = R.string.note_hint,
+            onDismiss = { pendingTextNote = null },
+            onAdd = { text ->
+                pendingTextNote = null
+                // A note on text is a highlight carrying the note, as Acrobat and others make it.
+                onAction(ViewerAction.MarkLines(page, AnnotateTool.Highlight, styleOf(AnnotateTool.Highlight), lines, text))
             },
         )
     }
@@ -872,6 +1035,15 @@ private fun TextEntryDialog(@StringRes title: Int, @StringRes hint: Int, onDismi
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
+
+/** The text markup a tool makes, or null for tools that do not mark text. */
+private val AnnotateTool.markup: Annotator.TextMarkup?
+    get() = when (this) {
+        AnnotateTool.Highlight -> Annotator.TextMarkup.Highlight
+        AnnotateTool.Underline -> Annotator.TextMarkup.Underline
+        AnnotateTool.StrikeOut -> Annotator.TextMarkup.StrikeOut
+        else -> null
+    }
 
 private const val SEARCH_DELAY_MS = 300L
 
