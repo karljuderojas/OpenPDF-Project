@@ -6,6 +6,7 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
+import io.github.karljuderojas.freepdf.files.SafeWrite
 import java.io.File
 import java.util.UUID
 
@@ -17,10 +18,9 @@ object PdfDocuments {
         return input.use { PDDocument.load(it, password) }
     }
 
-    /** Overwrites [uri] with [document]. "wt" truncates so a shorter file leaves no stale bytes. */
+    /** Overwrites [uri] with [document], leaving the old content in place if the write fails (see [SafeWrite]). */
     fun save(context: Context, document: PDDocument, uri: Uri) {
-        val output = context.contentResolver.openOutputStream(uri, "wt") ?: error("Cannot write $uri")
-        output.use { document.save(it) }
+        SafeWrite.write(context, uri) { document.save(it) }
     }
 
     /** True if [file] opens with [password]; false if it needs a different one. */
