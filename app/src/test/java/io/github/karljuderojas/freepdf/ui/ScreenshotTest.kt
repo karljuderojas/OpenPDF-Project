@@ -2,6 +2,7 @@ package io.github.karljuderojas.freepdf.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.Looper
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
@@ -38,6 +39,7 @@ import io.github.karljuderojas.freepdf.ui.viewer.ViewerState
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.util.Calendar
@@ -132,7 +134,10 @@ class ScreenshotTest {
         }
         composeRule.mainClock.autoAdvance = false
         open.value = true
-        composeRule.mainClock.advanceTimeBy(1_000)
+        composeRule.mainClock.advanceTimeBy(500)
+        // The dialog is its own window, which is attached and laid out by the main looper.
+        shadowOf(Looper.getMainLooper()).idle()
+        composeRule.mainClock.advanceTimeBy(500)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_go_to_page.png")
     }
 
