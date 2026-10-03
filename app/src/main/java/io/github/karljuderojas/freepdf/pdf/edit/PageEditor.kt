@@ -30,6 +30,18 @@ object PageEditor {
         pageIndexes.distinct().sortedDescending().forEach { document.removePage(it) }
     }
 
+    /**
+     * Removes every page not in [pages], so the rest keep their document order. Used to make a
+     * new PDF from some of the pages; [pages] must name at least one page that exists.
+     */
+    fun keepOnly(document: PDDocument, pages: List<Int>) {
+        val keep = pages.toSet()
+        require(keep.isNotEmpty() && keep.all { it in 0 until document.numberOfPages }) { "No such pages: $pages" }
+        for (index in document.numberOfPages - 1 downTo 0) {
+            if (index !in keep) document.removePage(index)
+        }
+    }
+
     fun move(document: PDDocument, fromIndex: Int, toIndex: Int) {
         if (fromIndex == toIndex) return
         val pages = document.pages
