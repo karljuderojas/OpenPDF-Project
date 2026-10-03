@@ -47,6 +47,35 @@ object Reflow {
         return paragraphs
     }
 
+    /**
+     * The sentences of [text] as ranges of it, for reading aloud and for highlighting the one being
+     * read. A sentence ends at . ! or ? (with any closing quote or bracket) before a space or the
+     * end, so "3.5" stays whole; a very long run with no ending is cut at a space.
+     */
+    fun sentenceRanges(text: String): List<IntRange> {
+        val ranges = ArrayList<IntRange>()
+        for (match in SENTENCE.findAll(text)) {
+            var start = match.range.first
+            val end = match.range.last
+            while (start <= end && text[start].isWhitespace()) start++
+            while (start <= end) {
+                var stop = minOf(end, start + MAX_SENTENCE - 1)
+                if (stop < end) {
+                    val space = text.lastIndexOf(' ', stop)
+                    if (space > start) stop = space - 1
+                }
+                ranges += start..stop
+                start = stop + 1
+                while (start <= end && text[start].isWhitespace()) start++
+            }
+        }
+        return ranges
+    }
+
+    /** All the sentences of [paragraphs], in order; [sentenceRanges] counted over each paragraph in turn. */
+    fun sentences(paragraphs: List<String>): List<String> =
+        paragraphs.flatMap { p -> sentenceRanges(p).map { p.substring(it.first, it.last + 1) } }
+
     private inline fun <T, K> List<T>.groupConsecutive(key: (T) -> K): List<List<T>> {
         val groups = ArrayList<MutableList<T>>()
         var lastKey: K? = null
@@ -61,4 +90,6 @@ object Reflow {
     private const val PARAGRAPH_GAP = 0.6f
     private const val SHORT_LINE = 0.75f
     private const val SENTENCE_END = ".!?:"
+    private const val MAX_SENTENCE = 400
+    private val SENTENCE = Regex("""[\s\S]+?(?:[.!?]+["')\]]*(?=\s|$)|$)""")
 }
