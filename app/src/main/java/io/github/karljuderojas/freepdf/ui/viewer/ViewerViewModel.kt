@@ -6,8 +6,10 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.util.LruCache
+import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.AndroidViewModel
@@ -25,6 +27,7 @@ import io.github.karljuderojas.freepdf.pdf.edit.EditSession
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import io.github.karljuderojas.freepdf.pdf.edit.PdfText
+import io.github.karljuderojas.freepdf.pdf.edit.Splitting
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.render.PdfRenderer
 import io.github.karljuderojas.freepdf.pdf.sign.AuditEvent
@@ -76,12 +79,21 @@ sealed interface ViewerState {
 /** One-off things the screen does for the view model: messages, the Save As picker, leaving. */
 sealed interface ViewerEffect {
     data class Message(@StringRes val text: Int) : ViewerEffect
+
+    /** A message that names a number, such as "Saved 3 pages as a new PDF". */
+    data class CountMessage(@PluralsRes val text: Int, val count: Int) : ViewerEffect
     data class SaveAs(val suggestedName: String) : ViewerEffect
     data object Close : ViewerEffect
     data class Share(val file: File) : ViewerEffect
 
     /** Ask where to save the signed copy; see [ViewerViewModel.saveSignedCopy]. */
     data class SaveSigned(val suggestedName: String) : ViewerEffect
+
+    /** Ask where to save extracted pages; see [ViewerViewModel.saveExtract]. */
+    data class SaveExtract(val suggestedName: String) : ViewerEffect
+
+    /** Ask which folder the split PDFs go in; see [ViewerViewModel.splitInto]. */
+    data object PickSplitFolder : ViewerEffect
 }
 
 class ViewerViewModel(application: Application) : AndroidViewModel(application) {
@@ -106,6 +118,10 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     /** The finished signed copy, in the cache, waiting for the user to pick where it goes. */
     private var pendingSignedCopy: File? = null
+
+    /** Pages to extract, or the parts to split into, waiting for the user to pick where they go. */
+    private var pendingExtract: List<Int>? = null
+    private var pendingSplit: List<List<Int>>? = null
 
     private val signingPrefs = application.getSharedPreferences("signing", Context.MODE_PRIVATE)
     private val _signerName = MutableStateFlow(signingPrefs.getString(KEY_SIGNER_NAME, "").orEmpty())
@@ -373,6 +389,83 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             copy.onSuccess { _effects.send(ViewerEffect.Share(it)) }
                 .onFailure { _effects.send(ViewerEffect.Message(R.string.share_failed)) }
         }
+    }
+
+    /** Asks where to save [pages] as a new PDF; [saveExtract] then writes them. */
+    fun extract(pages: List<Int>) {
+        val uri = openedUri ?: return
+        pendingExtract = pages
+        viewModelScope.launch {
+            val name = withContext(Dispatchers.IO) { displayName(uri) }
+            _effects.send(ViewerEffect.SaveExtract(Splitting.extractName(name, pages)))
+        }
+    }
+
+    /** Writes the pages chosen in [extract], unsaved changes included, to [target]. */
+    fun saveExtract(target: Uri) {
+        val pages = pendingExtract ?: return
+        pendingExtract = null
+        viewModelScope.launch {
+            val saved = runCatching {
+                lock.withLock {
+                    withContext(Dispatchers.IO) {
+                        val current = session ?: error("Nothing is open")
+                        val output = context.contentResolver.openOutputStream(target, "wt") ?: error("Cannot write $target")
+                        output.use { Splitting.writePart(current.workingFile, pages, it) }
+                    }
+                }
+            }.isSuccess
+            _effects.send(
+                if (saved) ViewerEffect.CountMessage(R.plurals.extract_saved, pages.size)
+                else ViewerEffect.Message(R.string.extract_failed),
+            )
+        }
+    }
+
+    fun cancelExtract() {
+        pendingExtract = null
+    }
+
+    /** Asks which folder to split into; [splitInto] then writes one PDF per part. */
+    fun split(parts: List<List<Int>>) {
+        pendingSplit = parts
+        _effects.trySend(ViewerEffect.PickSplitFolder)
+    }
+
+    /**
+     * Writes each part chosen in [split], unsaved changes included, as a new PDF in the folder
+     * [tree] (from the system folder picker), named like "Lease (part 1).pdf".
+     */
+    fun splitInto(tree: Uri) {
+        val parts = pendingSplit ?: return
+        val uri = openedUri ?: return
+        pendingSplit = null
+        viewModelScope.launch {
+            val saved = runCatching {
+                lock.withLock {
+                    withContext(Dispatchers.IO) {
+                        val current = session ?: error("Nothing is open")
+                        val name = displayName(uri)
+                        val resolver = context.contentResolver
+                        val folder = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+                        parts.forEachIndexed { i, pages ->
+                            val file = DocumentsContract.createDocument(resolver, folder, "application/pdf", Splitting.partName(name, i + 1))
+                                ?: error("Cannot create a file in $tree")
+                            val output = resolver.openOutputStream(file, "wt") ?: error("Cannot write $file")
+                            output.use { Splitting.writePart(current.workingFile, pages, it) }
+                        }
+                    }
+                }
+            }.isSuccess
+            _effects.send(
+                if (saved) ViewerEffect.CountMessage(R.plurals.split_saved, parts.size)
+                else ViewerEffect.Message(R.string.split_failed),
+            )
+        }
+    }
+
+    fun cancelSplit() {
+        pendingSplit = null
     }
 
     fun undo() {

@@ -44,7 +44,7 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ✅ Edits go to a private working copy with undo; Save writes back, or asks where to save when the file is read-only; leaving with unsaved changes asks first
 - 🧱 Add text (`PageEditor.addText`)
 - ⬜ Drag to reorder in the page grid, multi-select
-- ⬜ Extract and split
+- ✅ Extract and split: save chosen pages (typed like 1-3, 5) as a new PDF, or split into two after the selected page or every few pages into a folder you pick; the open PDF stays as it is
 - ⬜ Add image, redact (true removal, not a black box), links
 - ⬜ Edit existing text (hard; needs font handling)
 

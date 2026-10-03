@@ -89,6 +89,8 @@ sealed interface ViewerAction {
     data class InsertBlank(val afterPage: Int) : ViewerAction
     data class Move(val from: Int, val to: Int) : ViewerAction
     data object Merge : ViewerAction
+    data class Extract(val pages: List<Int>) : ViewerAction
+    data class Split(val parts: List<List<Int>>) : ViewerAction
     data object Share : ViewerAction
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
@@ -125,15 +127,26 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
     val mergePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
         if (it != null) viewModel.merge(it)
     }
+    val extractPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) {
+        if (it != null) viewModel.saveExtract(it) else viewModel.cancelExtract()
+    }
+    val splitFolderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) {
+        if (it != null) viewModel.splitInto(it) else viewModel.cancelSplit()
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { effect ->
             when (effect) {
                 is ViewerEffect.Message -> launch { snackbarHostState.showSnackbar(resources.getString(effect.text)) }
+                is ViewerEffect.CountMessage -> launch {
+                    snackbarHostState.showSnackbar(resources.getQuantityString(effect.text, effect.count, effect.count))
+                }
                 is ViewerEffect.SaveAs -> saveAsPicker.launch(effect.suggestedName)
                 ViewerEffect.Close -> onBack()
                 is ViewerEffect.Share -> Sharing.shareFile(context, effect.file)
                 is ViewerEffect.SaveSigned -> signedCopyPicker.launch(effect.suggestedName)
+                is ViewerEffect.SaveExtract -> extractPicker.launch(effect.suggestedName)
+                ViewerEffect.PickSplitFolder -> splitFolderPicker.launch(null)
             }
         }
     }
@@ -155,6 +168,8 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.InsertBlank -> viewModel.insertBlankPage(action.afterPage)
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
                 ViewerAction.Merge -> mergePicker.launch(arrayOf("application/pdf"))
+                is ViewerAction.Extract -> viewModel.extract(action.pages)
+                is ViewerAction.Split -> viewModel.split(action.parts)
                 ViewerAction.Share -> viewModel.share()
                 is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.tool.rgb)
                 is ViewerAction.Box -> when (action.tool) {
@@ -203,6 +218,8 @@ fun ViewerContent(
     var selectedTool by rememberSaveable { mutableStateOf(initialTool) }
     var selectedPage by rememberSaveable { mutableIntStateOf(initialSelectedPage) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var extracting by remember { mutableStateOf(false) }
+    var splitting by remember { mutableStateOf(false) }
     var confirmLeave by remember { mutableStateOf(false) }
     var pendingNote by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
@@ -235,7 +252,9 @@ fun ViewerContent(
                 selectedPage++
             }
             R.string.tool_delete -> confirmDelete = true
+            R.string.tool_extract -> extracting = true
             R.string.tool_merge -> onAction(ViewerAction.Merge)
+            R.string.tool_split -> splitting = true
         }
     }
 
@@ -402,6 +421,30 @@ fun ViewerContent(
             },
             dismissButton = {
                 TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+
+    if (extracting) {
+        ExtractPagesDialog(
+            pageCount = pageCount,
+            selectedPage = selectedPage,
+            onDismiss = { extracting = false },
+            onExtract = {
+                extracting = false
+                onAction(ViewerAction.Extract(it))
+            },
+        )
+    }
+
+    if (splitting) {
+        SplitDialog(
+            pageCount = pageCount,
+            selectedPage = selectedPage,
+            onDismiss = { splitting = false },
+            onSplit = {
+                splitting = false
+                onAction(ViewerAction.Split(it))
             },
         )
     }

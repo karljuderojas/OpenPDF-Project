@@ -99,4 +99,28 @@
     <string name="forget_recent">Remove from recent</string>
     <string name="share_title">Share %1$s</string>
     <string name="share_failed">Could not prepare this PDF for sharing.</string>
+    <string name="extract_title">Extract pages</string>
+    <string name="extract_body">Saves the pages you choose as a new PDF. This one stays as it is.</string>
+    <string name="extract_pages_label">Pages</string>
+    <string name="extract_pages_help">For example 1-3, 5</string>
+    <string name="extract_pages_error">Use pages 1 to %1$d, for example 1-3, 5</string>
+    <string name="extract_failed">Could not save those pages as a new PDF.</string>
+    <plurals name="extract_saved">
+        <item quantity="one">Saved %d page as a new PDF</item>
+        <item quantity="other">Saved %d pages as a new PDF</item>
+    </plurals>
+    <string name="split_title">Split into separate PDFs</string>
+    <string name="split_body">The new PDFs go in a folder you choose. This one stays as it is.</string>
+    <string name="split_after">Into two after page %1$d</string>
+    <string name="split_every">Every few pages</string>
+    <string name="split_pages_each">Pages in each PDF</string>
+    <string name="split_failed">Could not save the split PDFs in that folder.</string>
+    <plurals name="split_makes">
+        <item quantity="one">Makes %d PDF</item>
+        <item quantity="other">Makes %d PDFs</item>
+    </plurals>
+    <plurals name="split_saved">
+        <item quantity="one">Split into %d PDF</item>
+        <item quantity="other">Split into %d PDFs</item>
+    </plurals>
 </resources>
