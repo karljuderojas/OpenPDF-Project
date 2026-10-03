@@ -121,10 +121,11 @@ class ScreenshotTest {
     @Test
     fun viewerGoToPage() {
         show { viewer(ViewerMode.Read) }
+        composeRule.onNodeWithTag("page-indicator").performClick()
         // The dialog's page field can take focus, and its blinking cursor never lets Compose go
         // idle, so drive the clock by hand from here.
         composeRule.mainClock.autoAdvance = false
-        composeRule.onNodeWithTag("page-indicator").performClick()
+        repeat(10) { composeRule.mainClock.advanceTimeByFrame() }
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_go_to_page.png")
     }
