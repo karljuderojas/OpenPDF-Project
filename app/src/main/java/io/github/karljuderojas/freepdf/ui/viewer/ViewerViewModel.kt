@@ -43,11 +43,17 @@ import io.github.karljuderojas.freepdf.pdf.edit.PdfText
 import io.github.karljuderojas.freepdf.pdf.form.FormField
 import io.github.karljuderojas.freepdf.pdf.form.FormFiller
 import io.github.karljuderojas.freepdf.pdf.edit.Splitting
+import io.github.karljuderojas.freepdf.pdf.edit.TextEditing
+import io.github.karljuderojas.freepdf.pdf.edit.WatermarkStyle
+import io.github.karljuderojas.freepdf.pdf.edit.Watermarks
 import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
 import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
 import io.github.karljuderojas.freepdf.pdf.render.PageBox
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.text.PageText
+import io.github.karljuderojas.freepdf.pdf.text.Reflow
+import io.github.karljuderojas.freepdf.speech.AndroidSpeaker
+import io.github.karljuderojas.freepdf.speech.ReadAloud
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.render.PdfRenderer
 import io.github.karljuderojas.freepdf.pdf.sign.AuditEvent
@@ -181,6 +187,16 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     // The open documents' sessions live in the application, so they survive this view model
     // (switching documents replaces it) and switching back finds edits, undo and place as left.
     private val sessions = getApplication<FreePdfApp>().sessions
+
+    // Reading aloud carries on through a rotation; the speech engine starts at the first sentence.
+    private val readAloudDelegate = lazy {
+        ReadAloud(
+            AndroidSpeaker(application),
+            viewModelScope,
+            pageCount = { (_state.value as? ViewerState.Ready)?.pageSizes?.size ?: 0 },
+        ) { page -> Reflow.sentences(Reflow.paragraphs(words(page))) }
+    }
+    val readAloud: ReadAloud by readAloudDelegate
 
     /** The session this view model shows and edits; null until [open] has attached one. */
     private var doc: DocumentSession? = null
@@ -453,6 +469,19 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun rotatePages(pages: Set<Int>) = edit(movesPages = true) { PageEditor.rotate(it, pages, 90) }
 
+    /** Stamps [pages] with [text], or with the picture at [image] when that is given. */
+    fun watermark(pages: Set<Int>, text: String, image: Uri?, style: WatermarkStyle) {
+        viewModelScope.launch {
+            val bitmap = image?.let { uri -> runCatching { withContext(Dispatchers.IO) { PickedImage.load(context, uri) } }.getOrNull() }
+            if (image != null && bitmap == null) {
+                _effects.send(ViewerEffect.Message(R.string.image_failed))
+                return@launch
+            }
+            if (bitmap != null) edit { Watermarks.addImage(it, pages, bitmap, style) }
+            else edit { Watermarks.addText(it, pages, text, style) }
+        }
+    }
+
     /** Trims [pages] by [margins], or shows them in full again when [margins] is null. */
     fun cropPages(pages: Set<Int>, margins: CropMargins?) = edit(movesPages = true) {
         if (margins == null) PageCrop.reset(it, pages) else PageCrop.crop(it, pages, margins)
@@ -525,6 +554,22 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 PageText.words(document, page)
             }.getOrDefault(emptyList())
         }.also { wordCache[page] = it }
+    }
+
+    /** The line of existing text under [at] (page fractions) that Edit text could change, or null if none is there. */
+    suspend fun editableLine(page: Int, at: Offset): TextEditing.EditableLine? = lock.withLock {
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val document = textDocument ?: (session?.let { PDDocument.load(it.workingFile, it.password) } ?: error("Nothing is open")).also { textDocument = it }
+                TextEditing.lineAt(document, page, at.x, at.y)
+            }.getOrNull()
+        }
+    }
+
+    /** Edit text: replaces the words of the line [oldText] under [at] with [newText], as one undo step. */
+    fun replaceText(page: Int, at: Offset, oldText: String, newText: String) = edit { document ->
+        val outcome = TextEditing.replace(document, page, at.x, at.y, oldText, newText)
+        if (outcome == TextEditing.Outcome.OtherFont) _effects.trySend(ViewerEffect.Message(R.string.edit_text_other_font))
     }
 
     fun shape(page: Int, start: Offset, end: Offset, style: ToolStyle) = mark { document ->
@@ -1390,6 +1435,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         // The session stays with the application for the next visit; only this screen's
         // renderer and bitmaps go, so a document that is not on screen holds no PDFium memory.
         detachLocked()
+        if (readAloudDelegate.isInitialized()) readAloud.shutdown()
         renderer?.close()
         renderer = null
         textDocument?.close()

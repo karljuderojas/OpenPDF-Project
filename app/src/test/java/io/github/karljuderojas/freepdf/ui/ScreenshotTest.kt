@@ -50,6 +50,9 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureReport
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureFields
 import io.github.karljuderojas.freepdf.pdf.text.PageText
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
+import io.github.karljuderojas.freepdf.pdf.edit.TextEditing.EditableLine
+import io.github.karljuderojas.freepdf.pdf.DisplayRect
+import io.github.karljuderojas.freepdf.ui.viewer.nearest
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
 import io.github.karljuderojas.freepdf.pdf.sign.TimestampReport
@@ -57,12 +60,17 @@ import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
 import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
 import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
+import io.github.karljuderojas.freepdf.speech.ReadAloudState
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
+import io.github.karljuderojas.freepdf.ui.files.UnsavedCloseDialog
 import io.github.karljuderojas.freepdf.ui.sign.CertificatePasswordDialog
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.home.HomeContent
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
 import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
+import io.github.karljuderojas.freepdf.ui.create.ImagesToPdfContent
+import io.github.karljuderojas.freepdf.pdf.create.PageFit
+import androidx.compose.ui.graphics.asImageBitmap
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
 import io.github.karljuderojas.freepdf.ui.viewer.DocumentInfoDialog
 import io.github.karljuderojas.freepdf.ui.viewer.AnnotateTool
@@ -145,6 +153,25 @@ class ScreenshotTest {
 
     @Test
     fun tools() = capture("tools") { shell(MainTab.Tools) { ToolsContent(onToolPicked = {}, modifier = it) } }
+
+    @Test
+    fun imagesToPdfEmpty() = capture("images_to_pdf_empty") {
+        ImagesToPdfContent(emptyList(), emptyMap(), PageFit.A4, null, false, {}, { _, _ -> }, {}, {}, {}, {})
+    }
+
+    @Test
+    fun imagesToPdfPicked() = capture("images_to_pdf_picked") {
+        val photos = listOf("content://a", "content://b", "content://c")
+        val thumbs = photos.zip(listOf(samplePages[0], samplePages[1], samplePages[0])).toMap().mapValues { it.value.asImageBitmap() }
+        ImagesToPdfContent(photos, thumbs, PageFit.A4, null, false, {}, { _, _ -> }, {}, {}, {}, {})
+    }
+
+    @Test
+    fun imagesToPdfMaking() = capture("images_to_pdf_making") {
+        val photos = listOf("content://a", "content://b", "content://c")
+        val thumbs = photos.zip(listOf(samplePages[0], samplePages[1], samplePages[0])).toMap().mapValues { it.value.asImageBitmap() }
+        ImagesToPdfContent(photos, thumbs, PageFit.Picture, 2, false, {}, { _, _ -> }, {}, {}, {}, {})
+    }
 
     @Test
     fun toolsSearch() = capture("tools_search_tick") {
@@ -264,6 +291,44 @@ class ScreenshotTest {
     @Test
     @Config(qualifiers = "w800dp-h1280dp-mdpi")
     fun tabletViewerPortrait() = capture("tablet_viewer_portrait") { viewer(ViewerMode.Read, state = tabletState) }
+
+    @Test
+    fun viewerReflow() = capture("viewer_reflow") { viewer(ViewerMode.Read, reflow = true) }
+
+    @Test
+    fun viewerReflowNightLarge() = capture("viewer_reflow_night_large") {
+        viewer(ViewerMode.Read, reflow = true, pageColors = PageColors.Night, readingTextSize = 26)
+    }
+
+    @Test
+    fun viewerReadAloud() = capture("viewer_read_aloud") {
+        viewer(
+            ViewerMode.Read,
+            readAloud = ReadAloudState(active = true, speaking = true, page = 0, sentence = 2, text = "The Provider agrees to perform the services described in Schedule A."),
+        )
+    }
+
+    @Test
+    fun viewerReflowReadAloud() = capture("viewer_reflow_read_aloud") {
+        viewer(
+            ViewerMode.Read,
+            reflow = true,
+            readAloud = ReadAloudState(active = true, speaking = false, page = 0, sentence = 1, text = "Paused on this sentence."),
+        )
+    }
+
+    @Test
+    fun viewerReflowSepia() = capture("viewer_reflow_sepia") { viewer(ViewerMode.Read, reflow = true, pageColors = PageColors.Sepia) }
+
+    @Test
+    fun filesCloseUnsaved() = capture("files_close_unsaved") {
+        files(
+            open = listOf(sampleRecent[0], DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * HOUR)),
+            recent = sampleRecent,
+            unsaved = setOf("content://b"),
+            closing = true,
+        )
+    }
 
     @Test
     fun viewerRead() = capture("viewer_read") { viewer(ViewerMode.Read) }
@@ -796,6 +861,22 @@ class ScreenshotTest {
     fun viewerEditAddText() = capture("viewer_edit_add_text") { viewer(ViewerMode.Edit, tool = R.string.tool_add_text) }
 
     @Test
+    fun viewerEditText() = capture("viewer_edit_text") { viewer(ViewerMode.Edit, tool = R.string.tool_edit_text) }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerEditTextDialog() {
+        show { viewer(ViewerMode.Edit, tool = R.string.tool_edit_text) }
+        // Tap the line holding "Northwind": its words open in a box to change. The dialog's text
+        // field keeps Compose from going idle, as in viewerAnnotateNote.
+        composeRule.mainClock.autoAdvance = false
+        val layer = "edit-text-layer-0"
+        composeRule.onNodeWithTag(layer).performTouchInput { click(wordCentre(layer, 0, wordIndex(0, "Northwind"))) }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_edit_text_dialog.png")
+    }
+
+    @Test
     fun viewerEditPlaced() {
         // A heading typed with Add text, and a picture from Add image, selected so its handles show.
         val heading = "Draft - for review"
@@ -857,6 +938,19 @@ class ScreenshotTest {
         composeRule.onNodeWithText("Split").performClick()
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_split.png")
+    }
+
+    // The text field keeps Compose from going idle, so drive the clock by hand (see viewerPagesExtract).
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesWatermark() {
+        show { viewer(ViewerMode.Pages, sixPages, selectedPage = 1) }
+        composeRule.onNodeWithText("Watermark").performScrollTo()
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Watermark").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_watermark.png")
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
@@ -1181,8 +1275,9 @@ class ScreenshotTest {
     )
 
     @Composable
-    private fun files(open: List<DocumentEntry>, recent: List<DocumentEntry>) = shell(MainTab.Files) {
-        FilesContent(open, recent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {}, modifier = it, now = now)
+    private fun files(open: List<DocumentEntry>, recent: List<DocumentEntry>, unsaved: Set<String> = emptySet(), closing: Boolean = false) = shell(MainTab.Files) {
+        FilesContent(open, recent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {}, modifier = it, unsaved = unsaved, now = now)
+        if (closing) UnsavedCloseDialog(onSave = {}, onDiscard = {}, onCancel = {})
     }
 
     /** A tab's screen inside the bottom tab bar, as the app shows it. */
@@ -1212,6 +1307,9 @@ class ScreenshotTest {
         openDocuments: List<DocumentEntry> = emptyList(),
         unsavedDocuments: Set<String> = emptySet(),
         pageColors: PageColors = PageColors.Normal,
+        reflow: Boolean = false,
+        readingTextSize: Int = 18,
+        readAloud: ReadAloudState = ReadAloudState(),
         tip: Int? = null,
         stamps: List<PlacedStamp> = emptyList(),
         selectedStamp: Long? = null,
@@ -1225,6 +1323,17 @@ class ScreenshotTest {
             loadPage = { index, width -> scaled(withMarks(pages[index % pages.size], index, marks), width) },
             // The agreement's words and sharp, zoomed-in renders; the form has neither.
             loadWords = { if (pages === samplePages) sampleWords[it % sampleWords.size] else emptyList() },
+            // Every line of the sample's words can be edited, as in a PDF whose text is not scanned.
+            findLine = { page, at ->
+                val words = sampleWords[page % sampleWords.size]
+                words.nearest(at, aspect = 792f / 612f, reach = 0.05f)?.let { i ->
+                    val line = words.filter { it.line == words[i].line }
+                    EditableLine(
+                        line.joinToString(" ") { it.text },
+                        DisplayRect(line.minOf { it.left }, line.minOf { it.top }, line.maxOf { it.right }, line.maxOf { it.bottom }),
+                    )
+                }
+            },
             loadRegion = { index, fullWidth, region ->
                 largePages[index]?.takeIf { pages === samplePages }?.let { cropped(it, fullWidth, region) }
             },
@@ -1248,6 +1357,9 @@ class ScreenshotTest {
             unsavedDocuments = unsavedDocuments,
             currentUri = openDocuments.firstOrNull()?.uri,
             pageColors = pageColors,
+            initialReflow = reflow,
+            readAloud = readAloud,
+            readingTextSize = readingTextSize,
             tip = tip,
             stamps = stamps,
             initialSelectedStamp = selectedStamp,

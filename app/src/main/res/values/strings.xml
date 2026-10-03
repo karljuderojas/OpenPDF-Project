@@ -64,6 +64,7 @@
     <string name="tool_select_all">Select all</string>
     <string name="tool_share_selected">Share selected</string>
     <string name="tool_split">Split</string>
+    <string name="tool_watermark">Watermark</string>
     <string name="tool_password">Password</string>
     <string name="tool_print">Print</string>
     <string name="tool_share">Share</string>
@@ -102,6 +103,8 @@
     <string name="discard">Discard</string>
     <string name="saved">Saved</string>
     <string name="save_failed">Could not save this PDF.</string>
+    <string name="save_open_to_finish">This PDF has stamps that are not placed yet. Open it and tap Done to finish them.</string>
+    <string name="save_failed_open_to_save_a_copy">Could not save here. Open the PDF and use Save As.</string>
     <string name="edit_failed">That change could not be made to this PDF.</string>
     <string name="cannot_delete_last_page">A PDF needs at least one page.</string>
     <string name="delete_page_title">Delete page %1$d?</string>
@@ -147,6 +150,11 @@
     <string name="sign_hint_date">Tap where today\'s date goes. Drag it to move it.</string>
     <string name="sign_hint_text">Tap where you want to type text. Drag it to move it.</string>
     <string name="sign_hint_checkmark">Tap a box to tick it. Drag the tick to move it.</string>
+    <string name="edit_hint_edit_text">Tap a line of text to change its words. It keeps its font, size and colour where the PDF allows.</string>
+    <string name="edit_text_title">Edit text</string>
+    <string name="edit_text_hint">The words of this line</string>
+    <string name="edit_text_none">No editable text there. Scanned pages are pictures, so they have no text to change.</string>
+    <string name="edit_text_other_font">That font could not draw every letter, so this line now uses the built-in font.</string>
     <string name="edit_hint_text">Tap where the text goes. Drag it to move it, or its corner to resize.</string>
     <string name="image_failed">Could not open that picture.</string>
     <string name="stamp_delete">Delete</string>
@@ -249,6 +257,27 @@
     <string name="share_pages_hint">For example 1-3, 5</string>
     <string name="share_pages_invalid">Use page numbers from 1 to %1$d</string>
     <string name="share_images_too_many">Pick up to %1$d pages at a time</string>
+    <string name="watermark_title">Add a watermark</string>
+    <string name="watermark_text_option">Text</string>
+    <string name="watermark_picture_option">Picture</string>
+    <string name="watermark_text_label">Watermark text</string>
+    <string name="watermark_choose_picture">Choose a picture</string>
+    <string name="watermark_change_picture">Change picture</string>
+    <string name="watermark_no_picture">No picture chosen yet.</string>
+    <string name="watermark_picture_chosen">Picture chosen.</string>
+    <string name="watermark_opacity">Strength</string>
+    <string name="watermark_angle">Angle</string>
+    <string name="watermark_size">Size</string>
+    <string name="watermark_angle_value">%1$d°</string>
+    <string name="watermark_color">Colour</string>
+    <string name="watermark_note">It is drawn on top of the page. Use Undo to take it off.</string>
+    <string name="watermark_apply">Add</string>
+    <string name="watermark_apply_selected">Selected pages (%1$s)</string>
+    <string name="watermark_apply_all">All %1$d pages</string>
+    <string name="watermark_color_gray">Gray</string>
+    <string name="watermark_color_red">Red</string>
+    <string name="watermark_color_blue">Blue</string>
+    <string name="watermark_color_black">Black</string>
     <string name="crop_title">Crop pages</string>
     <string name="crop_body">Trim each edge of the page. The cut-off part stays in the file, so you can undo this or bring it back with Show whole page.</string>
     <string name="crop_left">Left</string>
@@ -334,6 +363,7 @@
     <string name="tool_about_signature">Draw your signature once, then tap to place it.</string>
     <string name="tool_about_initials">Draw your initials once, then tap to place them.</string>
     <string name="tool_about_date">Add today\'s date.</string>
+    <string name="tool_about_edit_text">Change the words of a line that is already in the PDF.</string>
     <string name="tool_about_add_text">Type a heading, label or note straight onto the page.</string>
     <string name="tool_about_add_image">Put a photo, logo or picture on the page and size it.</string>
     <string name="tool_about_text">Type a name, address or answer onto the page.</string>
@@ -351,6 +381,7 @@
     <string name="tool_about_move_later">Move a page towards the end.</string>
     <string name="tool_about_insert">Add an empty page.</string>
     <string name="tool_about_delete">Remove a page.</string>
+    <string name="tool_about_watermark">Stamp text or a picture across pages, such as DRAFT or a logo.</string>
     <string name="tool_about_merge">Add another PDF\'s pages to this one.</string>
     <string name="tool_about_share">Send the PDF to another app.</string>
     <string name="tool_about_password">Lock the PDF with a password, or change or remove one.</string>
@@ -360,6 +391,7 @@
     <string name="tool_synonyms_signature">sign, signing, autograph, e-sign, esign, electronic signature</string>
     <string name="tool_synonyms_initials">initial, sign</string>
     <string name="tool_synonyms_date">today, day, time</string>
+    <string name="tool_synonyms_edit_text">change, correct, fix, typo, rewrite, replace, existing text</string>
     <string name="tool_synonyms_add_text">type, write, words, label, heading, edit</string>
     <string name="tool_synonyms_add_image">picture, photo, logo, insert, gallery, edit</string>
     <string name="tool_synonyms_text">type, write, fill, form, name, address</string>
@@ -376,6 +408,7 @@
     <string name="tool_synonyms_reorder">reorder, order, arrange, sort, move page</string>
     <string name="tool_synonyms_insert">add page, new page, blank page</string>
     <string name="tool_synonyms_delete">remove page, delete page</string>
+    <string name="tool_synonyms_watermark">stamp, draft, confidential, logo, overlay, background, text across page</string>
     <string name="tool_synonyms_merge">combine, join, append, add pdf, attach</string>
     <string name="tool_synonyms_share">send, email, export, upload</string>
     <string name="tool_synonyms_password">lock, unlock, protect, encrypt, secure</string>
@@ -405,6 +438,19 @@
     <string name="open_documents_open_another">Open another</string>
     <!-- Reading modes -->
     <string name="side_panel">Pages, contents and comments</string>
+    <string name="page_label">Page %1$d</string>
+    <string name="reading_mode">Reading mode</string>
+    <string name="reading_mode_no_text">No text on this page. It may be a scan.</string>
+    <string name="reading_mode_smaller">Smaller text</string>
+    <string name="reading_mode_larger">Larger text</string>
+    <string name="tool_read_aloud">Read aloud</string>
+    <string name="read_aloud_page">Reading page %1$d</string>
+    <string name="read_aloud_pause">Pause</string>
+    <string name="read_aloud_play">Play</string>
+    <string name="read_aloud_previous">Previous sentence</string>
+    <string name="read_aloud_next">Next sentence</string>
+    <string name="read_aloud_stop">Stop</string>
+    <string name="read_aloud_unavailable">Read aloud is not available. Check the text-to-speech settings on your phone.</string>
     <string name="page_colors">Page colors</string>
     <string name="page_colors_normal">Normal</string>
     <string name="page_colors_night">Night</string>
@@ -416,7 +462,7 @@
     <string name="tip_annotate">Pick a tool, then mark the page. Pick it again to scroll with one finger.</string>
     <string name="tip_sign">Pick Signature, then tap where you want to sign. You draw it once; it is saved on this phone.</string>
     <string name="tip_pages">Tap a page to select it, or tap the circles to pick several. Hold a page and drag it to move it.</string>
-    <string name="tip_edit">Add text or a picture, then drag it into place. Done writes it into the PDF.</string>
+    <string name="tip_edit">Add text or a picture and drag it into place, or tap Edit text to change a line already in the PDF. Done writes it in.</string>
     <string name="tip_got_it">Got it</string>
     <string name="settings_tips">Tips</string>
     <string name="settings_show_tips">Show tips</string>
@@ -424,4 +470,28 @@
     <string name="settings_reset_tips">Show all tips again</string>
     <string name="settings_reset_tips_detail">Each hint appears once more when its feature comes up.</string>
     <string name="settings_reset_tips_done">Tips will show again</string>
+    <string name="tools_create">Create</string>
+    <string name="tool_images_to_pdf">Images to PDF</string>
+    <string name="tool_about_images_to_pdf">Turn photos from your gallery into one PDF.</string>
+    <string name="tool_synonyms_images_to_pdf">picture, photo, jpg, jpeg, png, gallery, convert, make pdf, create</string>
+    <string name="images_title">Images to PDF</string>
+    <string name="images_empty_title">Pick the pictures for your PDF</string>
+    <string name="images_empty_body">Each picture becomes one page. You can reorder them before saving.</string>
+    <string name="images_choose">Choose pictures</string>
+    <string name="images_add_more">Add more</string>
+    <string name="images_create">Create PDF</string>
+    <string name="images_page_size">Page size</string>
+    <string name="images_fit_a4">A4</string>
+    <string name="images_fit_picture">Same as picture</string>
+    <string name="images_page_n">Page %1$d</string>
+    <string name="images_move_earlier">Move page %1$d earlier</string>
+    <string name="images_move_later">Move page %1$d later</string>
+    <string name="images_remove">Remove page %1$d</string>
+    <string name="images_making">Making page %1$d of %2$d…</string>
+    <string name="images_failed">Could not make the PDF. Check that there is room on your phone and try again.</string>
+    <string name="images_default_name">Images</string>
+    <plurals name="images_count">
+        <item quantity="one">%1$d picture</item>
+        <item quantity="other">%1$d pictures</item>
+    </plurals>
 </resources>

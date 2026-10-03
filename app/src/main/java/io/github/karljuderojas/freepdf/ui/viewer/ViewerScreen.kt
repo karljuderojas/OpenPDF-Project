@@ -106,6 +106,8 @@ import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
+import io.github.karljuderojas.freepdf.pdf.edit.TextEditing
+import io.github.karljuderojas.freepdf.pdf.edit.WatermarkStyle
 import io.github.karljuderojas.freepdf.pdf.edit.CropMargins
 import io.github.karljuderojas.freepdf.pdf.form.FormField
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
@@ -120,6 +122,8 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
 import io.github.karljuderojas.freepdf.settings.Tip
 import io.github.karljuderojas.freepdf.print.Printing
+import io.github.karljuderojas.freepdf.settings.AppSettings
+import io.github.karljuderojas.freepdf.speech.ReadAloudState
 import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.ui.rememberWindowSize
 import io.github.karljuderojas.freepdf.share.Sharing
@@ -151,10 +155,16 @@ sealed interface ViewerAction {
      */
     data class SaveAndLeave(val then: () -> Unit, val document: String? = null) : ViewerAction
 
+    /** Reads the document aloud from [page]; see [ReadAloudBar] for the controls. */
+    data class StartReadAloud(val page: Int) : ViewerAction
+    data class ControlReadAloud(val command: ReadAloudCommand) : ViewerAction
+
     /** Lets the unsaved changes of the document on screen go, on the way out. */
     data object DiscardChanges : ViewerAction
 
     data class Rotate(val pages: Set<Int>) : ViewerAction
+    /** Stamps [pages] with [text], or with the picture at [image] when that is given. */
+    data class Watermark(val pages: Set<Int>, val text: String, val image: Uri?, val style: WatermarkStyle) : ViewerAction
     /** Trims [pages] by [margins], or shows them in full again when [margins] is null. */
     data class Crop(val pages: Set<Int>, val margins: CropMargins?) : ViewerAction
     data class Delete(val pages: Set<Int>) : ViewerAction
@@ -227,6 +237,9 @@ sealed interface ViewerAction {
 
     /** Edit actions. The screen opens the photo picker for [PickImage], then places the picture. */
     data class AddEditText(val page: Int, val at: Offset, val text: String) : ViewerAction
+
+    /** Edit text: swaps the words of the line at [at] on [page], which read [oldText], for [newText]. */
+    data class ReplaceText(val page: Int, val at: Offset, val oldText: String, val newText: String) : ViewerAction
     data class PickImage(val page: Int) : ViewerAction
 }
 
@@ -259,6 +272,8 @@ fun ViewerScreen(
     val context = LocalContext.current
     val settings = (context.applicationContext as FreePdfApp).settings
     val pageColors by settings.pageColors.collectAsStateWithLifecycle()
+    val readingTextSize by settings.readingTextSize.collectAsStateWithLifecycle()
+    val readAloud by viewModel.readAloud.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var shownInfo by remember { mutableStateOf<ViewerEffect.ShowInfo?>(null) }
     val scope = rememberCoroutineScope()
@@ -327,6 +342,7 @@ fun ViewerScreen(
         onBack = onBack,
         loadPage = viewModel::page,
         loadWords = viewModel::words,
+        findLine = viewModel::editableLine,
         loadRegion = viewModel::pageRegion,
         initialMode = initialMode,
         initialTool = initialTool,
@@ -351,6 +367,9 @@ fun ViewerScreen(
         onViewPosition = viewModel::viewPositionChanged,
         pageColors = pageColors,
         onPageColors = settings::setPageColors,
+        readAloud = readAloud,
+        readingTextSize = readingTextSize,
+        onReadingTextSize = settings::setReadingTextSize,
         tip = tip?.text,
         onTipDismissed = { tip = null },
         onModeEntered = { mode ->
@@ -367,7 +386,18 @@ fun ViewerScreen(
                     viewModel.save(thenClose = true, document = action.document)
                 }
                 ViewerAction.DiscardChanges -> viewModel.discardChanges()
+                is ViewerAction.StartReadAloud -> viewModel.readAloud.start(action.page)
+                is ViewerAction.ControlReadAloud -> viewModel.readAloud.let {
+                    when (action.command) {
+                        ReadAloudCommand.Pause -> it.pause()
+                        ReadAloudCommand.Resume -> it.resume()
+                        ReadAloudCommand.Next -> it.next()
+                        ReadAloudCommand.Previous -> it.previous()
+                        ReadAloudCommand.Stop -> it.stop()
+                    }
+                }
                 is ViewerAction.Rotate -> viewModel.rotatePages(action.pages)
+                is ViewerAction.Watermark -> viewModel.watermark(action.pages, action.text, action.image, action.style)
                 is ViewerAction.Crop -> viewModel.cropPages(action.pages, action.margins)
                 is ViewerAction.Delete -> viewModel.deletePages(action.pages)
                 is ViewerAction.InsertBlank -> viewModel.insertBlankPage(action.afterPage)
@@ -411,6 +441,7 @@ fun ViewerScreen(
                 is ViewerAction.Erase -> viewModel.erase(action.page, action.at)
                 is ViewerAction.SaveSignature -> viewModel.saveSignature(action.kind, action.image, action.method)
                 is ViewerAction.PlaceSignature -> viewModel.placeSignature(action.page, action.at, action.kind)
+                is ViewerAction.ReplaceText -> viewModel.replaceText(action.page, action.at, action.oldText, action.newText)
                 is ViewerAction.AddDate -> viewModel.addDate(action.page, action.at)
                 is ViewerAction.AddText -> viewModel.addText(action.page, action.at, action.text)
                 is ViewerAction.AddCheckmark -> viewModel.addCheckmark(action.page, action.at)
@@ -454,6 +485,7 @@ fun ViewerContent(
     onBack: () -> Unit,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
     loadWords: suspend (page: Int) -> List<PageWord> = { emptyList() },
+    findLine: suspend (page: Int, at: Offset) -> TextEditing.EditableLine? = { _, _ -> null },
     loadRegion: LoadRegion = { _, _, _ -> null },
     initialMode: ViewerMode = ViewerMode.Read,
     initialSelectedPage: Int = 0,
@@ -485,6 +517,10 @@ fun ViewerContent(
     onViewPosition: (ViewPosition) -> Unit = {},
     pageColors: PageColors = PageColors.Normal,
     onPageColors: (PageColors) -> Unit = {},
+    readAloud: ReadAloudState = ReadAloudState(),
+    readingTextSize: Int = AppSettings.DEFAULT_TEXT_SIZE,
+    onReadingTextSize: (Int) -> Unit = {},
+    initialReflow: Boolean = false,
     @StringRes tip: Int? = null,
     onTipDismissed: () -> Unit = {},
     onModeEntered: (ViewerMode) -> Unit = {},
@@ -512,6 +548,11 @@ fun ViewerContent(
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     var extracting by rememberSaveable { mutableStateOf(false) }
     var splitting by rememberSaveable { mutableStateOf(false) }
+    var watermarking by rememberSaveable { mutableStateOf(false) }
+    var watermarkImage by rememberSaveable { mutableStateOf<Uri?>(null) }
+    val watermarkPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) {
+        if (it != null) watermarkImage = it
+    }
     var cropping by rememberSaveable { mutableStateOf(false) }
     // What to do once the reader settles unsaved changes; non-null while the dialog shows.
     var leavePrompt by remember { mutableStateOf<LeavePrompt?>(null) }
@@ -520,6 +561,9 @@ fun ViewerContent(
     var pendingTextBox by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var stampKind by rememberSaveable { mutableStateOf(Stamps.Kind.Approved) }
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
+    // The line Edit text found under the last tap: its page, where it was tapped, and its words.
+    var editingLine by remember { mutableStateOf<Triple<Int, Offset, String>?>(null) }
+    val noEditableText = stringResource(R.string.edit_text_none)
     var editingField by remember { mutableStateOf<FormField?>(null) }
     var padFor by rememberSaveable { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by rememberSaveable { mutableStateOf(false) }
@@ -555,6 +599,9 @@ fun ViewerContent(
     val searchFocus = remember { FocusRequester() }
     var focusSearch by remember { mutableStateOf(false) }
     var goingToPage by rememberSaveable { mutableStateOf(false) }
+    // Reading mode shows the text reflowed instead of the pages; only from Read mode.
+    var reflowing by rememberSaveable { mutableStateOf(initialReflow) }
+    val reflowState = rememberLazyListState()
     var showingOutline by rememberSaveable { mutableStateOf(false) }
     var selectedStamp by remember { mutableStateOf(initialSelectedStamp) }
     // A newly placed stamp starts out selected, so its handles show right away.
@@ -680,6 +727,7 @@ fun ViewerContent(
                 val after = selectedPages.max()
                 editPages(ViewerAction.InsertBlank(after), then = setOf(after + 1))
             }
+            R.string.tool_watermark -> watermarking = true
             R.string.tool_crop -> cropping = true
             R.string.tool_delete -> confirmDelete = true
             R.string.tool_extract -> extracting = true
@@ -737,8 +785,25 @@ fun ViewerContent(
         listState.animateScrollToItem(match.page / columns, (top * pageHeight - viewport.height / 3f).toInt().coerceAtLeast(0))
     }
 
-    BackHandler(enabled = selectedMark != null || mode != ViewerMode.Read || searching || ready?.hasUnsavedChanges == true) {
+    // The page being read aloud stays on screen, in whichever view is showing.
+    LaunchedEffect(readAloud.active, readAloud.page, reflowing) {
+        if (!readAloud.active) return@LaunchedEffect
+        if (reflowing) reflowState.animateScrollToItem(readAloud.page) else listState.animateScrollToItem(readAloud.page / columns)
+    }
+    val readAloudUnavailable = stringResource(R.string.read_aloud_unavailable)
+    LaunchedEffect(readAloud.unavailable) {
+        if (readAloud.unavailable) snackbarHostState.showSnackbar(readAloudUnavailable)
+    }
+
+    // Leaving reading mode puts the page list where the reader had got to.
+    fun exitReflow() {
+        reflowing = false
+        scope.launch { listState.scrollToItem(reflowState.firstVisibleItemIndex / columns) }
+    }
+
+    BackHandler(enabled = reflowing || selectedMark != null || mode != ViewerMode.Read || searching || ready?.hasUnsavedChanges == true) {
         when {
+            reflowing -> exitReflow()
             selectedMark != null -> pickedMark = null
             mode != ViewerMode.Read -> backToReading()
             searching -> closeSearch()
@@ -752,6 +817,7 @@ fun ViewerContent(
             TopAppBar(
                 title = {
                     when {
+                        reflowing -> Text(stringResource(R.string.reading_mode))
                         mode == ViewerMode.Read && searching -> SearchField(
                             query = query,
                             onQueryChange = { query = it },
@@ -771,7 +837,11 @@ fun ViewerContent(
                     }
                 },
                 navigationIcon = {
-                    if (mode == ViewerMode.Read) {
+                    if (reflowing) {
+                        IconButton(onClick = { exitReflow() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                        }
+                    } else if (mode == ViewerMode.Read) {
                         IconButton(onClick = { if (searching) closeSearch() else leave(discard = { onAction(ViewerAction.DiscardChanges) }) }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                         }
@@ -782,7 +852,18 @@ fun ViewerContent(
                     }
                 },
                 actions = {
-                    if (mode == ViewerMode.Read && searching) {
+                    if (reflowing) {
+                        TextSizeButtons(
+                            readingTextSize, onReadingTextSize,
+                            AppSettings.MIN_TEXT_SIZE, AppSettings.MAX_TEXT_SIZE, AppSettings.TEXT_SIZE_STEP,
+                        )
+                        if (!readAloud.active) {
+                            TextButton(onClick = { onAction(ViewerAction.StartReadAloud(reflowState.firstVisibleItemIndex)) }) {
+                                Text(stringResource(R.string.tool_read_aloud))
+                            }
+                        }
+                        PageColorsButton(pageColors, onPageColors)
+                    } else if (mode == ViewerMode.Read && searching) {
                         SearchStepper(search, currentMatch) { step ->
                             val count = search.matches.size
                             if (count > 0) currentMatch = (currentMatch + step + count) % count
@@ -799,6 +880,10 @@ fun ViewerContent(
                                 IconButton(onClick = { panelOpen = !panelOpen }) {
                                     Icon(Icons.AutoMirrored.Filled.List, contentDescription = stringResource(R.string.side_panel))
                                 }
+                            }
+                            ReadingModeButton {
+                                scope.launch { reflowState.scrollToItem(currentPage) }
+                                reflowing = true
                             }
                             IconButton(onClick = { sharing = true }) {
                                 Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.tool_share))
@@ -839,6 +924,8 @@ fun ViewerContent(
         bottomBar = {
             when {
                 ready == null -> Unit
+                readAloud.active && mode == ViewerMode.Read -> ReadAloudBar(readAloud) { onAction(ViewerAction.ControlReadAloud(it)) }
+                reflowing -> Unit
                 selectedMark != null -> MarkEditBar(
                     mark = selectedMark,
                     onStyle = { style ->
@@ -882,6 +969,7 @@ fun ViewerContent(
                 }
                 mode == ViewerMode.Edit -> Column {
                     if (selectedTool == R.string.tool_add_text) EditHint(R.string.edit_hint_text)
+                    if (selectedTool == R.string.tool_edit_text) EditHint(R.string.edit_hint_edit_text)
                     ToolStrip(mode, selectedTool, onToolSelected = { label ->
                         when {
                             // Add image acts once: pick a picture and it lands on the page in view.
@@ -922,6 +1010,10 @@ fun ViewerContent(
                 }
                 else -> ToolStrip(mode, selectedTool = null, onToolSelected = {
                     when (it) {
+                        R.string.tool_read_aloud -> {
+                            onAction(ViewerAction.StartReadAloud(currentPage))
+                            backToReading()
+                        }
                         R.string.tool_share -> sharing = true
                         R.string.tool_password -> choosingPassword = true
                         R.string.tool_info -> onAction(ViewerAction.ShowInfo)
@@ -934,7 +1026,7 @@ fun ViewerContent(
     ) { padding ->
         Row(Modifier.fillMaxSize().padding(padding)) {
         // On a large screen the pages, contents and comments sit beside the document.
-        if (window.sidePanel && panelOpen && ready != null && mode != ViewerMode.Pages) {
+        if (window.sidePanel && panelOpen && ready != null && mode != ViewerMode.Pages && !reflowing) {
             ViewerSidePanel(
                 pageSizes = ready.pageSizes,
                 revision = ready.revision,
@@ -964,6 +1056,15 @@ fun ViewerContent(
                     onCancel = onBack,
                 )
                 ready == null -> CircularProgressIndicator()
+                reflowing -> ReflowView(
+                    pageCount = pageCount,
+                    revision = ready.revision,
+                    loadWords = loadWords,
+                    textSize = readingTextSize,
+                    pageColors = pageColors,
+                    listState = reflowState,
+                    spoken = readAloud.takeIf { it.active },
+                )
                 mode == ViewerMode.Pages -> PageGrid(
                     pageSizes = ready.pageSizes,
                     revision = ready.revision,
@@ -992,6 +1093,7 @@ fun ViewerContent(
                         val showsStamps = mode == ViewerMode.Sign || mode == ViewerMode.Edit
                         val pageStamps = if (showsStamps) stamps.filter { it.page == page } else emptyList()
                         val addsText = mode == ViewerMode.Edit && selectedTool == R.string.tool_add_text
+                        val editsText = mode == ViewerMode.Edit && selectedTool == R.string.tool_edit_text
                         val words by produceState(emptyList<PageWord>(), page, ready.revision) { value = loadWords(page) }
                         // Text can be selected while reading, or in Annotate before a tool is picked.
                         if (mode == ViewerMode.Read || (mode == ViewerMode.Annotate && tool == null)) {
@@ -1015,6 +1117,15 @@ fun ViewerContent(
                                     selection = null
                                 },
                             )
+                            }
+                        }
+                        if (editsText) {
+                            EditTextLayer(page, words) { at ->
+                                scope.launch {
+                                    val line = findLine(page, at)
+                                    if (line == null) snackbarHostState.showSnackbar(noEditableText)
+                                    else editingLine = Triple(page, at, line.text)
+                                }
                             }
                         }
                         if (signTool == SignTool.FillForm) {
@@ -1168,6 +1279,21 @@ fun ViewerContent(
         )
     }
 
+    if (watermarking) {
+        WatermarkDialog(
+            pageCount = pageCount,
+            selectedPages = selectedPages.sorted(),
+            pageAspect = ready?.pageSizes?.getOrNull(selectedPage)?.aspectRatio ?: 0.77f,
+            image = watermarkImage,
+            onChooseImage = { watermarkPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            onDismiss = { watermarking = false },
+            onWatermark = { pages, text, image, style ->
+                watermarking = false
+                onAction(ViewerAction.Watermark(pages, text, image, style))
+            },
+        )
+    }
+
     if (cropping) {
         CropPagesDialog(
             pageCount = pageCount,
@@ -1257,6 +1383,21 @@ fun ViewerContent(
             onAdd = { text ->
                 pendingText = null
                 onAction(if (mode == ViewerMode.Edit) ViewerAction.AddEditText(page, at, text) else ViewerAction.AddText(page, at, text))
+            },
+        )
+    }
+
+    editingLine?.let { (page, at, text) ->
+        TextEntryDialog(
+            title = R.string.edit_text_title,
+            hint = R.string.edit_text_hint,
+            initial = text,
+            confirm = R.string.save,
+            allowBlank = true,
+            onDismiss = { editingLine = null },
+            onAdd = { changed ->
+                editingLine = null
+                if (changed != text) onAction(ViewerAction.ReplaceText(page, at, text, changed))
             },
         )
     }
