@@ -13,7 +13,7 @@ import com.tom_roush.pdfbox.text.PDFTextStripper
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
 import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.displayToPdf
-import io.github.karljuderojas.freepdf.pdf.sign.SignatureStamper
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureAnnotation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -85,7 +85,10 @@ class PageEditorTest {
             PageEditor.addText(document, 0, "Signed on a rotated page: 3 paź 2026", tap(0.08f, 0.80f), fontSize = 14f)
             PageEditor.addCheckmark(document, 0, tap(0.08f, 0.88f), size = 14f)
             PageEditor.addText(document, 0, "I agree to the terms above", tap(0.12f, 0.875f), fontSize = 12f)
-            SignatureStamper.stamp(document, 0, signatureBitmap(), tap(0.65f, 0.86f), maxWidth = 160f, maxHeight = 56f, caption = "Dana Whitfield")
+            // Placed as a stamp annotation, then locked into the page as Finish does.
+            SignatureAnnotation.add(document, 0, signatureBitmap(), tap(0.65f, 0.86f), maxWidth = 160f, maxHeight = 56f)
+            assertEquals(1, SignatureAnnotation.lock(document))
+            assertTrue(page.annotations.none(SignatureAnnotation::isSignature))
 
             // Reading with the page's rotation applied, the text comes out in display order.
             val extracted = text(document, page = 1)
