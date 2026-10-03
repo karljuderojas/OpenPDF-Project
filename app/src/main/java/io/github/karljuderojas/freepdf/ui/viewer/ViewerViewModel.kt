@@ -1358,7 +1358,8 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         val (formFields, placedSignatures, links) = withContext(Dispatchers.IO) {
             runCatching {
                 PDDocument.load(current.workingFile, current.password).use {
-                    Triple(FormFiller.fields(it), SignatureAnnotation.placed(it), PageLinks.read(it))
+                    // A link PdfBox cannot read just means no links, not no form fields or signatures.
+                    Triple(FormFiller.fields(it), SignatureAnnotation.placed(it), runCatching { PageLinks.read(it) }.getOrDefault(emptyList()))
                 }
             }.getOrDefault(Triple(emptyList<FormField>(), emptyList<SignatureAnnotation.Placed>(), emptyList<PageLink>()))
         }
