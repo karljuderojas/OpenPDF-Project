@@ -32,7 +32,7 @@ enum class ViewerMode(@StringRes val label: Int, val icon: ImageVector?, val too
     Edit(R.string.mode_edit, Icons.Filled.Build, listOf(R.string.tool_add_text, R.string.tool_add_image)),
     Pages(
         R.string.mode_pages, Icons.AutoMirrored.Filled.List,
-        listOf(R.string.tool_select_all, R.string.tool_rotate, R.string.tool_move_earlier, R.string.tool_move_later,
+        listOf(R.string.tool_select_all, R.string.tool_rotate, R.string.tool_crop, R.string.tool_move_earlier, R.string.tool_move_later,
             R.string.tool_insert, R.string.tool_delete, R.string.tool_extract, R.string.tool_share_selected,
             R.string.tool_merge, R.string.tool_split),
     ),
