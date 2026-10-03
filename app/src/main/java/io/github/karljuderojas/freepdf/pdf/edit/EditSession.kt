@@ -99,6 +99,11 @@ class EditSession(private val dir: File, source: InputStream) {
     /** Copies the working copy to [output] and marks the current state as saved. */
     fun writeTo(output: OutputStream) {
         workingFile.inputStream().use { it.copyTo(output) }
+        markSaved()
+    }
+
+    /** Records that the working copy, as it is now, has been written out successfully. */
+    fun markSaved() {
         savedVersion = version
     }
 

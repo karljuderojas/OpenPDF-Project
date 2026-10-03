@@ -23,6 +23,7 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
+import io.github.karljuderojas.freepdf.files.SafeWrite
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
 import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
@@ -762,8 +763,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
-                    val output = context.contentResolver.openOutputStream(target, "wt") ?: error("Cannot write $target")
-                    output.use { out -> copy.inputStream().use { it.copyTo(out) } }
+                    SafeWrite.write(context, target, copy)
                     // Shared under the name it was saved as, from a copy the share sheet can read.
                     val shared = if (shareSignedCopy) copy.copyTo(Sharing.sharedCopy(context, displayName(target)), overwrite = true) else null
                     copy.delete()
@@ -890,8 +890,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 lock.withLock {
                     withContext(Dispatchers.IO) {
                         val current = session ?: error("Nothing is open")
-                        val output = context.contentResolver.openOutputStream(target, "wt") ?: error("Cannot write $target")
-                        output.use { Splitting.writePart(current.workingFile, pages, it, current.password) }
+                        SafeWrite.write(context, target) { Splitting.writePart(current.workingFile, pages, it, current.password) }
                     }
                 }
             }.isSuccess
@@ -931,8 +930,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         parts.forEachIndexed { i, pages ->
                             val file = DocumentsContract.createDocument(resolver, folder, "application/pdf", Splitting.partName(name, i + 1))
                                 ?: error("Cannot create a file in $tree")
-                            val output = resolver.openOutputStream(file, "wt") ?: error("Cannot write $file")
-                            output.use { Splitting.writePart(current.workingFile, pages, it, current.password) }
+                            SafeWrite.write(context, file) { Splitting.writePart(current.workingFile, pages, it, current.password) }
                         }
                     }
                 }
@@ -1071,8 +1069,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     private suspend fun writeLocked(uri: Uri) = withContext(Dispatchers.IO) {
         val current = session ?: error("Nothing is open")
-        val output = context.contentResolver.openOutputStream(uri, "wt") ?: error("Cannot write $uri")
-        output.use { current.writeTo(it) }
+        // The working copy is complete, so it goes out as a whole; only a finished write counts as saved.
+        SafeWrite.write(context, uri, current.workingFile)
+        current.markSaved()
     }
 
     /** Thrown from an edit that turns out to have nothing to do, so no undo step is recorded. */
