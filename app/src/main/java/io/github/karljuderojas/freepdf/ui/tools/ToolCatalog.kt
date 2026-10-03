@@ -24,6 +24,7 @@ data class ToolEntry(val mode: ViewerMode, @StringRes val label: Int) {
  * listed above the viewer's tools and open their own screen.
  */
 enum class CreateTool(@StringRes val label: Int, @StringRes val description: Int, @StringRes val synonyms: Int) {
+    ScanDocument(R.string.tool_scan_document, R.string.tool_about_scan_document, R.string.tool_synonyms_scan_document),
     ImagesToPdf(R.string.tool_images_to_pdf, R.string.tool_about_images_to_pdf, R.string.tool_synonyms_images_to_pdf),
 }
 

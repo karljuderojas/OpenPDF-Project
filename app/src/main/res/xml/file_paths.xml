@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Files FreePDF may hand to other apps through FileProvider: only copies made for sharing. -->
+<!-- Files FreePDF may hand to other apps through FileProvider: copies made for sharing, and the
+     empty files the camera app writes a scanned page's photo into. -->
 <paths>
     <cache-path name="shared" path="shared/" />
+    <cache-path name="scans" path="scans/" />
 </paths>

@@ -30,6 +30,7 @@ import io.github.karljuderojas.freepdf.ui.home.QuickAction
 import io.github.karljuderojas.freepdf.ui.settings.SOURCE_URL
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
 import io.github.karljuderojas.freepdf.ui.create.ImagesToPdfScreen
+import io.github.karljuderojas.freepdf.ui.create.ScannerScreen
 import io.github.karljuderojas.freepdf.ui.tools.CreateTool
 import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerMode
@@ -38,6 +39,7 @@ import io.github.karljuderojas.freepdf.ui.viewer.ViewerScreen
 private const val MAIN = "main"
 private const val VIEWER = "viewer?uri={uri}&mode={mode}&tool={tool}"
 private const val IMAGES_TO_PDF = "images-to-pdf"
+private const val SCANNER = "scanner"
 private const val NO_TOOL = 0
 
 @Composable
@@ -58,9 +60,20 @@ fun FreePdfNavHost(incomingPdf: Uri?, onIncomingPdfHandled: () -> Unit) {
         composable(MAIN) {
             MainScreen(openPdf, onCreateTool = { tool ->
                 when (tool) {
+                    CreateTool.ScanDocument -> navController.navigate(SCANNER)
                     CreateTool.ImagesToPdf -> navController.navigate(IMAGES_TO_PDF)
                 }
             })
+        }
+        composable(SCANNER) {
+            ScannerScreen(
+                onBack = { navController.popBackStack() },
+                onCreated = { uri ->
+                    navController.navigate(viewerRoute(uri, ViewerMode.Read, null)) {
+                        popUpTo(SCANNER) { inclusive = true }
+                    }
+                },
+            )
         }
         composable(IMAGES_TO_PDF) {
             ImagesToPdfScreen(
