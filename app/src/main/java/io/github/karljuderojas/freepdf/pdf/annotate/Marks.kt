@@ -10,6 +10,7 @@ import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationTextMarku
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDBorderStyleDictionary
 import com.tom_roush.pdfbox.util.DateConverter
 import io.github.karljuderojas.freepdf.pdf.PdfRect
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureAnnotation
 import io.github.karljuderojas.freepdf.pdf.pdfToDisplay
 import io.github.karljuderojas.freepdf.pdf.text.PageText
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
@@ -122,6 +123,15 @@ object Marks {
         page.annotations = annotations.filterIndexed { i, it -> i != index && (popup == null || it.cosObject !== popup) }
     }
 
+    /**
+     * The index of the topmost mark under ([x], [y]) in PDF space on [pageIndex], or null. Links,
+     * form fields, pop-up windows and placed signatures are not marks and are passed over.
+     */
+    fun indexAt(document: PDDocument, pageIndex: Int, x: Float, y: Float): Int? =
+        document.getPage(pageIndex).annotations.indexOfLast { annotation ->
+            kindOf(annotation) != null && annotation.rectangle?.contains(x, y) == true
+        }.takeIf { it >= 0 }
+
     private fun kindOf(annotation: PDAnnotation): Mark.Kind? = when (annotation.subtype) {
         PDAnnotationTextMarkup.SUB_TYPE_HIGHLIGHT -> Mark.Kind.Highlight
         PDAnnotationTextMarkup.SUB_TYPE_UNDERLINE -> Mark.Kind.Underline
@@ -131,7 +141,8 @@ object Marks {
         PDAnnotationSquareCircle.SUB_TYPE_CIRCLE -> Mark.Kind.Circle
         PDAnnotationText.SUB_TYPE -> Mark.Kind.Note
         PDAnnotationMarkup.SUB_TYPE_FREETEXT -> Mark.Kind.TextBox
-        "Stamp" -> Mark.Kind.Stamp
+        // A signature placed in Sign mode is a stamp too, but it is managed there, not as a mark.
+        "Stamp" -> if (SignatureAnnotation.isSignature(annotation)) null else Mark.Kind.Stamp
         "Link", "Widget", "Popup" -> null
         // Lines, polygons, carets and the like still show in the list, under a general name.
         else -> if (annotation is PDAnnotationMarkup) Mark.Kind.Other else null

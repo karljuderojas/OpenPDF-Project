@@ -24,14 +24,16 @@ data class PageWord(
  * Finds the words on a page and where they sit, so a selection or a highlight can snap to whole
  * words. Scanned pages have no text and give an empty list.
  *
- * Only left-to-right text along the page's own x axis is boxed (that is, horizontal text, shown
- * turned along with the page when the page has a /Rotate); sideways text is skipped.
+ * Text that reads upright as the page is shown is boxed, which on a page with a /Rotate (a scan,
+ * a landscape export) is text drawn turned by that angle. Text along the page's own x axis is
+ * boxed too, turned along with the page; text at any other angle is skipped.
  */
 object PageText {
 
     fun words(document: PDDocument, pageIndex: Int): List<PageWord> {
         val page = document.getPage(pageIndex)
         val crop = page.cropBox.let { PdfRect(it.lowerLeftX, it.lowerLeftY, it.upperRightX, it.upperRightY) }
+        val rotation = (((page.rotation % 360) + 360) % 360).toFloat()
         val words = ArrayList<PageWord>()
         val stripper = object : PDFTextStripper() {
             private var line = 0
@@ -55,8 +57,11 @@ object PageText {
             }
 
             private fun boxOf(text: String, glyphs: List<TextPosition>): PageWord? {
+                if (text.isBlank()) return null
+                val upright = glyphs.filter { it.dir == rotation }
+                if (upright.isNotEmpty()) return uprightBoxOf(text, upright)
                 val horizontal = glyphs.filter { it.dir == 0f }
-                if (text.isBlank() || horizontal.isEmpty()) return null
+                if (horizontal.isEmpty()) return null
                 // The text matrix is in user space, shifted so the crop box starts at 0,0.
                 val left = horizontal.minOf { it.textMatrix.translateX } + crop.left
                 val right = horizontal.maxOf { it.textMatrix.translateX + it.widthDirAdj } + crop.left
@@ -70,6 +75,24 @@ object PageText {
                 val (x1, y1) = pdfToDisplay(left, top, page.rotation, crop)
                 val (x2, y2) = pdfToDisplay(right, bottom, page.rotation, crop)
                 return PageWord(text, line, minOf(x1, x2), minOf(y1, y2), maxOf(x1, x2), maxOf(y1, y2))
+            }
+
+            /**
+             * Glyphs that read upright on the displayed page. PdfBox's direction-adjusted
+             * coordinates are already in that frame: crop-relative, turned by the page's rotation,
+             * origin top-left, so they only need dividing by the displayed page size.
+             */
+            private fun uprightBoxOf(text: String, glyphs: List<TextPosition>): PageWord {
+                val left = glyphs.minOf { it.xDirAdj }
+                val right = glyphs.maxOf { it.xDirAdj + it.widthDirAdj }
+                val baseline = glyphs.maxOf { it.yDirAdj }
+                val size = glyphs.maxOf { glyph -> glyph.fontSizeInPt.takeIf { it > 0f } ?: (glyph.heightDir * 1.4f) }
+                val top = baseline - size * 0.8f
+                val bottom = baseline + size * 0.22f
+                val turned = rotation == 90f || rotation == 270f
+                val shownWidth = if (turned) crop.height else crop.width
+                val shownHeight = if (turned) crop.width else crop.height
+                return PageWord(text, line, left / shownWidth, top / shownHeight, right / shownWidth, bottom / shownHeight)
             }
         }
         stripper.sortByPosition = true
