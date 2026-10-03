@@ -287,7 +287,10 @@
     <string name="watermark_size">Size</string>
     <string name="watermark_angle_value">%1$d°</string>
     <string name="watermark_color">Colour</string>
-    <string name="watermark_note">It is drawn on top of the page. Use Undo to take it off.</string>
+    <string name="watermark_note">It is drawn on top of the page. Remove watermarks takes off the ones added with this app, now or after saving.</string>
+    <string name="watermark_unsupported_text">Only Latin, Greek and Cyrillic letters can be used.</string>
+    <string name="watermark_remove">Remove watermarks</string>
+    <string name="watermark_none_to_remove">These pages have no watermark added with this app.</string>
     <string name="watermark_apply">Add</string>
     <string name="watermark_apply_selected">Selected pages (%1$s)</string>
     <string name="watermark_apply_all">All %1$d pages</string>
@@ -305,6 +308,7 @@
     <string name="crop_apply_selected">Selected pages (%1$s)</string>
     <string name="crop_apply_all">All %1$d pages</string>
     <string name="crop_reset">Show whole page</string>
+    <string name="crop_nothing_to_reset">These pages are not cropped.</string>
     <string name="extract_title">Extract pages</string>
     <string name="extract_body">Saves the pages you choose as a new PDF. This one stays as it is.</string>
     <string name="extract_pages_label">Pages</string>

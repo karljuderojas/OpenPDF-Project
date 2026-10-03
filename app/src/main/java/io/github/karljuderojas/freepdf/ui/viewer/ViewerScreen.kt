@@ -172,6 +172,8 @@ sealed interface ViewerAction {
     data class Rotate(val pages: Set<Int>) : ViewerAction
     /** Stamps [pages] with [text], or with the picture at [image] when that is given. */
     data class Watermark(val pages: Set<Int>, val text: String, val image: Uri?, val style: WatermarkStyle) : ViewerAction
+    /** Takes the watermarks added with this app off [pages]. */
+    data class RemoveWatermarks(val pages: Set<Int>) : ViewerAction
     /** Trims [pages] by [margins], or shows them in full again when [margins] is null. */
     data class Crop(val pages: Set<Int>, val margins: CropMargins?) : ViewerAction
     /** Adds a link over [box], an area of [page] as shown, leading to [target]. */
@@ -432,6 +434,7 @@ fun ViewerScreen(
                 }
                 is ViewerAction.Rotate -> viewModel.rotatePages(action.pages)
                 is ViewerAction.Watermark -> viewModel.watermark(action.pages, action.text, action.image, action.style)
+                is ViewerAction.RemoveWatermarks -> viewModel.removeWatermarks(action.pages)
                 is ViewerAction.Crop -> viewModel.cropPages(action.pages, action.margins)
                 is ViewerAction.AddLink -> viewModel.addLink(action.page, action.box, action.target)
                 is ViewerAction.ChangeLink -> viewModel.changeLink(action.page, action.index, action.target)
@@ -1464,6 +1467,10 @@ fun ViewerContent(
             onWatermark = { pages, text, image, style ->
                 watermarking = false
                 onAction(ViewerAction.Watermark(pages, text, image, style))
+            },
+            onRemove = { pages ->
+                watermarking = false
+                onAction(ViewerAction.RemoveWatermarks(pages))
             },
         )
     }

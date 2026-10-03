@@ -550,9 +550,18 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
         }
     }
 
+    /** Takes the watermarks this app added off [pages]. */
+    fun removeWatermarks(pages: Set<Int>) = edit(onNoChange = R.string.watermark_none_to_remove) {
+        if (!Watermarks.remove(it, pages)) throw NothingChanged()
+    }
+
     /** Trims [pages] by [margins], or shows them in full again when [margins] is null. */
-    fun cropPages(pages: Set<Int>, margins: CropMargins?) = edit(movesPages = true) {
-        if (margins == null) PageCrop.reset(it, pages) else PageCrop.crop(it, pages, margins)
+    fun cropPages(pages: Set<Int>, margins: CropMargins?) = edit(onNoChange = R.string.crop_nothing_to_reset.takeIf { margins == null }, movesPages = true) {
+        if (margins == null) {
+            if (!PageCrop.reset(it, pages)) throw NothingChanged()
+        } else {
+            PageCrop.crop(it, pages, margins)
+        }
     }
 
     /** Adds a link over [box] on [page] (fractions of the page as shown) that leads to [target]. */

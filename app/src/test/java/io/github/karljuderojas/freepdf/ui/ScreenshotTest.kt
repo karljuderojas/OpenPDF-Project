@@ -2,6 +2,7 @@ package io.github.karljuderojas.freepdf.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Looper
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -112,6 +113,7 @@ import io.github.karljuderojas.freepdf.ui.viewer.ViewerAction
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerContent
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerMode
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerState
+import io.github.karljuderojas.freepdf.ui.viewer.WatermarkDialog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -1340,6 +1342,65 @@ class ScreenshotTest {
         composeRule.onNodeWithText("Split").performClick()
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_split_every.png")
+    }
+
+    // Picture mode has no text field, so the dialog could be tapped; it is shown directly over the
+    // viewer with the picture already chosen, as viewerSignFinishEditable shows its dialog.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesWatermarkPicture() {
+        var open by mutableStateOf(false)
+        show {
+            viewer(ViewerMode.Pages, sixPages, selectedPage = 1)
+            if (open) {
+                WatermarkDialog(
+                    pageCount = 6, selectedPages = listOf(1), pageAspect = 612f / 792f,
+                    image = Uri.parse("content://media/picker/0/com.android.providers.media.photopicker/media/1"),
+                    onChooseImage = {}, onDismiss = {}, onWatermark = { _, _, _, _ -> }, onRemove = {},
+                    initialPicture = true,
+                )
+            }
+        }
+        composeRule.mainClock.autoAdvance = false
+        open = true
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_watermark_picture.png")
+    }
+
+    // Text the fonts cannot show: the field is in error and Add is disabled. The text field never
+    // lets Compose go idle, so the dialog opens only once the clock is driven by hand.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesWatermarkUnsupportedText() {
+        var open by mutableStateOf(false)
+        show {
+            viewer(ViewerMode.Pages, sixPages, selectedPage = 1)
+            if (open) {
+                WatermarkDialog(
+                    pageCount = 6, selectedPages = listOf(1), pageAspect = 612f / 792f, image = null,
+                    onChooseImage = {}, onDismiss = {}, onWatermark = { _, _, _, _ -> }, onRemove = {},
+                    initialText = "\u6a5f\u5bc6",
+                )
+            }
+        }
+        composeRule.mainClock.autoAdvance = false
+        open = true
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_watermark_unsupported_text.png")
+    }
+
+    // One page: the rows for choosing selected or all pages are left out.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesCropSinglePage() {
+        show { viewer(ViewerMode.Pages, ViewerState.Ready(listOf(PageSize(612f, 792f))), selectedPage = 0) }
+        composeRule.onNodeWithText("Crop").performScrollTo()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Crop").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("crop-bottom").performSemanticsAction(SemanticsActions.SetProgress) { it(0.15f) }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_crop_single_page.png")
     }
 
     @Test
