@@ -69,6 +69,7 @@ import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.ui.create.CropBox
+import java.io.File
 import kotlin.math.hypot
 
 private val InkColors = listOf(R.string.ink_black to Color(0xFF111111), R.string.ink_blue to Color(0xFF1A3FA8))
@@ -108,7 +109,17 @@ fun SignaturePadDialog(
     var crop by rememberSaveable(stateSaver = CropSaver) { mutableStateOf(CropBox.Whole) }
     var photoResult by remember { mutableStateOf<Bitmap?>(null) }
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    // The photo is a temporary file in the cache: gone once it is replaced or the pad is closed.
+    fun setPhotoPath(path: String?) {
+        photoPath?.takeIf { it != path }?.let { File(it).delete() }
+        photoPath = path
+    }
+    fun close() {
+        setPhotoPath(null)
+        onDismiss()
+    }
+
+    Dialog(onDismissRequest = ::close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             shape = RoundedCornerShape(24.dp),
             tonalElevation = 6.dp,
@@ -183,7 +194,7 @@ fun SignaturePadDialog(
                     }
                     PadTab.Photo -> SignaturePhotoPane(
                         photoPath = photoPath,
-                        onPhotoPath = { photoPath = it },
+                        onPhotoPath = ::setPhotoPath,
                         crop = crop,
                         onCrop = { crop = it },
                         ink = ink,
@@ -247,7 +258,7 @@ fun SignaturePadDialog(
                         TextButton(onClick = { strokes.clear(); tooSimple = false }) { Text(stringResource(R.string.clear)) }
                     }
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+                    TextButton(onClick = ::close) { Text(stringResource(R.string.cancel)) }
                     Button(
                         enabled = when (tab) {
                             PadTab.Draw -> strokes.isNotEmpty()
@@ -256,7 +267,10 @@ fun SignaturePadDialog(
                         },
                         onClick = {
                             when {
-                                tab == PadTab.Photo -> photoResult?.let { onSave(it, SignatureMethod.Uploaded) }
+                                tab == PadTab.Photo -> photoResult?.let {
+                                    setPhotoPath(null)
+                                    onSave(it, SignatureMethod.Uploaded)
+                                }
                                 tab == PadTab.Type -> {
                                     val typeface = ResourcesCompat.getFont(context, font) ?: Typeface.SERIF
                                     onSave(TypedSignature.render(typed.trim(), typeface, ink.toArgb()), SignatureMethod.Typed)

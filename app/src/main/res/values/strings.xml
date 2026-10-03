@@ -533,6 +533,8 @@
     <string name="images_making">Making page %1$d of %2$d…</string>
     <string name="images_failed">Could not make the PDF. Check that there is room on your phone and try again.</string>
     <string name="images_default_name">Images</string>
+    <string name="images_unreadable">Page %1$d could not be read</string>
+    <string name="images_unreadable_remove">Remove the pictures that could not be read, then create the PDF.</string>
     <plurals name="images_count">
         <item quantity="one">%1$d picture</item>
         <item quantity="other">%1$d pictures</item>
@@ -559,6 +561,12 @@
     <string name="scan_no_camera">No camera app was found on this phone.</string>
     <string name="scan_photo_failed">Could not use that photo.</string>
     <string name="scan_default_name">Scan</string>
+    <string name="scan_adjust_unusable">The corners cross or the outline is too small. Drag them so they go round the page.</string>
+    <string name="scan_discard_body">The pages are not saved as a PDF yet. Leaving the scanner throws the photos away.</string>
+    <plurals name="scan_discard_title">
+        <item quantity="one">Discard %1$d page?</item>
+        <item quantity="other">Discard %1$d pages?</item>
+    </plurals>
     <plurals name="scan_page_count">
         <item quantity="one">%1$d page</item>
         <item quantity="other">%1$d pages</item>
