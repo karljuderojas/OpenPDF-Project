@@ -78,6 +78,16 @@
     <string name="sign_hint_date">Tap where today\'s date goes.</string>
     <string name="sign_hint_text">Tap where you want to type text.</string>
     <string name="sign_hint_checkmark">Tap a box to tick it.</string>
+    <string name="finish">Finish</string>
+    <string name="finish_title">Finish signing</string>
+    <string name="finish_name">Your full name</string>
+    <string name="finish_seal">Seal with a digital certificate</string>
+    <string name="finish_seal_detail">Anyone can then see if the file changes after you sign. Other apps may call the certificate not verified, because it was made on this phone.</string>
+    <string name="finish_consent">I agree to sign this document electronically, and my electronic signature is as binding as my handwritten one.</string>
+    <string name="finish_record">A signing certificate page with your name, the time and the file\'s fingerprint is added at the end. The signed copy is saved separately, so the original stays as it is.</string>
+    <string name="finish_confirm">Sign and save</string>
+    <string name="sign_failed">Could not finish signing.</string>
+    <string name="signed_copy_saved">Signed copy saved</string>
     <string name="files_title">Files</string>
     <string name="open_file">Open file</string>
     <string name="files_open_now">Open now</string>

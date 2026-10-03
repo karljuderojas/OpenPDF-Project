@@ -161,6 +161,18 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_pad.png")
     }
 
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerSignFinish() {
+        show { viewer(ViewerMode.Sign, sample.copy(canUndo = true, hasUnsavedChanges = true, hasSignature = true), signerName = "Dana Whitfield") }
+        // The dialog's name field takes focus, and its blinking cursor never lets Compose go idle,
+        // so drive the clock by hand and capture without further clicks.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Finish").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_finish.png")
+    }
+
     @Test
     fun viewerPages() = capture("viewer_pages") {
         viewer(ViewerMode.Pages, sample.copy(canUndo = true, hasUnsavedChanges = true), selectedPage = 1)
@@ -194,6 +206,7 @@ class ScreenshotTest {
         selectedPage: Int = 0,
         tool: Int? = null,
         savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
+        signerName: String = "",
     ) {
         ViewerContent(
             state = state,
@@ -203,6 +216,7 @@ class ScreenshotTest {
             initialSelectedPage = selectedPage,
             initialTool = tool,
             savedSignatures = savedSignatures,
+            signerName = signerName,
         )
     }
 

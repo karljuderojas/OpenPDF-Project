@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -75,6 +76,7 @@ import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.share.Sharing
+import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
 import kotlinx.coroutines.launch
 
@@ -102,6 +104,7 @@ sealed interface ViewerAction {
     data class AddDate(val page: Int, val at: Offset) : ViewerAction
     data class AddText(val page: Int, val at: Offset, val text: String) : ViewerAction
     data class AddCheckmark(val page: Int, val at: Offset) : ViewerAction
+    data class FinishSigning(val name: String, val consentText: String, val seal: Boolean) : ViewerAction
 }
 
 @Composable
@@ -109,12 +112,16 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
     LaunchedEffect(uri) { viewModel.open(uri) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val savedSignatures by viewModel.savedSignatures.collectAsStateWithLifecycle()
+    val signerName by viewModel.signerName.collectAsStateWithLifecycle()
     val resources = LocalResources.current
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
     val saveAsPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) {
         if (it != null) viewModel.saveAs(it) else viewModel.cancelSaveAs()
+    }
+    val signedCopyPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) {
+        if (it != null) viewModel.saveSignedCopy(it) else viewModel.cancelSignedCopy()
     }
     val mergePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
         if (it != null) viewModel.merge(it)
@@ -127,6 +134,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerEffect.SaveAs -> saveAsPicker.launch(effect.suggestedName)
                 ViewerEffect.Close -> onBack()
                 is ViewerEffect.Share -> Sharing.shareFile(context, effect.file)
+                is ViewerEffect.SaveSigned -> signedCopyPicker.launch(effect.suggestedName)
             }
         }
     }
@@ -136,6 +144,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
         onBack = onBack,
         loadPage = viewModel::page,
         savedSignatures = savedSignatures,
+        signerName = signerName,
         snackbarHostState = snackbarHostState,
         onAction = { action ->
             when (action) {
@@ -168,6 +177,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.AddDate -> viewModel.addDate(action.page, action.at)
                 is ViewerAction.AddText -> viewModel.addText(action.page, action.at, action.text)
                 is ViewerAction.AddCheckmark -> viewModel.addCheckmark(action.page, action.at)
+                is ViewerAction.FinishSigning -> viewModel.finishSigning(action.name, action.consentText, action.seal)
             }
         },
     )
@@ -184,6 +194,7 @@ fun ViewerContent(
     initialSelectedPage: Int = 0,
     initialTool: Int? = null,
     savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
+    signerName: String = "",
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onAction: (ViewerAction) -> Unit = {},
 ) {
@@ -197,6 +208,7 @@ fun ViewerContent(
     var pendingNote by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
+    var finishing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val resources = LocalResources.current
 
@@ -283,6 +295,12 @@ fun ViewerContent(
                         }
                         TextButton(onClick = { backToReading() }) {
                             Text(stringResource(R.string.done))
+                        }
+                        // Once something is signed, Finish turns it into a signed copy.
+                        if (mode == ViewerMode.Sign && ready?.hasSignature == true) {
+                            Button(onClick = { finishing = true }, modifier = Modifier.padding(end = 8.dp)) {
+                                Text(stringResource(R.string.finish))
+                            }
                         }
                     }
                 },
@@ -404,6 +422,18 @@ fun ViewerContent(
             onSave = {
                 padFor = null
                 onAction(ViewerAction.SaveSignature(kind, it))
+            },
+        )
+    }
+
+    if (finishing) {
+        FinishSigningDialog(
+            initialName = signerName,
+            onDismiss = { finishing = false },
+            onFinish = { name, consentText, seal ->
+                finishing = false
+                backToReading()
+                onAction(ViewerAction.FinishSigning(name, consentText, seal))
             },
         )
     }
