@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
@@ -32,6 +33,7 @@ import io.github.karljuderojas.freepdf.pdf.annotate.Marks
 import io.github.karljuderojas.freepdf.pdf.annotate.TextBoxes
 import io.github.karljuderojas.freepdf.pdf.displayToPdf
 import io.github.karljuderojas.freepdf.pdf.edit.EditSession
+import io.github.karljuderojas.freepdf.pdf.edit.Flattener
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import io.github.karljuderojas.freepdf.pdf.edit.PdfText
@@ -73,6 +75,7 @@ import java.time.Instant
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.roundToInt
 
 sealed interface ViewerState {
     data object Loading : ViewerState
@@ -115,6 +118,9 @@ sealed interface ViewerEffect {
     data class SaveAs(val suggestedName: String) : ViewerEffect
     data object Close : ViewerEffect
     data class Share(val file: File) : ViewerEffect
+
+    /** Share page pictures; [title] names the document they came from. */
+    data class ShareImages(val files: List<File>, val title: String) : ViewerEffect
 
     /** Open the print dialog for [file], a printable copy named [name]. */
     data class Print(val file: File, val name: String, val pageCount: Int) : ViewerEffect
@@ -639,20 +645,74 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         pendingSignedCopy = null
     }
 
-    /** Shares the PDF as it is now, unsaved changes included, under the file's own name. */
-    fun share() {
+    /**
+     * Shares the PDF as it is now, unsaved changes included, in the form [option] asks for.
+     * [pages] (zero-based) are the pages to send for [ShareOption.SomePages] and [ShareOption.Images].
+     */
+    fun share(option: ShareOption = ShareOption.WithChanges, pages: List<Int> = emptyList()) {
         val uri = openedUri ?: return
         viewModelScope.launch {
-            val copy = runCatching {
+            val effect = runCatching {
                 lock.withLock {
-                    withContext(Dispatchers.IO) {
-                        val current = session ?: error("Nothing is open")
-                        Sharing.sharedCopy(context, displayName(uri)).also { current.workingFile.copyTo(it, overwrite = true) }
+                    val current = session ?: error("Nothing is open")
+                    val name = withContext(Dispatchers.IO) { displayName(uri) }
+                    when (option) {
+                        ShareOption.WithChanges -> withContext(Dispatchers.IO) {
+                            ViewerEffect.Share(Sharing.sharedCopy(context, name).also { current.workingFile.copyTo(it, overwrite = true) })
+                        }
+                        ShareOption.Locked -> sharedPdf(current, name) { Flattener.flatten(it) }
+                        ShareOption.SomePages -> {
+                            require(pages.isNotEmpty())
+                            sharedPdf(current, Splitting.extractName(name, pages)) { PageEditor.keepOnly(it, pages) }
+                        }
+                        ShareOption.Images -> ViewerEffect.ShareImages(pageImagesLocked(pages, name), name)
                     }
                 }
+            }.getOrElse { ViewerEffect.Message(R.string.share_failed) }
+            _effects.send(effect)
+        }
+    }
+
+    /**
+     * A changed copy of the working file to share as [name]. A locked PDF stays locked with its
+     * password. Call with [lock] held.
+     */
+    private suspend fun sharedPdf(current: EditSession, name: String, change: (PDDocument) -> Unit) =
+        withContext(Dispatchers.IO) {
+            val out = Sharing.sharedCopy(context, name)
+            PDDocument.load(current.workingFile, current.password).use { document ->
+                change(document)
+                PdfDocuments.keepProtection(document, current.password)
+                document.save(out)
             }
-            copy.onSuccess { _effects.send(ViewerEffect.Share(it)) }
-                .onFailure { _effects.send(ViewerEffect.Message(R.string.share_failed)) }
+            ViewerEffect.Share(out)
+        }
+
+    /**
+     * Renders [pages] as JPEGs at 150 dpi (enough to read and print a page, small enough for chat
+     * apps), named after the document. Call with [lock] held.
+     */
+    private suspend fun pageImagesLocked(pages: List<Int>, name: String): List<File> {
+        require(pages.isNotEmpty() && pages.size <= MAX_SHARED_IMAGES)
+        val current = renderer ?: error("Nothing is open")
+        val dir = withContext(Dispatchers.IO) { Sharing.sharedFolder(context) }
+        val base = Sharing.safeName(name.removeSuffix(".pdf").removeSuffix(".PDF")).ifBlank { "page" }
+        return pages.map { index ->
+            val widthPx = (current.pageSizes[index].widthPt * 150f / 72f).roundToInt().coerceIn(1, 2400)
+            val page = current.renderPage(index, widthPx)
+            withContext(Dispatchers.IO) {
+                // Pages render onto a transparent bitmap, which JPEG would turn black.
+                val image = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888)
+                Canvas(image).apply {
+                    drawColor(android.graphics.Color.WHITE)
+                    drawBitmap(page, 0f, 0f, null)
+                }
+                page.recycle()
+                File(dir, "$base page ${index + 1}.jpg").also { file ->
+                    file.outputStream().use { image.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+                    image.recycle()
+                }
+            }
         }
     }
 
