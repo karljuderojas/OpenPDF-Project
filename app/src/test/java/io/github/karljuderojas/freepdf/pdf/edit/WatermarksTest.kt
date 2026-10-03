@@ -10,6 +10,10 @@ import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.cos.COSNumber
 import com.tom_roush.pdfbox.pdfparser.PDFStreamParser
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.PDResources
+import com.tom_roush.pdfbox.pdmodel.common.PDStream
+import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import kotlin.math.abs
@@ -170,6 +174,43 @@ class WatermarksTest {
             assertTrue(Watermarks.remove(document, listOf(1)))
             assertFalse(document.getPage(1).hasContents())
             assertFalse(Watermarks.remove(document, listOf(0, 1)))
+        }
+    }
+
+    /** A one-page document whose single content stream is [content] as written, with Helvetica as /F1. */
+    private fun rawPage(content: String): PDDocument {
+        val document = PDDocument()
+        val page = PDPage().also { it.resources = PDResources().apply { put(COSName.getPDFName("F1"), PDType1Font.HELVETICA) } }
+        document.addPage(page)
+        val stream = PDStream(document)
+        stream.createOutputStream().use { it.write(content.toByteArray(Charsets.ISO_8859_1)) }
+        page.setContents(stream)
+        return document
+    }
+
+    @Test
+    fun aStreamThatAlsoHoldsThePagesOwnWordsIsNeverRemoved() {
+        val watermark = "/Artifact <</Subtype /Watermark /FreePDF true>> BDC BT /F1 40 Tf 100 400 Td (DRAFT) Tj ET EMC"
+        val body = "/P <</MCID 0>> BDC BT /F1 12 Tf 72 700 Td (Body text) Tj ET EMC"
+        rawPage("$watermark $body").use { document ->
+            assertFalse(Watermarks.remove(document, listOf(0)))
+            assertTrue(text(document, page = 1).contains("Body text"))
+            assertTrue(text(document, page = 1).contains("DRAFT"))
+        }
+        // The same section on its own, after the Q that resets the page, is a watermark.
+        rawPage("Q Q $watermark").use { document ->
+            assertTrue(Watermarks.remove(document, listOf(0)))
+            assertFalse(text(document, page = 1).contains("DRAFT"))
+            assertEquals(2, operands(document, 0, "Q").size)
+            assertTrue(operands(document, 0, "BDC").isEmpty())
+        }
+    }
+
+    @Test
+    fun anotherToolsWatermarkIsLeftAlone() {
+        rawPage("/Artifact <</Subtype /Watermark>> BDC BT /F1 40 Tf 100 400 Td (CONFIDENTIAL) Tj ET EMC").use { document ->
+            assertFalse(Watermarks.remove(document, listOf(0)))
+            assertTrue(text(document, page = 1).contains("CONFIDENTIAL"))
         }
     }
 

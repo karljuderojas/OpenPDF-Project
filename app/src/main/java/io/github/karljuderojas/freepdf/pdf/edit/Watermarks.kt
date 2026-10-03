@@ -121,17 +121,26 @@ object Watermarks {
             val page = document.getPage(index)
             val dictionary = page.cosObject
             when (val contents = dictionary.getDictionaryObject(COSName.CONTENTS)) {
-                is COSStream -> if (isWatermark(contents, page.resources)) {
-                    dictionary.removeItem(COSName.CONTENTS)
+                is COSStream -> {
+                    val resets = watermarkResets(contents, page.resources) ?: return@forEach
+                    val stub = resetStream(document, resets)
+                    if (stub == null) dictionary.removeItem(COSName.CONTENTS) else dictionary.setItem(COSName.CONTENTS, stub)
                     removed = true
                 }
                 is COSArray -> {
                     val kept = COSArray()
                     for (i in 0 until contents.size()) {
                         val item = contents.getObject(i)
-                        if (item is COSStream && isWatermark(item, page.resources)) removed = true else kept.add(contents.get(i))
+                        val resets = (item as? COSStream)?.let { watermarkResets(it, page.resources) }
+                        if (resets == null) {
+                            kept.add(contents.get(i))
+                        } else {
+                            removed = true
+                            // The Q that undoes the q PdfBox put in front of the page stays, so the page's own state is still reset.
+                            resetStream(document, resets)?.let { kept.add(it) }
+                        }
                     }
-                    if (kept.size() != contents.size()) dictionary.setItem(COSName.CONTENTS, kept)
+                    if (removed) dictionary.setItem(COSName.CONTENTS, kept)
                 }
                 else -> Unit
             }
@@ -140,27 +149,54 @@ object Watermarks {
     }
 
     /**
-     * True when [stream] is nothing but a watermark: apart from the `Q` that resets the page's
-     * state, its first operator opens a `/Artifact` with `/Subtype /Watermark` and its last closes it.
+     * When [stream] is nothing but a watermark this app added, the number of `Q` operators in
+     * front of it; null otherwise. Apart from those `Q`s, the first operator must open an
+     * `/Artifact` whose properties carry [APP_KEY] with `/Subtype /Watermark`, and the matching
+     * `EMC` must be the stream's last operator, so a stream that also holds the page's own
+     * content, or another tool's watermark, is never touched.
      */
-    private fun isWatermark(stream: COSStream, resources: PDResources?): Boolean {
-        val tokens = runCatching { PDFStreamParser(stream).also { it.parse() }.tokens }.getOrNull() ?: return false
+    private fun watermarkResets(stream: COSStream, resources: PDResources?): Int? {
+        val tokens = runCatching { PDFStreamParser(stream).also { it.parse() }.tokens }.getOrNull() ?: return null
         val operators = tokens.indices.filter { tokens[it] is Operator }
-        val first = operators.firstOrNull { (tokens[it] as Operator).name != "Q" } ?: return false
-        val last = operators.last()
-        if ((tokens[first] as Operator).name != "BDC" || (tokens[last] as Operator).name != "EMC") return false
+        val first = operators.firstOrNull { (tokens[it] as Operator).name != "Q" } ?: return null
+        val resets = operators.indexOf(first)
+        if ((tokens[first] as Operator).name != "BDC") return null
+        var depth = 0
+        for (i in operators.drop(resets)) {
+            when ((tokens[i] as Operator).name) {
+                "BDC", "BMC" -> depth++
+                "EMC" -> depth--
+            }
+            // The section that opened first closes before the end: what follows is not the watermark.
+            if (depth == 0 && i != operators.last()) return null
+        }
+        if (depth != 0) return null
         val tag = tokens.getOrNull(first - 2) as? COSName
         val properties = when (val operand = tokens.getOrNull(first - 1)) {
             is COSDictionary -> operand
             is COSName -> resources?.getProperties(operand)?.cosObject
             else -> null
         }
-        return tag == COSName.ARTIFACT && properties?.getCOSName(COSName.SUBTYPE) == WATERMARK
+        if (tag != COSName.ARTIFACT || properties == null) return null
+        return if (properties.getCOSName(COSName.SUBTYPE) == WATERMARK && properties.getBoolean(APP_KEY, false)) resets else null
+    }
+
+    /** A stream holding only [count] `Q` operators, or null when there is nothing to keep. */
+    private fun resetStream(document: PDDocument, count: Int): COSStream? {
+        if (count == 0) return null
+        val stream = document.document.createCOSStream()
+        stream.createOutputStream(COSName.FLATE_DECODE).use { it.write("Q\n".repeat(count).toByteArray(Charsets.US_ASCII)) }
+        return stream
     }
 
     /** Wraps what [draw] writes in the marked-content section that [remove] looks for. */
     private fun PDPageContentStream.asWatermark(draw: PDPageContentStream.() -> Unit) {
-        val properties = PDPropertyList.create(COSDictionary().apply { setItem(COSName.SUBTYPE, WATERMARK) })
+        val properties = PDPropertyList.create(
+            COSDictionary().apply {
+                setItem(COSName.SUBTYPE, WATERMARK)
+                setBoolean(APP_KEY, true)
+            },
+        )
         beginMarkedContent(COSName.ARTIFACT, properties)
         draw()
         endMarkedContent()
@@ -208,6 +244,9 @@ object Watermarks {
     }
 
     private val WATERMARK: COSName = COSName.getPDFName("Watermark")
+
+    /** Marks a watermark as this app's, so [remove] leaves other tools' watermarks alone. */
+    private val APP_KEY: COSName = COSName.getPDFName("FreePDF")
     private const val LEADING = 1.2f
     private const val MIN_FONT_SIZE = 6f
     private const val MAX_FONT_SIZE = 400f
