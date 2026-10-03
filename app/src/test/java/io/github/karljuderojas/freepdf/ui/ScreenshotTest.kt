@@ -89,6 +89,7 @@ import io.github.karljuderojas.freepdf.pdf.scan.SyntheticPhoto
 import io.github.karljuderojas.freepdf.pdf.create.PageFit
 import androidx.compose.ui.graphics.asImageBitmap
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
+import io.github.karljuderojas.freepdf.ui.viewer.AddLinkDialog
 import io.github.karljuderojas.freepdf.ui.viewer.DocumentInfoDialog
 import io.github.karljuderojas.freepdf.ui.viewer.AnnotateTool
 import io.github.karljuderojas.freepdf.ui.viewer.ToolStyle
@@ -991,6 +992,50 @@ class ScreenshotTest {
         composeRule.onNodeWithTag("link-0-0").performClick()
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_link_open.png")
+    }
+
+    // The sample with a web link over its title and a page link over the first heading.
+    private val linked by lazy {
+        sample.copy(
+            links = listOf(
+                PageLink(0, 0, DisplayRect(0.1f, 0.1f, 0.6f, 0.15f), LinkTarget.Web("https://example.com/terms")),
+                PageLink(0, 1, DisplayRect(0.1f, 0.3f, 0.4f, 0.34f), LinkTarget.Page(1)),
+            ),
+        )
+    }
+
+    // In Edit's Add link, the links a page already has are outlined.
+    @Test
+    fun viewerEditLinks() = capture("viewer_edit_links") { viewer(ViewerMode.Edit, linked, tool = R.string.tool_add_link) }
+
+    // A tap on one of them offers to change where it leads, or to remove it.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerEditLinkChange() {
+        show { viewer(ViewerMode.Edit, linked, tool = R.string.tool_add_link) }
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("edit-link-0-0").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_edit_link_change.png")
+    }
+
+    // The link dialog with "Page in this PDF" chosen, for a page the PDF no longer has (6 of 2),
+    // so the page field shows its error and Change is off. Opened like viewerGoToPage.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerLinkToPage() {
+        val open = mutableStateOf(false)
+        show {
+            viewer(ViewerMode.Edit, linked, tool = R.string.tool_add_link)
+            if (open.value) AddLinkDialog(pageCount = 2, onDismiss = {}, onAdd = {}, existing = LinkTarget.Page(5), onRemove = {})
+        }
+        composeRule.mainClock.autoAdvance = false
+        open.value = true
+        composeRule.mainClock.advanceTimeBy(500)
+        shadowOf(Looper.getMainLooper()).idle()
+        composeRule.mainClock.advanceTimeBy(500)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_link_to_page.png")
     }
 
     @Test
