@@ -32,13 +32,16 @@ import androidx.compose.ui.unit.dp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 
-/** The Sign tools that are wired up. Each one places something where the user taps. */
+/** The Sign tools that are wired up. Each one places something where the user taps, except Fill form. */
 enum class SignTool(val label: Int, val hint: Int, val signatureKind: SignatureStore.Kind? = null) {
     Signature(R.string.tool_signature, R.string.sign_hint_signature, SignatureStore.Kind.Signature),
     Initials(R.string.tool_initials, R.string.sign_hint_initials, SignatureStore.Kind.Initials),
     Date(R.string.tool_date, R.string.sign_hint_date),
     Text(R.string.tool_text, R.string.sign_hint_text),
-    Checkmark(R.string.tool_checkmark, R.string.sign_hint_checkmark);
+    Checkmark(R.string.tool_checkmark, R.string.sign_hint_checkmark),
+
+    /** Types into the PDF's own form fields; see [FormFieldLayer]. */
+    FillForm(R.string.tool_fill_form, R.string.sign_hint_fill_form);
 
     companion object {
         fun forLabel(label: Int?): SignTool? = entries.firstOrNull { it.label == label }
@@ -62,7 +65,7 @@ fun TapLayer(page: Int, onTap: (Offset) -> Unit) {
 
 /** Above the Sign tool strip: what a tap will do, with the saved signature and Redraw. */
 @Composable
-fun SignHint(tool: SignTool, savedImage: Bitmap?, onRedraw: () -> Unit) {
+fun SignHint(tool: SignTool, savedImage: Bitmap?, onRedraw: () -> Unit, hint: Int = tool.hint) {
     Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -81,7 +84,7 @@ fun SignHint(tool: SignTool, savedImage: Bitmap?, onRedraw: () -> Unit) {
                 )
             }
             Text(
-                stringResource(tool.hint),
+                stringResource(hint),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                 modifier = Modifier.weight(1f),

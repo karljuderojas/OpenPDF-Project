@@ -13,6 +13,7 @@ enum class Tip(@StringRes val text: Int) {
     Annotate(R.string.tip_annotate),
     Sign(R.string.tip_sign),
     Pages(R.string.tip_pages),
+    Edit(R.string.tip_edit),
 }
 
 /**
