@@ -28,6 +28,7 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
+import io.github.karljuderojas.freepdf.ui.viewer.GoToPageDialog
 import io.github.karljuderojas.freepdf.ui.viewer.SearchResults
 import io.github.karljuderojas.freepdf.ui.viewer.TextMatch
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerContent
@@ -120,12 +121,14 @@ class ScreenshotTest {
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerGoToPage() {
-        show { viewer(ViewerMode.Read) }
-        composeRule.onNodeWithTag("page-indicator").performClick()
-        // The dialog's page field can take focus, and its blinking cursor never lets Compose go
-        // idle, so drive the clock by hand from here.
+        // Shown over the viewer directly: tapping "Page 1 of 2" opens the same dialog. Its page
+        // field can take focus, and a blinking cursor never lets Compose go idle, so the clock is
+        // driven by hand.
         composeRule.mainClock.autoAdvance = false
-        repeat(10) { composeRule.mainClock.advanceTimeByFrame() }
+        show {
+            viewer(ViewerMode.Read)
+            GoToPageDialog(pageCount = 2, onDismiss = {}, onGo = {})
+        }
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_go_to_page.png")
     }
