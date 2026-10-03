@@ -64,7 +64,6 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.create.ImagesToPdf
 import io.github.karljuderojas.freepdf.pdf.create.PageFit
@@ -84,9 +83,6 @@ private const val SCAN_SIDE = 2200
 /** The photo shown while dragging corners, and the small previews in the page list. */
 private const val ADJUST_SIDE = 1600
 private const val THUMB_SIDE = 480
-
-/** Every scan photo lives here until the PDF is saved; the system may clear a cache folder at any time. */
-private fun scanDir(context: android.content.Context) = File(context.cacheDir, "scans").apply { mkdirs() }
 
 /** Which preview a page needs: it changes when the corners or the look do. */
 fun thumbKey(page: ScanPage, filter: ScanFilter): String = "${page.id}-${page.quad.encode()}-${filter.name}"
@@ -119,7 +115,7 @@ fun ScannerScreen(onBack: () -> Unit, onCreated: (Uri) -> Unit) {
 
     // Leftovers from an earlier visit that never got saved.
     LaunchedEffect(Unit) {
-        if (encoded.isEmpty()) withContext(Dispatchers.IO) { scanDir(context).listFiles()?.forEach { it.delete() } }
+        if (encoded.isEmpty()) withContext(Dispatchers.IO) { ScanFiles.dir(context).listFiles()?.forEach { it.delete() } }
     }
 
     LaunchedEffect(pages, filter) {
@@ -178,10 +174,7 @@ fun ScannerScreen(onBack: () -> Unit, onCreated: (Uri) -> Unit) {
             val files = withContext(Dispatchers.IO) {
                 uris.mapNotNull { uri ->
                     runCatching {
-                        File.createTempFile("page-", ".jpg", scanDir(context)).also { file ->
-                            val input = context.contentResolver.openInputStream(uri) ?: error("Cannot read $uri")
-                            input.use { src -> file.outputStream().use { src.copyTo(it) } }
-                        }
+                        ScanFiles.copyFrom(context, uri)
                     }.getOrNull()
                 }
             }
@@ -191,10 +184,9 @@ fun ScannerScreen(onBack: () -> Unit, onCreated: (Uri) -> Unit) {
     }
 
     fun takePhoto() {
-        val file = File.createTempFile("page-", ".jpg", scanDir(context))
+        val file = ScanFiles.newPhoto(context)
         pendingPhoto = file.path
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-        runCatching { camera.launch(uri) }.onFailure {
+        runCatching { camera.launch(ScanFiles.cameraUri(context, file)) }.onFailure {
             pendingPhoto = null
             file.delete()
             Toast.makeText(context, R.string.scan_no_camera, Toast.LENGTH_SHORT).show()
