@@ -43,6 +43,7 @@ import io.github.karljuderojas.freepdf.pdf.text.PageText
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
+import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
 import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
@@ -129,6 +130,8 @@ class ScreenshotTest {
                 onShowTips = {},
                 onResetTips = {},
                 modifier = it,
+                pageColors = PageColors.Normal,
+                onPageColors = {},
             )
         }
     }
@@ -163,6 +166,22 @@ class ScreenshotTest {
         composeRule.mainClock.advanceTimeBy(1_000)
         composeRule.waitForIdle()
         captureRoot("viewer_read_zoomed")
+    }
+
+    @Test
+    fun viewerReadNight() = capture("viewer_read_night") { viewer(ViewerMode.Read, pageColors = PageColors.Night) }
+
+    @Test
+    fun viewerReadSepia() = capture("viewer_read_sepia") { viewer(ViewerMode.Read, pageColors = PageColors.Sepia) }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPageColorsMenu() {
+        show { viewer(ViewerMode.Read, pageColors = PageColors.Night) }
+        composeRule.onNodeWithContentDescription("Page colors").performClick()
+        composeRule.waitForIdle()
+        // The menu is a popup, so capture the whole screen rather than the root node.
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_page_colors_menu.png")
     }
 
     @Test
@@ -686,6 +705,7 @@ class ScreenshotTest {
         marks: List<Mark> = emptyList(),
         search: SearchResults = SearchResults(),
         searchQuery: String? = null,
+        pageColors: PageColors = PageColors.Normal,
         tip: Int? = null,
         stamps: List<PlacedStamp> = emptyList(),
         selectedStamp: Long? = null,
@@ -706,6 +726,7 @@ class ScreenshotTest {
             marks = marks,
             search = search,
             initialSearchQuery = searchQuery,
+            pageColors = pageColors,
             tip = tip,
             stamps = stamps,
             initialSelectedStamp = selectedStamp,

@@ -82,6 +82,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -105,6 +107,7 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.settings.Tip
 import io.github.karljuderojas.freepdf.print.Printing
+import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
@@ -201,6 +204,8 @@ fun ViewerScreen(
     val stamps by viewModel.stamps.collectAsStateWithLifecycle()
     val resources = LocalResources.current
     val context = LocalContext.current
+    val settings = (context.applicationContext as FreePdfApp).settings
+    val pageColors by settings.pageColors.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var shownInfo by remember { mutableStateOf<ViewerEffect.ShowInfo?>(null) }
     val scope = rememberCoroutineScope()
@@ -268,6 +273,8 @@ fun ViewerScreen(
         search = search,
         stamps = stamps,
         snackbarHostState = snackbarHostState,
+        pageColors = pageColors,
+        onPageColors = settings::setPageColors,
         tip = tip?.text,
         onTipDismissed = { tip = null },
         onModeEntered = { mode ->
@@ -363,6 +370,8 @@ fun ViewerContent(
     stamps: List<PlacedStamp> = emptyList(),
     initialSelectedStamp: Long? = null,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
+    pageColors: PageColors = PageColors.Normal,
+    onPageColors: (PageColors) -> Unit = {},
     @StringRes tip: Int? = null,
     onTipDismissed: () -> Unit = {},
     onModeEntered: (ViewerMode) -> Unit = {},
@@ -570,6 +579,7 @@ fun ViewerContent(
                         if (ready?.hasUnsavedChanges == true) {
                             TextButton(onClick = { onAction(ViewerAction.Save) }) { Text(stringResource(R.string.save)) }
                         }
+                        if (ready != null) PageColorsButton(pageColors, onPageColors)
                     } else {
                         IconButton(onClick = { onAction(ViewerAction.Undo) }, enabled = canUndo) {
                             Icon(EditIcons.Undo, contentDescription = stringResource(R.string.undo))
@@ -705,7 +715,7 @@ fun ViewerContent(
                 else -> {
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
                     val signTool = SignTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Sign }
-                    PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState) { page ->
+                    PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState, pageColors) { page ->
                         if (mode == ViewerMode.Read && searching) {
                             val onPage = search.matches.withIndex().filter { it.value.page == page }
                             if (onPage.isNotEmpty()) SearchHighlights(onPage, currentMatch)
@@ -1019,10 +1029,13 @@ private fun PageList(
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
     loadRegion: LoadRegion,
     listState: LazyListState,
+    pageColors: PageColors,
     overlay: @Composable BoxScope.(page: Int) -> Unit = {},
 ) {
     var zoom by remember { mutableFloatStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
+    // The sharp zoomed tiles get the same night or sepia colors as the page under them.
+    val detailColors = remember(pageColors) { pageColors.matrix?.let { ColorFilter.colorMatrix(ColorMatrix(it)) } }
     val detail = remember { ZoomDetail() }
     SideEffect { detail.loadRegion = loadRegion }
     // Sharpen once the view has stopped moving, not on every frame of a pinch or fling.
@@ -1069,8 +1082,8 @@ private fun PageList(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             itemsIndexed(pageSizes) { index, size ->
-                PageImage(index, size, revision, widthPx, loadPage, Modifier.fillMaxWidth()) {
-                    ZoomDetailLayer(index, revision, detail)
+                PageImage(index, size, revision, widthPx, loadPage, Modifier.fillMaxWidth(), pageColors) {
+                    ZoomDetailLayer(index, revision, detail, detailColors)
                     overlay(index)
                 }
             }
@@ -1078,7 +1091,10 @@ private fun PageList(
     }
 }
 
-/** One page, rendered at [widthPx]. Re-renders when the document's [revision] changes. */
+/**
+ * One page, rendered at [widthPx]. Re-renders when the document's [revision] changes.
+ * [pageColors] tints only what is drawn on screen (see PageColors.kt).
+ */
 @Composable
 internal fun PageImage(
     index: Int,
@@ -1087,17 +1103,19 @@ internal fun PageImage(
     widthPx: Int,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
     modifier: Modifier = Modifier,
+    pageColors: PageColors = PageColors.Normal,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     val bitmap by produceState<Bitmap?>(null, index, widthPx, revision) {
         value = loadPage(index, widthPx)
     }
+    val colorFilter = remember(pageColors) { pageColors.matrix?.let { ColorFilter.colorMatrix(ColorMatrix(it)) } }
     Box(
-        modifier.aspectRatio(size.aspectRatio).background(Color.White),
+        modifier.aspectRatio(size.aspectRatio).background(pageColors.paper),
         contentAlignment = Alignment.Center,
     ) {
         bitmap?.let {
-            Image(it.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize())
+            Image(it.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize(), colorFilter = colorFilter)
         }
         overlay()
     }

@@ -19,6 +19,7 @@ class AppSettingsTest {
         val settings = AppSettings(prefs)
         assertEquals(ThemeChoice.System, settings.theme.value)
         assertTrue(settings.rememberHistory.value)
+        assertEquals(PageColors.Normal, settings.pageColors.value)
     }
 
     @Test
@@ -26,9 +27,11 @@ class AppSettingsTest {
         AppSettings(prefs).apply {
             setTheme(ThemeChoice.Dark)
             setRememberHistory(false)
+            setPageColors(PageColors.Sepia)
         }
         val restarted = AppSettings(prefs)
         assertEquals(ThemeChoice.Dark, restarted.theme.value)
         assertFalse(restarted.rememberHistory.value)
+        assertEquals(PageColors.Sepia, restarted.pageColors.value)
     }
 }
