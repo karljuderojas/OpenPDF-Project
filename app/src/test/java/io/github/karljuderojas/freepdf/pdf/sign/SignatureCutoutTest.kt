@@ -47,6 +47,26 @@ class SignatureCutoutTest {
     }
 
     @Test
+    fun ruledLinesAndTheMarginLineAreNotKeptAsGreyInk() {
+        val cut = SignatureCutout.extract(SignaturePhotos.ruled(), Color.BLACK)
+        assertNotNull(cut)
+        cut!!
+        // Trimmed to the signature, not to the lines that run across the whole sheet.
+        assertTrue("width ${cut.width}", cut.width in 480..620)
+        assertTrue("height ${cut.height}", cut.height in 150..280)
+        // The lines cross the margin columns of the cut-out, where there is no ink: nothing there.
+        for (y in 0 until cut.height) {
+            assertEquals("left edge row $y", 0, Color.alpha(cut.getPixel(0, y)))
+            assertEquals("right edge row $y", 0, Color.alpha(cut.getPixel(cut.width - 1, y)))
+        }
+        // Whatever is kept is ink, not a faint haze: nothing is barely see-through.
+        for (y in 0 until cut.height) for (x in 0 until cut.width) {
+            val a = Color.alpha(cut.getPixel(x, y))
+            assertTrue("pixel $x,$y alpha $a", a == 0 || a > 90)
+        }
+    }
+
+    @Test
     fun aBlankPageHasNoSignature() {
         val blank = Bitmap.createBitmap(600, 300, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.rgb(230, 230, 225)) }
         assertNull(SignatureCutout.extract(blank, Color.BLACK))
