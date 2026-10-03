@@ -19,6 +19,7 @@ import com.tom_roush.pdfbox.pdmodel.documentinterchange.markedcontent.PDProperty
 import com.tom_roush.pdfbox.pdmodel.font.PDFont
 import com.tom_roush.pdfbox.pdmodel.font.PDType0Font
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
+import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
 import com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.util.Matrix
@@ -481,6 +482,34 @@ class TextEditingTest {
                 val (x, y) = centre(line.box)
                 assertEquals(line, TextEditing.lineAt(document, 0, x, y))
             }
+        }
+    }
+
+    @Test
+    fun textDrawnByAFormXObjectIsNotEditableAndDoesNotJoinThePagesOwnLine() {
+        val document = PDDocument()
+        val page = PDPage()
+        document.addPage(page)
+        val form = PDFormXObject(document).apply {
+            bBox = PDRectangle(0f, 0f, 612f, 792f)
+            resources = PDResources()
+        }
+        PDPageContentStream(document, form, form.stream.createOutputStream()).use {
+            it.line(PDType1Font.HELVETICA, 12f, 300f, 700f, "Inside the form")
+            it.line(PDType1Font.HELVETICA, 12f, 72f, 600f, "Also inside")
+        }
+        PDPageContentStream(document, page).use {
+            it.line(PDType1Font.HELVETICA, 12f, 72f, 700f, "On the page")
+            it.drawForm(form)
+        }
+        reloaded(document).use { reloadedDocument ->
+            assertNull(TextEditing.lineAt(reloadedDocument, 0, fx(330f), fy(703f)))
+            assertNull(TextEditing.lineAt(reloadedDocument, 0, fx(90f), fy(603f)))
+            assertEquals(listOf("On the page"), TextEditing.lines(reloadedDocument, 0).map { it.text })
+            // The page's own line on the same baseline as form text is still edited on its own.
+            val outcome = TextEditing.replace(reloadedDocument, 0, fx(90f), fy(703f), "On the page", "Edited page line")
+            assertEquals(TextEditing.Outcome.SameFont, outcome)
+            assertEquals(listOf("Also inside", "Edited page line", "Inside the form"), reloadedDocument.text().lines().sorted())
         }
     }
 

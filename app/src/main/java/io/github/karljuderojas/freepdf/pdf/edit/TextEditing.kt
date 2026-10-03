@@ -420,7 +420,8 @@ object TextEditing {
             // ' and " run as T* (with null operands) and Tj from inside their own processing:
             // those nested calls count as the operator that made them, so indices match the stream.
             override fun processOperator(operator: Operator, operands: MutableList<COSBase>?) {
-                if (nesting == 0) current = if (depth == 0) operators++ else -1
+                // Inside a form the operators arrive nested under the page's Do, so they never count.
+                if (depth > 0) current = -1 else if (nesting == 0) current = operators++
                 if (current >= 0 && operator.name in SHOWING && operands != null) rememberCodes(operands)
                 if (current >= 0 && operator.name in POSITIONING) positioned += current
                 nesting++
