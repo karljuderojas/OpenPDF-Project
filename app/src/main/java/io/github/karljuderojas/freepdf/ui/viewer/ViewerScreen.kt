@@ -77,6 +77,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
+import io.github.karljuderojas.freepdf.pdf.annotate.Mark
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
@@ -113,6 +114,16 @@ sealed interface ViewerAction {
         val comment: String? = null,
     ) : ViewerAction
     data class Copy(val text: String) : ViewerAction
+
+    /** Changes a mark found by its page and its [index] in that page's marks; null leaves that part alone. */
+    data class EditMark(
+        val page: Int,
+        val index: Int,
+        val color: Annotator.Rgb? = null,
+        val width: Float? = null,
+        val comment: String? = null,
+    ) : ViewerAction
+    data class DeleteMark(val page: Int, val index: Int) : ViewerAction
     data class Erase(val page: Int, val at: Offset) : ViewerAction
 
     /** Sign actions. */
@@ -131,6 +142,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
     val savedSignatures by viewModel.savedSignatures.collectAsStateWithLifecycle()
     val signerName by viewModel.signerName.collectAsStateWithLifecycle()
     val toolStyles by viewModel.toolStyles.collectAsStateWithLifecycle()
+    val marks by viewModel.marks.collectAsStateWithLifecycle()
     val resources = LocalResources.current
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -169,6 +181,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
         savedSignatures = savedSignatures,
         signerName = signerName,
         toolStyles = toolStyles,
+        marks = marks,
         snackbarHostState = snackbarHostState,
         onAction = { action ->
             when (action) {
@@ -195,6 +208,9 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.MarkLines -> action.tool.markup?.let {
                     viewModel.markLines(action.page, action.lines, it, action.style, action.comment)
                 }
+                is ViewerAction.EditMark ->
+                    viewModel.editMark(action.page, action.index, action.color, action.width, action.comment)
+                is ViewerAction.DeleteMark -> viewModel.deleteMark(action.page, action.index)
                 is ViewerAction.Copy -> {
                     context.getSystemService(ClipboardManager::class.java)
                         ?.setPrimaryClip(ClipData.newPlainText(resources.getString(R.string.selection_copy), action.text))
@@ -229,6 +245,7 @@ fun ViewerContent(
     savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
     signerName: String = "",
     toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
+    marks: List<Mark> = emptyList(),
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onAction: (ViewerAction) -> Unit = {},
 ) {
@@ -252,6 +269,13 @@ fun ViewerContent(
     var selection by remember { mutableStateOf<TextSelection?>(null) }
     var pendingTextNote by remember { mutableStateOf<Pair<Int, List<Rect>>?>(null) }
     LaunchedEffect(mode, selectedTool, ready?.revision) { selection = null }
+
+    // The mark picked for editing, by page and index, which stay the same while it is restyled.
+    var pickedMark by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    val selectedMark = pickedMark?.let { (page, index) -> marks.firstOrNull { it.page == page && it.index == index } }
+        ?.takeIf { mode == ViewerMode.Read || (mode == ViewerMode.Annotate && AnnotateTool.forLabel(selectedTool) == null) }
+    var showComments by remember { mutableStateOf(false) }
+    var commentFor by remember { mutableStateOf<Mark?>(null) }
 
     val ready = state as? ViewerState.Ready
     val pageCount = ready?.pageSizes?.size ?: 0
@@ -294,10 +318,15 @@ fun ViewerContent(
         if (mode == ViewerMode.Pages) returnToPage = selectedPage
         mode = ViewerMode.Read
         selectedTool = null
+        pickedMark = null
     }
 
-    BackHandler(enabled = mode != ViewerMode.Read || ready?.hasUnsavedChanges == true) {
-        if (mode != ViewerMode.Read) backToReading() else leave()
+    BackHandler(enabled = selectedMark != null || mode != ViewerMode.Read || ready?.hasUnsavedChanges == true) {
+        when {
+            selectedMark != null -> pickedMark = null
+            mode != ViewerMode.Read -> backToReading()
+            else -> leave()
+        }
     }
 
     Scaffold(
@@ -348,6 +377,25 @@ fun ViewerContent(
         bottomBar = {
             when {
                 ready == null -> Unit
+                selectedMark != null -> MarkEditBar(
+                    mark = selectedMark,
+                    onStyle = { style ->
+                        val tool = selectedMark.kind.tool
+                        onAction(
+                            ViewerAction.EditMark(
+                                selectedMark.page, selectedMark.index,
+                                color = style.rgb.takeIf { style.color != selectedMark.displayColor },
+                                width = style.width.takeIf { tool?.widths?.isNotEmpty() == true && it != selectedMark.width },
+                            ),
+                        )
+                    },
+                    onComment = { commentFor = selectedMark },
+                    onDelete = {
+                        onAction(ViewerAction.DeleteMark(selectedMark.page, selectedMark.index))
+                        pickedMark = null
+                    },
+                    onDone = { pickedMark = null },
+                )
                 mode == ViewerMode.Read -> ModeBar(onModeSelected = {
                     mode = it
                     if (it == ViewerMode.Pages) selectedPage = currentPage
@@ -364,6 +412,7 @@ fun ViewerContent(
                     }
                     ToolStrip(mode, selectedTool, onToolSelected = {
                         when {
+                            it == R.string.tool_comments -> showComments = true
                             selectedTool == it -> selectedTool = null
                             else -> selectedTool = it
                         }
@@ -391,7 +440,10 @@ fun ViewerContent(
                     })
                 }
                 else -> ToolStrip(mode, selectedTool = null, onToolSelected = {
-                    if (it == R.string.tool_share) onAction(ViewerAction.Share)
+                    when (it) {
+                        R.string.tool_share -> onAction(ViewerAction.Share)
+                        R.string.tool_comments -> showComments = true
+                    }
                 })
             }
         },
@@ -417,6 +469,7 @@ fun ViewerContent(
                         val words by produceState(emptyList<PageWord>(), page, ready.revision) { value = loadWords(page) }
                         // Text can be selected while reading, or in Annotate before a tool is picked.
                         if (mode == ViewerMode.Read || (mode == ViewerMode.Annotate && tool == null)) {
+                            MarkTapLayer(page, marks, selectedMark, onSelect = { pickedMark = it?.let { m -> m.page to m.index } }) {
                             TextSelectionLayer(
                                 page = page,
                                 words = words,
@@ -436,6 +489,7 @@ fun ViewerContent(
                                     selection = null
                                 },
                             )
+                            }
                         }
                         if (signTool != null) {
                             TapLayer(page) { at ->
@@ -549,6 +603,36 @@ fun ViewerContent(
         )
     }
 
+    if (showComments) {
+        CommentsSheet(
+            marks = marks,
+            onDismiss = { showComments = false },
+            onOpen = { mark ->
+                showComments = false
+                // Mark editing happens while reading, or in Annotate with no tool picked.
+                if (mode != ViewerMode.Annotate) mode = ViewerMode.Read
+                selectedTool = null
+                returnToPage = mark.page
+                pickedMark = mark.page to mark.index
+            },
+        )
+    }
+
+    commentFor?.let { mark ->
+        TextEntryDialog(
+            title = R.string.comment_title,
+            hint = R.string.comment_hint,
+            initial = mark.comment,
+            confirm = R.string.save,
+            allowBlank = true,
+            onDismiss = { commentFor = null },
+            onAdd = { text ->
+                commentFor = null
+                onAction(ViewerAction.EditMark(mark.page, mark.index, comment = text))
+            },
+        )
+    }
+
     if (confirmLeave) {
         AlertDialog(
             onDismissRequest = { confirmLeave = false },
@@ -651,8 +735,16 @@ internal fun PageImage(
 }
 
 @Composable
-private fun TextEntryDialog(@StringRes title: Int, @StringRes hint: Int, onDismiss: () -> Unit, onAdd: (String) -> Unit) {
-    var text by rememberSaveable { mutableStateOf("") }
+private fun TextEntryDialog(
+    @StringRes title: Int,
+    @StringRes hint: Int,
+    onDismiss: () -> Unit,
+    onAdd: (String) -> Unit,
+    initial: String = "",
+    @StringRes confirm: Int = R.string.add,
+    allowBlank: Boolean = false,
+) {
+    var text by rememberSaveable { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(title)) },
@@ -666,8 +758,8 @@ private fun TextEntryDialog(@StringRes title: Int, @StringRes hint: Int, onDismi
             )
         },
         confirmButton = {
-            TextButton(onClick = { onAdd(text.trim()) }, enabled = text.isNotBlank()) {
-                Text(stringResource(R.string.add))
+            TextButton(onClick = { onAdd(text.trim()) }, enabled = allowBlank || text.isNotBlank()) {
+                Text(stringResource(confirm))
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
