@@ -26,10 +26,12 @@ Goal: the features people use in PDFGear and Xodo, free, offline and open source
 - ⬜ Comments list
 
 ## Signing (Sign mode), see [signing-design.md](signing-design.md)
-- 🧱 Place a signature image (`SignatureStamper`)
+- ✅ Signature and initials: draw once on a pad (black or blue ink; too-simple drawings are refused), saved encrypted on the device, then tap the line to place
+- ✅ Date, text and checkmark: tap where they go
+- ⬜ Move and resize a placed signature (for now: Undo and tap again)
 - 🧱 Digital signature with an on-device or imported certificate (`DigitalSigner`, `SigningIdentity`)
 - 🧱 Audit trail, SHA-256 fingerprints and audit page
-- ⬜ Signature pad: draw, type, photo; saved signatures and initials
+- ⬜ Type or photograph a signature instead of drawing it
 - ⬜ Field detection and the guided next-field walk
 - ⬜ Fill AcroForm fields
 - ⬜ Verify banner for signed PDFs

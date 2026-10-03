@@ -19,6 +19,8 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
+import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
 import io.github.karljuderojas.freepdf.ui.home.HomeScreen
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerContent
@@ -102,6 +104,32 @@ class ScreenshotTest {
     fun viewerSign() = capture("viewer_sign") { viewer(ViewerMode.Sign) }
 
     @Test
+    fun viewerSignPlacing() = capture("viewer_sign_placing") {
+        viewer(
+            ViewerMode.Sign,
+            tool = R.string.tool_signature,
+            savedSignatures = mapOf(SignatureStore.Kind.Signature to SignatureInk.render(sampleSignature(), 0xFF1A3FA8.toInt(), 6f)),
+        )
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerSignPad() {
+        show { viewer(ViewerMode.Sign) }
+        // First use of Signature opens the pad.
+        composeRule.onNodeWithText("Signature").performClick()
+        composeRule.onNodeWithTag("signature-pad").performTouchInput {
+            sampleSignature().forEach { stroke ->
+                down(stroke.first())
+                stroke.drop(1).forEach { moveTo(it) }
+                up()
+            }
+        }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_pad.png")
+    }
+
+    @Test
     fun viewerPages() = capture("viewer_pages") {
         viewer(ViewerMode.Pages, sample.copy(canUndo = true, hasUnsavedChanges = true), selectedPage = 1)
     }
@@ -120,7 +148,13 @@ class ScreenshotTest {
     fun viewerMore() = capture("viewer_more") { viewer(ViewerMode.More) }
 
     @Composable
-    private fun viewer(mode: ViewerMode, state: ViewerState = sample, selectedPage: Int = 0, tool: Int? = null) {
+    private fun viewer(
+        mode: ViewerMode,
+        state: ViewerState = sample,
+        selectedPage: Int = 0,
+        tool: Int? = null,
+        savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
+    ) {
         ViewerContent(
             state = state,
             onBack = {},
@@ -128,6 +162,7 @@ class ScreenshotTest {
             initialMode = mode,
             initialSelectedPage = selectedPage,
             initialTool = tool,
+            savedSignatures = savedSignatures,
         )
     }
 
@@ -142,6 +177,16 @@ class ScreenshotTest {
 
     private fun captureRoot(name: String) {
         composeRule.onRoot().captureRoboImage("build/outputs/roborazzi/$name.png")
+    }
+
+    /** A made-up cursive signature, in pad pixels: a looping first stroke and an underline. */
+    private fun sampleSignature(): List<List<Offset>> {
+        val loops = (0..80).map { i ->
+            val t = i / 80f
+            Offset(120f + t * 560f + 30f * kotlin.math.cos(t * 28f), 300f - 90f * kotlin.math.sin(t * 14f) * (1.1f - t))
+        }
+        val underline = (0..20).map { i -> Offset(150f + i * 30f, 410f - i * 2f) }
+        return listOf(loops, underline)
     }
 
     private fun scaled(page: Bitmap, width: Int): Bitmap =

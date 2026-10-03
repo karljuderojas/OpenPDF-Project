@@ -63,4 +63,19 @@
     <string name="note_title">Add a note</string>
     <string name="note_hint">Type your note</string>
     <string name="nothing_to_erase">Nothing to erase here. Tap on a mark to remove it.</string>
+    <string name="text_title">Add text</string>
+    <string name="text_hint">Type the text to place</string>
+    <string name="redraw">Redraw</string>
+    <string name="clear">Clear</string>
+    <string name="ink_black">Black</string>
+    <string name="ink_blue">Blue</string>
+    <string name="pad_title_signature">Draw your signature</string>
+    <string name="pad_title_initials">Draw your initials</string>
+    <string name="pad_hint">Sign above the line. It is saved on this phone only, for next time.</string>
+    <string name="pad_too_simple">That is too small or simple to identify you. Please draw it again, larger.</string>
+    <string name="sign_hint_signature">Tap the line where you want to sign.</string>
+    <string name="sign_hint_initials">Tap where your initials go.</string>
+    <string name="sign_hint_date">Tap where today\'s date goes.</string>
+    <string name="sign_hint_text">Tap where you want to type text.</string>
+    <string name="sign_hint_checkmark">Tap a box to tick it.</string>
 </resources>
