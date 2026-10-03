@@ -845,6 +845,9 @@ class ScreenshotTest {
         composeRule.onNodeWithTag("link-0-0").performClick()
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_link_open.png")
+    }
+
+    @Test
     fun viewerEditText() = capture("viewer_edit_text") { viewer(ViewerMode.Edit, tool = R.string.tool_edit_text) }
 
     @OptIn(ExperimentalRoborazziApi::class)
