@@ -59,10 +59,17 @@ class SignatureCutoutTest {
             assertEquals("left edge row $y", 0, Color.alpha(cut.getPixel(0, y)))
             assertEquals("right edge row $y", 0, Color.alpha(cut.getPixel(cut.width - 1, y)))
         }
-        // Whatever is kept is ink, not a faint haze: nothing is barely see-through.
+        // Whatever is kept is ink or the soft edge of a stroke, not a faint haze on its own.
         for (y in 0 until cut.height) for (x in 0 until cut.width) {
             val a = Color.alpha(cut.getPixel(x, y))
-            assertTrue("pixel $x,$y alpha $a", a == 0 || a > 90)
+            if (a == 0 || a > 90) continue
+            var touchesInk = false
+            for (dy in -1..1) for (dx in -1..1) {
+                val nx = x + dx
+                val ny = y + dy
+                if (nx in 0 until cut.width && ny in 0 until cut.height && Color.alpha(cut.getPixel(nx, ny)) > 96) touchesInk = true
+            }
+            assertTrue("pixel $x,$y alpha $a stands alone", touchesInk)
         }
     }
 

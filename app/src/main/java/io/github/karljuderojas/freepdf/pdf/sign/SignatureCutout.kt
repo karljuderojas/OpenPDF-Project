@@ -66,6 +66,9 @@ object SignatureCutout {
         }
         val radius = max(12, min(w, h) / 5)
         val alpha = IntArray(w * h)
+        // Faint pixels are kept only where they edge a stroke, so pen strokes keep their
+        // anti-aliased fringe while ruled lines, shadows and paper grain fall away.
+        val fringe = IntArray(w * h)
         var ink = 0
         var left = w; var top = h; var right = -1; var bottom = -1
         val floor = median * 0.95f
@@ -88,7 +91,24 @@ object SignatureCutout {
                     if (x > right) right = x
                     if (y < top) top = y
                     if (y > bottom) bottom = y
+                } else if (a > 0) {
+                    fringe[y * w + x] = a
                 }
+            }
+        }
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val a = fringe[y * w + x]
+                if (a == 0) continue
+                var touchesInk = false
+                for (dy in -1..1) {
+                    for (dx in -1..1) {
+                        val nx = x + dx
+                        val ny = y + dy
+                        if (nx in 0 until w && ny in 0 until h && alpha[ny * w + nx] > INK_ALPHA) touchesInk = true
+                    }
+                }
+                if (touchesInk) alpha[y * w + x] = a
             }
         }
         val share = ink.toFloat() / (w * h)
