@@ -57,4 +57,18 @@ object PageEditor {
             stream.endText()
         }
     }
+
+    /** Draws a checkmark whose bottom point sits at [at]. [size] is its height in points. */
+    fun addCheckmark(document: PDDocument, pageIndex: Int, at: PdfPoint, size: Float = 10f) {
+        val page = document.getPage(pageIndex)
+        PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true, true).use { stream ->
+            stream.setLineWidth(size / 6)
+            stream.setLineCapStyle(1)
+            stream.setLineJoinStyle(1)
+            stream.moveTo(at.x - size * 0.4f, at.y + size * 0.4f)
+            stream.lineTo(at.x, at.y)
+            stream.lineTo(at.x + size * 0.6f, at.y + size)
+            stream.stroke()
+        }
+    }
 }

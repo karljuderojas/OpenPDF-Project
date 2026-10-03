@@ -6,10 +6,10 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.LruCache
 import androidx.annotation.StringRes
+import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tom_roush.pdfbox.pdmodel.PDDocument
-import androidx.compose.ui.geometry.Offset
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget
 import io.github.karljuderojas.freepdf.R
@@ -22,6 +22,8 @@ import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.render.PdfRenderer
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureStamper
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -34,6 +36,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.DateFormat
+import java.util.Date
 import java.util.UUID
 
 sealed interface ViewerState {
@@ -81,6 +85,20 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private val context get() = getApplication<Application>()
+
+    private val signatureStore = SignatureStore(File(application.filesDir, "signatures"))
+    private val _savedSignatures = MutableStateFlow<Map<SignatureStore.Kind, Bitmap>>(emptyMap())
+
+    /** The user's saved signature and initials, if they have drawn them. */
+    val savedSignatures: StateFlow<Map<SignatureStore.Kind, Bitmap>> = _savedSignatures.asStateFlow()
+
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            _savedSignatures.value = SignatureStore.Kind.entries.mapNotNull { kind ->
+                runCatching { signatureStore.load(kind) }.getOrNull()?.let { kind to it }
+            }.toMap()
+        }
+    }
 
     fun open(uri: Uri) {
         if (uri == openedUri) return
@@ -164,6 +182,42 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             } ?: throw NothingChanged()
             pdfPage.annotations = annotations.filter { it !== target }
         }
+    }
+
+    fun saveSignature(kind: SignatureStore.Kind, image: Bitmap) {
+        _savedSignatures.value += kind to image
+        viewModelScope.launch(Dispatchers.IO) {
+            // Still usable in this session if the Keystore refuses; it just is not remembered.
+            runCatching { signatureStore.save(kind, image) }
+        }
+    }
+
+    /** Stamps the saved signature or initials so they sit on the line the user tapped. */
+    fun placeSignature(page: Int, at: Offset, kind: SignatureStore.Kind) {
+        val image = _savedSignatures.value[kind] ?: return
+        edit { document ->
+            val point = displayMapper(document, page)(at)
+            val maxWidth = if (kind == SignatureStore.Kind.Initials) 60f else 160f
+            val maxHeight = if (kind == SignatureStore.Kind.Initials) 32f else 56f
+            val scale = minOf(maxWidth / image.width, maxHeight / image.height)
+            val width = image.width * scale
+            val height = image.height * scale
+            val box = PdfRect(point.x - width / 2, point.y, point.x + width / 2, point.y + height)
+            SignatureStamper.stamp(document, page, image, box)
+        }
+    }
+
+    fun addDate(page: Int, at: Offset) {
+        val today = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date())
+        addText(page, at, today)
+    }
+
+    fun addText(page: Int, at: Offset, text: String) = edit { document ->
+        PageEditor.addText(document, page, text, displayMapper(document, page)(at), fontSize = 11f)
+    }
+
+    fun addCheckmark(page: Int, at: Offset) = edit { document ->
+        PageEditor.addCheckmark(document, page, displayMapper(document, page)(at))
     }
 
     fun undo() {

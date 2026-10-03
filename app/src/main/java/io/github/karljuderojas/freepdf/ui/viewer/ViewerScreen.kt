@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -67,6 +69,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
+import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
 import kotlinx.coroutines.launch
 
 /** What the viewer asks its view model to do. Page numbers are zero-based. */
@@ -85,12 +89,20 @@ sealed interface ViewerAction {
     data class Box(val page: Int, val tool: AnnotateTool, val start: Offset, val end: Offset) : ViewerAction
     data class Note(val page: Int, val at: Offset, val text: String) : ViewerAction
     data class Erase(val page: Int, val at: Offset) : ViewerAction
+
+    /** Sign actions. */
+    data class SaveSignature(val kind: SignatureStore.Kind, val image: Bitmap) : ViewerAction
+    data class PlaceSignature(val page: Int, val at: Offset, val kind: SignatureStore.Kind) : ViewerAction
+    data class AddDate(val page: Int, val at: Offset) : ViewerAction
+    data class AddText(val page: Int, val at: Offset, val text: String) : ViewerAction
+    data class AddCheckmark(val page: Int, val at: Offset) : ViewerAction
 }
 
 @Composable
 fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = viewModel()) {
     LaunchedEffect(uri) { viewModel.open(uri) }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val savedSignatures by viewModel.savedSignatures.collectAsStateWithLifecycle()
     val resources = LocalResources.current
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -115,6 +127,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
         state = state,
         onBack = onBack,
         loadPage = viewModel::page,
+        savedSignatures = savedSignatures,
         snackbarHostState = snackbarHostState,
         onAction = { action ->
             when (action) {
@@ -141,6 +154,11 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 }
                 is ViewerAction.Note -> viewModel.note(action.page, action.at, action.text)
                 is ViewerAction.Erase -> viewModel.erase(action.page, action.at)
+                is ViewerAction.SaveSignature -> viewModel.saveSignature(action.kind, action.image)
+                is ViewerAction.PlaceSignature -> viewModel.placeSignature(action.page, action.at, action.kind)
+                is ViewerAction.AddDate -> viewModel.addDate(action.page, action.at)
+                is ViewerAction.AddText -> viewModel.addText(action.page, action.at, action.text)
+                is ViewerAction.AddCheckmark -> viewModel.addCheckmark(action.page, action.at)
             }
         },
     )
@@ -156,6 +174,7 @@ fun ViewerContent(
     initialMode: ViewerMode = ViewerMode.Read,
     initialSelectedPage: Int = 0,
     initialTool: Int? = null,
+    savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onAction: (ViewerAction) -> Unit = {},
 ) {
@@ -167,6 +186,8 @@ fun ViewerContent(
     var confirmDelete by remember { mutableStateOf(false) }
     var confirmLeave by remember { mutableStateOf(false) }
     var pendingNote by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
+    var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
+    var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     val scope = rememberCoroutineScope()
     val resources = LocalResources.current
 
@@ -275,6 +296,27 @@ fun ViewerContent(
                         else -> selectedTool = it
                     }
                 })
+                mode == ViewerMode.Sign -> Column {
+                    SignTool.forLabel(selectedTool)?.let { tool ->
+                        SignHint(
+                            tool = tool,
+                            savedImage = tool.signatureKind?.let { savedSignatures[it] },
+                            onRedraw = { padFor = tool.signatureKind },
+                        )
+                    }
+                    ToolStrip(mode, selectedTool, onToolSelected = { label ->
+                        val tool = SignTool.forLabel(label)
+                        when {
+                            tool == null -> comingSoon()
+                            selectedTool == label -> selectedTool = null
+                            else -> {
+                                selectedTool = label
+                                // First use: draw the signature before placing it.
+                                tool.signatureKind?.takeIf { savedSignatures[it] == null }?.let { padFor = it }
+                            }
+                        }
+                    })
+                }
                 else -> ToolStrip(mode, selectedTool = null, onToolSelected = { comingSoon() })
             }
         },
@@ -295,7 +337,20 @@ fun ViewerContent(
                 )
                 else -> {
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
+                    val signTool = SignTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Sign }
                     PageList(ready.pageSizes, ready.revision, loadPage, listState) { page ->
+                        if (signTool != null) {
+                            TapLayer(page) { at ->
+                                val kind = signTool.signatureKind
+                                when {
+                                    kind != null && savedSignatures[kind] == null -> padFor = kind
+                                    kind != null -> onAction(ViewerAction.PlaceSignature(page, at, kind))
+                                    signTool == SignTool.Date -> onAction(ViewerAction.AddDate(page, at))
+                                    signTool == SignTool.Text -> pendingText = page to at
+                                    else -> onAction(ViewerAction.AddCheckmark(page, at))
+                                }
+                            }
+                        }
                         if (tool != null) {
                             AnnotationLayer(
                                 page = page,
@@ -331,8 +386,33 @@ fun ViewerContent(
         )
     }
 
+    padFor?.let { kind ->
+        SignaturePadDialog(
+            kind = kind,
+            onDismiss = { padFor = null },
+            onSave = {
+                padFor = null
+                onAction(ViewerAction.SaveSignature(kind, it))
+            },
+        )
+    }
+
+    pendingText?.let { (page, at) ->
+        TextEntryDialog(
+            title = R.string.text_title,
+            hint = R.string.text_hint,
+            onDismiss = { pendingText = null },
+            onAdd = { text ->
+                pendingText = null
+                onAction(ViewerAction.AddText(page, at, text))
+            },
+        )
+    }
+
     pendingNote?.let { (page, at) ->
-        NoteDialog(
+        TextEntryDialog(
+            title = R.string.note_title,
+            hint = R.string.note_hint,
             onDismiss = { pendingNote = null },
             onAdd = { text ->
                 pendingNote = null
@@ -431,16 +511,16 @@ internal fun PageImage(
 }
 
 @Composable
-private fun NoteDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
+private fun TextEntryDialog(@StringRes title: Int, @StringRes hint: Int, onDismiss: () -> Unit, onAdd: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.note_title)) },
+        title = { Text(stringResource(title)) },
         text = {
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
-                placeholder = { Text(stringResource(R.string.note_hint)) },
+                placeholder = { Text(stringResource(hint)) },
                 minLines = 3,
                 modifier = Modifier.fillMaxWidth(),
             )
