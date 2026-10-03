@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -97,6 +98,8 @@ import io.github.karljuderojas.freepdf.ui.viewer.SearchResults
 import io.github.karljuderojas.freepdf.ui.viewer.TextMatch
 import io.github.karljuderojas.freepdf.ui.viewer.PlacedStamp
 import io.github.karljuderojas.freepdf.ui.viewer.RedactBox
+import io.github.karljuderojas.freepdf.ui.viewer.RedactCheck
+import io.github.karljuderojas.freepdf.ui.viewer.RedactProgress
 import io.github.karljuderojas.freepdf.ui.viewer.StampContent
 import io.github.karljuderojas.freepdf.ui.viewer.StampGeometry
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerAction
@@ -1056,15 +1059,53 @@ class ScreenshotTest {
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerRedactConfirm() {
-        show { viewer(ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(), confirmRedact = true) }
+        // The marked pages have been checked and nothing on them has to go whole.
+        show {
+            viewer(
+                ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(), confirmRedact = true,
+                redactCheck = RedactCheck(sampleRedactions(), emptyList()),
+            )
+        }
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_redact_confirm.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerRedactConfirmWholePicture() {
+        // A picture under a mark on page 1 cannot be partly cleared: the dialog says so before anything is saved.
+        show {
+            viewer(
+                ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(), confirmRedact = true,
+                redactCheck = RedactCheck(sampleRedactions(), listOf(0)),
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("redact-whole-pictures").assertExists()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_redact_confirm_whole_picture.png")
+    }
+
+    // The redacted copy is being written; the spinner never lets Compose go idle, so drive the clock.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerRedactProgress() {
+        var progress by mutableStateOf<RedactProgress?>(null)
+        show { viewer(ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(), redactProgress = progress) }
+        composeRule.mainClock.autoAdvance = false
+        progress = RedactProgress(2, 5)
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_redact_progress.png")
     }
 
     @Test
     fun viewerRedactApplyAsksThenSendsTheMarks() {
         val actions = mutableListOf<ViewerAction>()
-        show { viewer(ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(), onAction = { actions += it }) }
+        show {
+            viewer(
+                ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(),
+                redactCheck = RedactCheck(sampleRedactions(), emptyList()), onAction = { actions += it },
+            )
+        }
         composeRule.onNodeWithText("Apply").performClick()
         composeRule.waitForIdle()
         // Nothing is sent until the dialog is confirmed.
@@ -1073,6 +1114,18 @@ class ScreenshotTest {
         composeRule.waitForIdle()
         val redact = actions.filterIsInstance<ViewerAction.Redact>().single()
         assertEquals(sampleRedactions(), redact.boxes)
+    }
+
+    @Test
+    fun viewerRedactApplyWaitsForTheCheck() {
+        // Until the marked pages have been looked at, the copy cannot be confirmed, only cancelled.
+        val actions = mutableListOf<ViewerAction>()
+        show { viewer(ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(), onAction = { actions += it }) }
+        composeRule.onNodeWithText("Apply").performClick()
+        composeRule.waitForIdle()
+        assertEquals(sampleRedactions(), actions.filterIsInstance<ViewerAction.CheckRedaction>().single().boxes)
+        composeRule.onNodeWithText("Save redacted copy").assertIsNotEnabled()
+        composeRule.onNodeWithText("Checking the marked pages…").assertExists()
     }
 
     @Test
@@ -1495,6 +1548,8 @@ class ScreenshotTest {
         selectedStamp: Long? = null,
         redactions: List<RedactBox> = emptyList(),
         confirmRedact: Boolean = false,
+        redactCheck: RedactCheck? = null,
+        redactProgress: RedactProgress? = null,
         onAction: (ViewerAction) -> Unit = {},
         pages: List<Bitmap> = samplePages,
         signField: Int? = null,
@@ -1547,6 +1602,8 @@ class ScreenshotTest {
             initialSelectedStamp = selectedStamp,
             initialRedactions = redactions,
             initialConfirmRedact = confirmRedact,
+            redactCheck = redactCheck,
+            redactProgress = redactProgress,
             onAction = onAction,
         )
     }

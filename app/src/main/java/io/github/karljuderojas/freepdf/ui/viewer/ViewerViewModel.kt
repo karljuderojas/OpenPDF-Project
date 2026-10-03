@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.IntRect
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
@@ -159,6 +160,9 @@ data class SearchResults(val query: String = "", val matches: List<TextMatch> = 
 sealed interface ViewerEffect {
     data class Message(@StringRes val text: Int) : ViewerEffect
 
+    /** A message put together from several strings, such as what a redaction removed besides the marks. */
+    data class Text(val text: String) : ViewerEffect
+
     /** A message that names a number, such as "Saved 3 pages as a new PDF". */
     data class CountMessage(@PluralsRes val text: Int, val count: Int) : ViewerEffect
     data class SaveAs(val suggestedName: String) : ViewerEffect
@@ -186,7 +190,11 @@ sealed interface ViewerEffect {
     data class ShowInfo(val name: String, val info: DocumentInfo) : ViewerEffect
 }
 
-class ViewerViewModel(application: Application) : AndroidViewModel(application) {
+/**
+ * [handle] keeps what a system picker was opened for (pages to extract, marks to redact) across
+ * the process being killed while the picker is up, so its answer can still be acted on.
+ */
+class ViewerViewModel(application: Application, private val handle: SavedStateHandle = SavedStateHandle()) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow<ViewerState>(ViewerState.Loading)
     val state: StateFlow<ViewerState> = _state.asStateFlow()
@@ -264,10 +272,38 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Whether Finish asked to share the signed copy once it is saved. */
     private var shareSignedCopy = false
-    /** Pages to extract, or the parts to split into, waiting for the user to pick where they go. */
-    private var pendingExtract: List<Int>? = null
-    private var pendingRedaction: List<RedactBox>? = null
-    private var pendingSplit: List<List<Int>>? = null
+    // Pages to extract, marks to redact, or the parts to split into, waiting for the user to pick
+    // where they go. They live in the saved state: the picker is another app, and this process
+    // may be killed while it is up.
+    private var pendingExtract: List<Int>?
+        get() = handle.get<IntArray>(KEY_PENDING_EXTRACT)?.toList()
+        set(value) = keep(KEY_PENDING_EXTRACT, value?.toIntArray())
+
+    private var pendingRedaction: List<RedactBox>?
+        get() = handle.get<FloatArray>(KEY_PENDING_REDACTION)?.toList()?.chunked(5)
+            ?.map { (page, left, top, right, bottom) -> RedactBox(page.toInt(), Rect(left, top, right, bottom)) }
+        set(value) = keep(
+            KEY_PENDING_REDACTION,
+            value?.flatMap { listOf(it.page.toFloat(), it.rect.left, it.rect.top, it.rect.right, it.rect.bottom) }?.toFloatArray(),
+        )
+
+    // Each part as its length followed by its pages.
+    private var pendingSplit: List<List<Int>>?
+        get() = handle.get<IntArray>(KEY_PENDING_SPLIT)?.let { flat ->
+            val parts = ArrayList<List<Int>>()
+            var at = 0
+            while (at < flat.size) {
+                val length = flat[at++]
+                parts += flat.slice(at until at + length)
+                at += length
+            }
+            parts
+        }
+        set(value) = keep(KEY_PENDING_SPLIT, value?.flatMap { listOf(it.size) + it }?.toIntArray())
+
+    private fun keep(key: String, value: Any?) {
+        if (value == null) handle.remove<Any>(key) else handle[key] = value
+    }
 
     private val signingPrefs = application.getSharedPreferences("signing", Context.MODE_PRIVATE)
     private val _signerName = MutableStateFlow(signingPrefs.getString(KEY_SIGNER_NAME, "").orEmpty())
@@ -335,6 +371,16 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     /** What Finish is busy with while the signed copy is being made, or null when it is not. */
     val finishing: StateFlow<SignedCopy.Step?> = _finishing.asStateFlow()
+
+    private val _redacting = MutableStateFlow<RedactProgress?>(null)
+
+    /** Where Redact has got to while the redacted copy is written, or null when it is not. */
+    val redacting: StateFlow<RedactProgress?> = _redacting.asStateFlow()
+
+    private val _redactCheck = MutableStateFlow<RedactCheck?>(null)
+
+    /** What [checkRedaction] last found, for the confirmation before the copy is written. */
+    val redactCheck: StateFlow<RedactCheck?> = _redactCheck.asStateFlow()
 
     /** Sign and Edit mode stamps that can still be moved or resized; see [commitStamps]. */
     val stamps: StateFlow<List<PlacedStamp>> = _stamps.asStateFlow()
@@ -1069,7 +1115,11 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Writes the pages chosen in [extract], unsaved changes included, to [target]. */
     fun saveExtract(target: Uri) {
-        val pages = pendingExtract ?: return
+        val pages = pendingExtract
+        if (pages == null) {
+            discard(target, R.string.extract_failed)
+            return
+        }
         pendingExtract = null
         viewModelScope.launch {
             val saved = runCatching {
@@ -1103,57 +1153,116 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
+     * Looks over the pages [boxes] mark, without changing anything, for what the confirmation
+     * should warn about before the copy is written (see [RedactCheck]). The answer arrives in
+     * [redactCheck]; a check for the same marks is not made twice.
+     */
+    fun checkRedaction(boxes: List<RedactBox>) {
+        if (boxes.isEmpty() || _redactCheck.value?.boxes == boxes) return
+        viewModelScope.launch {
+            val pages = runCatching {
+                lock.withLock {
+                    withContext(Dispatchers.IO) {
+                        val current = session ?: error("Nothing is open")
+                        PDDocument.load(current.workingFile, current.password).use { document ->
+                            Redactor.check(document, redactAreas(document, boxes))
+                        }
+                    }
+                }
+            }.getOrDefault(emptyList())
+            _redactCheck.value = RedactCheck(boxes, pages)
+        }
+    }
+
+    /**
      * Writes a copy of the PDF as it is now, unsaved changes included, with everything under the
      * areas chosen in [redact] removed (see [Redactor]). The open PDF and its undo history are untouched.
      */
     fun saveRedacted(target: Uri) {
-        val boxes = pendingRedaction ?: return
+        val boxes = pendingRedaction
+        if (boxes == null) {
+            // The request did not survive; the empty file the picker made should not either.
+            discard(target, R.string.redact_failed)
+            return
+        }
         pendingRedaction = null
+        val marked = boxes.distinctBy { it.page }.size
+        _redacting.value = RedactProgress(1, marked)
         viewModelScope.launch {
-            val result = runCatching {
-                lock.withLock {
-                    withContext(Dispatchers.IO) {
-                        val current = session ?: error("Nothing is open")
-                        var redacted: Redactor.Result? = null
-                        SafeWrite.write(context, target) { out ->
-                            PDDocument.load(current.workingFile, current.password).use { document ->
-                                val areas = boxes.groupBy { it.page }.mapValues { (page, onPage) ->
-                                    onPage.map { box ->
-                                        // A point of margin so a word's box fully covers its letters.
-                                        boxOf(document, page, box.rect.topLeft, box.rect.bottomRight).let {
-                                            PdfRect(it.left - REDACT_MARGIN, it.bottom - REDACT_MARGIN, it.right + REDACT_MARGIN, it.top + REDACT_MARGIN)
-                                        }
+            val result = try {
+                runCatching {
+                    lock.withLock {
+                        withContext(Dispatchers.IO) {
+                            val current = session ?: error("Nothing is open")
+                            var redacted: Redactor.Result? = null
+                            SafeWrite.write(context, target) { out ->
+                                PDDocument.load(current.workingFile, current.password).use { document ->
+                                    redacted = Redactor.redact(document, redactAreas(document, boxes)) { page, of ->
+                                        _redacting.value = RedactProgress(page, of)
                                     }
+                                    PdfDocuments.keepProtection(document, current.password)
+                                    document.save(out)
                                 }
-                                redacted = Redactor.redact(document, areas)
-                                PdfDocuments.keepProtection(document, current.password)
-                                document.save(out)
                             }
+                            redacted ?: error("Nothing was redacted")
                         }
-                        redacted ?: error("Nothing was redacted")
                     }
                 }
+            } finally {
+                _redacting.value = null
             }
             if (result.isSuccess) {
                 redactionsSaved++
                 _state.update { if (it is ViewerState.Ready) it.copy(redactionsSaved = redactionsSaved) else it }
             }
             val message = result.fold(
-                onSuccess = {
-                    when {
-                        it.wholePictures > 0 -> R.string.redact_saved_whole_pictures
-                        it.foundNothing -> R.string.redact_saved_blank
-                        else -> R.string.redact_saved
-                    }
+                onSuccess = { redacted ->
+                    val resources = context.resources
+                    buildList {
+                        add(
+                            resources.getString(
+                                when {
+                                    redacted.wholePictures > 0 -> R.string.redact_saved_whole_pictures
+                                    redacted.foundNothing -> R.string.redact_saved_blank
+                                    else -> R.string.redact_saved
+                                },
+                            ),
+                        )
+                        if (redacted.attachments > 0) {
+                            add(resources.getQuantityString(R.plurals.redact_saved_attachments, redacted.attachments, redacted.attachments))
+                        }
+                        if (redacted.metadataCleared) add(resources.getString(R.string.redact_saved_metadata_cleared))
+                    }.joinToString(" ")
                 },
-                onFailure = { R.string.redact_failed },
+                onFailure = { context.getString(R.string.redact_failed) },
             )
-            _effects.send(ViewerEffect.Message(message))
+            _effects.send(ViewerEffect.Text(message))
         }
     }
 
+    /** The marked areas per page in PDF space, with a point of margin so a word's box fully covers its letters. */
+    private fun redactAreas(document: PDDocument, boxes: List<RedactBox>): Map<Int, List<PdfRect>> =
+        boxes.groupBy { it.page }.mapValues { (page, onPage) ->
+            onPage.map { box ->
+                boxOf(document, page, box.rect.topLeft, box.rect.bottomRight).let {
+                    PdfRect(it.left - REDACT_MARGIN, it.bottom - REDACT_MARGIN, it.right + REDACT_MARGIN, it.top + REDACT_MARGIN)
+                }
+            }
+        }
+
     fun cancelRedaction() {
         pendingRedaction = null
+    }
+
+    /**
+     * A file the system picker created for a request this view model no longer has (the process
+     * was killed meanwhile): it would stay behind empty, so it goes, and [failed] says why nothing was saved.
+     */
+    private fun discard(target: Uri, @StringRes failed: Int) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { runCatching { DocumentsContract.deleteDocument(context.contentResolver, target) } }
+            _effects.send(ViewerEffect.Message(failed))
+        }
     }
 
     /** Asks which folder to split into; [splitInto] then writes one PDF per part. */
@@ -1540,6 +1649,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         // 96 MB is more than low-end phones with a 128 MB heap can give without an OutOfMemoryError.
         val CACHE_BYTES = (Runtime.getRuntime().maxMemory() / 4).coerceAtMost(96L * 1024 * 1024).toInt()
         const val KEY_SIGNER_NAME = "name"
+        const val KEY_PENDING_EXTRACT = "pendingExtract"
+        const val KEY_PENDING_REDACTION = "pendingRedaction"
+        const val KEY_PENDING_SPLIT = "pendingSplit"
 
         // Points added around each redacted area, so a word's box fully covers its letters.
         const val REDACT_MARGIN = 1f

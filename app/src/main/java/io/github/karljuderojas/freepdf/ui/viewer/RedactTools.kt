@@ -3,6 +3,7 @@ package io.github.karljuderojas.freepdf.ui.viewer
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -118,14 +119,50 @@ fun RedactBar(count: Int, onRemoveLast: () -> Unit, onApply: () -> Unit) {
     }
 }
 
-/** Asks before [onConfirm] starts saving the redacted copy, since what it removes cannot be put back. */
+/**
+ * What a look at the marked pages found before the redacted copy is written: the zero-based
+ * [wholePicturePages] where a picture under a mark cannot be partly cleared and would go whole.
+ * [boxes] are the marks it was made for, so a stale check is not shown for new marks.
+ */
+data class RedactCheck(val boxes: List<RedactBox>, val wholePicturePages: List<Int>)
+
+/** Where writing the redacted copy has got to: marked page [page] (from 1) of [of]. */
+data class RedactProgress(val page: Int, val of: Int)
+
+/**
+ * Asks before [onConfirm] starts saving the redacted copy, since what it removes cannot be put
+ * back. Until [check] is in, the copy cannot be confirmed: a picture that would be removed whole
+ * is something to know before, not after.
+ */
 @Composable
-fun RedactConfirmDialog(count: Int, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+fun RedactConfirmDialog(count: Int, check: RedactCheck?, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(pluralStringResource(R.plurals.redact_confirm_title, count, count)) },
-        text = { Text(stringResource(R.string.redact_confirm_body)) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.redact_confirm_action)) } },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(stringResource(R.string.redact_confirm_body))
+                Text(stringResource(R.string.redact_confirm_limits))
+                when {
+                    check == null -> Text(
+                        stringResource(R.string.redact_confirm_checking),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    check.wholePicturePages.isNotEmpty() -> {
+                        val pages = check.wholePicturePages.sorted().map { it + 1 }
+                        Text(
+                            pluralStringResource(R.plurals.redact_confirm_whole_pictures, pages.size, pages.joinToString(", ")),
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.testTag("redact-whole-pictures"),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = check != null) { Text(stringResource(R.string.redact_confirm_action)) }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }

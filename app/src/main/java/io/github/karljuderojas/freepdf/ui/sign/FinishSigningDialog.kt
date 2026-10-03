@@ -140,22 +140,32 @@ fun FinishSigningDialog(
  */
 @Composable
 fun FinishProgressDialog(step: SignedCopy.Step) {
+    ProgressDialog(
+        title = stringResource(R.string.finish_title),
+        text = stringResource(
+            when (step) {
+                SignedCopy.Step.Signing -> R.string.finish_step_signing
+                SignedCopy.Step.Timestamping -> R.string.finish_step_timestamp
+            },
+        ),
+        tag = "finish-progress",
+    )
+}
+
+/**
+ * A spinner with a line saying what is being done, for work that cannot be cancelled part way:
+ * no buttons, and it does not close on a tap outside or Back.
+ */
+@Composable
+fun ProgressDialog(title: String, text: String, tag: String) {
     AlertDialog(
         onDismissRequest = {},
         properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
-        title = { Text(stringResource(R.string.finish_title)) },
+        title = { Text(title) },
         text = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                CircularProgressIndicator(modifier = Modifier.size(28.dp).testTag("finish-progress"))
-                Text(
-                    stringResource(
-                        when (step) {
-                            SignedCopy.Step.Signing -> R.string.finish_step_signing
-                            SignedCopy.Step.Timestamping -> R.string.finish_step_timestamp
-                        },
-                    ),
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+                CircularProgressIndicator(modifier = Modifier.size(28.dp).testTag(tag))
+                Text(text, style = MaterialTheme.typography.bodyLarge)
             }
         },
         confirmButton = {},
