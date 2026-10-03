@@ -150,6 +150,11 @@
     <string name="sign_hint_date">Tap where today\'s date goes. Drag it to move it.</string>
     <string name="sign_hint_text">Tap where you want to type text. Drag it to move it.</string>
     <string name="sign_hint_checkmark">Tap a box to tick it. Drag the tick to move it.</string>
+    <string name="edit_hint_edit_text">Tap a line of text to change its words. It keeps its font, size and colour where the PDF allows.</string>
+    <string name="edit_text_title">Edit text</string>
+    <string name="edit_text_hint">The words of this line</string>
+    <string name="edit_text_none">No editable text there. Scanned pages are pictures, so they have no text to change.</string>
+    <string name="edit_text_other_font">That font could not draw every letter, so this line now uses the built-in font.</string>
     <string name="edit_hint_text">Tap where the text goes. Drag it to move it, or its corner to resize.</string>
     <string name="image_failed">Could not open that picture.</string>
     <string name="stamp_delete">Delete</string>
@@ -358,6 +363,7 @@
     <string name="tool_about_signature">Draw your signature once, then tap to place it.</string>
     <string name="tool_about_initials">Draw your initials once, then tap to place them.</string>
     <string name="tool_about_date">Add today\'s date.</string>
+    <string name="tool_about_edit_text">Change the words of a line that is already in the PDF.</string>
     <string name="tool_about_add_text">Type a heading, label or note straight onto the page.</string>
     <string name="tool_about_add_image">Put a photo, logo or picture on the page and size it.</string>
     <string name="tool_about_text">Type a name, address or answer onto the page.</string>
@@ -385,6 +391,7 @@
     <string name="tool_synonyms_signature">sign, signing, autograph, e-sign, esign, electronic signature</string>
     <string name="tool_synonyms_initials">initial, sign</string>
     <string name="tool_synonyms_date">today, day, time</string>
+    <string name="tool_synonyms_edit_text">change, correct, fix, typo, rewrite, replace, existing text</string>
     <string name="tool_synonyms_add_text">type, write, words, label, heading, edit</string>
     <string name="tool_synonyms_add_image">picture, photo, logo, insert, gallery, edit</string>
     <string name="tool_synonyms_text">type, write, fill, form, name, address</string>
@@ -454,7 +461,7 @@
     <string name="tip_annotate">Pick a tool, then mark the page. Pick it again to scroll with one finger.</string>
     <string name="tip_sign">Pick Signature, then tap where you want to sign. You draw it once; it is saved on this phone.</string>
     <string name="tip_pages">Tap a page to select it, or tap the circles to pick several. Hold a page and drag it to move it.</string>
-    <string name="tip_edit">Add text or a picture, then drag it into place. Done writes it into the PDF.</string>
+    <string name="tip_edit">Add text or a picture and drag it into place, or tap Edit text to change a line already in the PDF. Done writes it in.</string>
     <string name="tip_got_it">Got it</string>
     <string name="settings_tips">Tips</string>
     <string name="settings_show_tips">Show tips</string>
