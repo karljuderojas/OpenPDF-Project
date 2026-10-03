@@ -68,6 +68,26 @@ class DocumentsTest {
     }
 
     @Test
+    fun leavingTheOpenListIsReportedHoweverItHappens() {
+        val closed = ArrayList<String>()
+        val documents = Documents(prefs, { time++ }, onClosed = closed::add)
+        (1..9).forEach { documents.opened("content://$it", "$it.pdf", remember = false) }
+        assertEquals(listOf("content://1"), closed)
+
+        documents.close("content://5")
+        documents.close("content://5")
+        assertEquals(listOf("content://1", "content://5"), closed)
+
+        // Reopening a document that is already open is not a close.
+        documents.opened("content://9", "9.pdf", remember = false)
+        assertEquals(2, closed.size)
+
+        documents.closeAll()
+        assertEquals(9, closed.size)
+        assertEquals(emptyList<DocumentEntry>(), documents.open.value)
+    }
+
+    @Test
     fun closeAllEmptiesOpenDocumentsButKeepsHistory() {
         val documents = documents()
         documents.opened("content://a", "A.pdf", remember = true)
