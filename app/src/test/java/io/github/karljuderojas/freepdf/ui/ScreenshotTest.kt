@@ -16,6 +16,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
 import androidx.compose.ui.unit.IntRect
+import androidx.core.content.res.ResourcesCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
@@ -27,6 +28,7 @@ import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
+import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
 import io.github.karljuderojas.freepdf.ui.home.HomeContent
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
@@ -38,6 +40,7 @@ import io.github.karljuderojas.freepdf.ui.viewer.ViewerState
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.util.Calendar
@@ -217,6 +220,30 @@ class ScreenshotTest {
         }
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_pad.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerSignPadTyped() {
+        show { viewer(ViewerMode.Sign, signerName = "Dana Whitfield") }
+        composeRule.onNodeWithText("Signature").performClick()
+        composeRule.onNodeWithTag("pad-tab-type").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_pad_typed.png")
+    }
+
+    @Test
+    fun viewerSignPlacingTyped() {
+        val typeface = ResourcesCompat.getFont(RuntimeEnvironment.getApplication(), R.font.dancing_script)!!
+        capture("viewer_sign_placing_typed") {
+            viewer(
+                ViewerMode.Sign,
+                tool = R.string.tool_signature,
+                savedSignatures = mapOf(
+                    SignatureStore.Kind.Signature to TypedSignature.render("Dana Whitfield", typeface, 0xFF1A3FA8.toInt()),
+                ),
+            )
+        }
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
