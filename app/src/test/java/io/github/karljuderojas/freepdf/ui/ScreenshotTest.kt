@@ -161,6 +161,20 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerReadOpenDocs() = capture("viewer_read_open_docs") {
+        viewer(ViewerMode.Read, openDocuments = sampleRecent.take(3))
+    }
+
+    @Test
+    fun viewerSwitcher() {
+        show { viewer(ViewerMode.Read, openDocuments = sampleRecent.take(3)) }
+        composeRule.onNodeWithTag("open-documents").performClick()
+        composeRule.waitForIdle()
+        // The sheet is its own window, so capture the whole screen rather than the root node.
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_switcher.png")
+    }
+
+    @Test
     fun viewerUnsaved() = capture("viewer_read_unsaved") {
         viewer(ViewerMode.Read, sample.copy(canUndo = true, hasUnsavedChanges = true))
     }
@@ -571,6 +585,7 @@ class ScreenshotTest {
         toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
         search: SearchResults = SearchResults(),
         searchQuery: String? = null,
+        openDocuments: List<DocumentEntry> = emptyList(),
         stamps: List<PlacedStamp> = emptyList(),
         selectedStamp: Long? = null,
         onAction: (ViewerAction) -> Unit = {},
@@ -589,6 +604,8 @@ class ScreenshotTest {
             toolStyles = toolStyles,
             search = search,
             initialSearchQuery = searchQuery,
+            openDocuments = openDocuments,
+            currentUri = openDocuments.firstOrNull()?.uri,
             stamps = stamps,
             initialSelectedStamp = selectedStamp,
             onAction = onAction,
