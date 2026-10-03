@@ -62,7 +62,9 @@ import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDResources
 import com.tom_roush.pdfbox.pdmodel.common.PDStream
 import com.tom_roush.pdfbox.pdmodel.font.PDFont
+import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
+import com.tom_roush.pdfbox.pdmodel.graphics.form.PDTransparencyGroup
 import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
 import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImage
@@ -72,6 +74,8 @@ import com.tom_roush.pdfbox.util.Vector
 import io.github.karljuderojas.freepdf.pdf.PdfRect
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.util.Collections
+import java.util.IdentityHashMap
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -115,9 +119,23 @@ internal class PageRedactor(
     /** Text that was removed, as runs and words, lower case; used to find the same words in metadata. */
     val fragments = LinkedHashSet<String>()
 
+    /** True when some removed glyphs had no known Unicode value, so [fragments] may miss words. */
+    var unreadableText = false
+        private set
+
+    /** The pictures and forms this page drew that were swapped for a rewritten copy, or dropped. */
+    val replacedObjects: MutableSet<COSBase> = Collections.newSetFromMap(IdentityHashMap())
+
+    // The run of removed text being collected; it continues across show operators until a kept glyph.
+    private val removedRun = StringBuilder()
+
     /** The stream being written (the page's, or a form copy's), where new resources go and what was replaced. */
     private class Frame(val tokens: MutableList<Any>, val target: PDResources) {
         val replaced = ArrayList<COSName>()
+
+        // Open marked-content sequences: where each one's property list is in [tokens] (-1 for
+        // none), and how much had been removed when it began.
+        val marked = ArrayList<Pair<Int, Int>>()
     }
 
     private class Glyph(
@@ -173,6 +191,7 @@ internal class PageRedactor(
         page.resources = resources
         frames += Frame(ArrayList(), resources)
         processPage(page)
+        flushRun()
         val done = frames.removeAt(frames.lastIndex)
         dropReplaced(done)
         val contents = PDStream(document)
@@ -195,9 +214,22 @@ internal class PageRedactor(
                 super.processOperator(operator, operands)
                 if (inlineHit) stats.pictures++ else emit(operands, operator)
             }
-            "BDC" -> {
+            // Marked content may carry the text it shows a second time, as /ActualText or /Alt.
+            // That is taken out at EMC if something inside the sequence was removed.
+            "BDC", "BMC" -> {
                 super.processOperator(operator, operands)
-                emit(operands.map { if (it is COSDictionary) withoutAlternateText(it) else it }, operator)
+                val properties = if (operator.name == "BDC" && operands.getOrNull(1) is COSDictionary) frame.tokens.size + 1 else -1
+                frame.marked += properties to removedSoFar()
+                emit(operands, operator)
+            }
+            "EMC" -> {
+                super.processOperator(operator, operands)
+                frame.marked.removeLastOrNull()?.let { (at, before) ->
+                    if (at >= 0 && removedSoFar() > before) {
+                        (frame.tokens[at] as? COSDictionary)?.let { frame.tokens[at] = withoutAlternateText(it) }
+                    }
+                }
+                emit(operands, operator)
             }
             else -> {
                 super.processOperator(operator, operands)
@@ -205,6 +237,8 @@ internal class PageRedactor(
             }
         }
     }
+
+    private fun removedSoFar() = stats.glyphs + stats.pictures + stats.shapes + stats.forms
 
     private fun emit(operands: List<COSBase>, operator: Operator) {
         frame.tokens.addAll(operands)
@@ -221,8 +255,11 @@ internal class PageRedactor(
         } finally {
             collecting = false
         }
-        val font = graphicsState.textState.font
-        if (font == null || glyphs.none { it.hit }) {
+        // With no font set (or one missing from the resources), PdfBox shows the text in Helvetica,
+        // and so do other readers; its codes are read the same way here.
+        val font = graphicsState.textState.font ?: PDType1Font.HELVETICA
+        if (glyphs.none { it.hit }) {
+            if (glyphs.isNotEmpty()) flushRun()
             emit(operands, operator)
             return
         }
@@ -238,7 +275,6 @@ internal class PageRedactor(
         val kept = ByteArrayOutputStream()
         var gap = 0f
         var next = 0
-        val removed = StringBuilder()
 
         fun flushText() {
             if (kept.size() > 0) {
@@ -263,10 +299,12 @@ internal class PageRedactor(
                         if (glyph.hit) {
                             flushText()
                             gap += gapFor(glyph, span)
-                            removed.append(glyph.unicode ?: "")
+                            if (glyph.unicode == null) unreadableText = true
+                            removedRun.append(glyph.unicode ?: "")
                             stats.glyphs++
                         } else {
                             flushGap()
+                            flushRun()
                             kept.write(bytes, span.start, span.length)
                         }
                     }
@@ -274,6 +312,8 @@ internal class PageRedactor(
                 is COSNumber -> {
                     flushText()
                     gap += item.floatValue()
+                    // Typesetters often leave out space glyphs and move the pen instead.
+                    if (item.floatValue() < -WORD_GAP && removedRun.isNotEmpty()) removedRun.append(' ')
                 }
                 else -> Unit
             }
@@ -281,7 +321,6 @@ internal class PageRedactor(
         check(next == glyphs.size) { "Glyph count differs from the string's codes" }
         flushText()
         flushGap()
-        rememberFragments(removed.toString())
         return result
     }
 
@@ -304,7 +343,10 @@ internal class PageRedactor(
         return spans
     }
 
-    private fun rememberFragments(text: String) {
+    /** Ends the run of removed text, remembering it and its words. */
+    private fun flushRun() {
+        val text = removedRun.toString()
+        removedRun.setLength(0)
         val run = text.trim().lowercase()
         if (run.isEmpty()) return
         fragments += run
@@ -345,6 +387,7 @@ internal class PageRedactor(
                     return
                 }
                 frame.replaced += name
+                replacedObjects += xobject.cosObject
                 val blanked = blank(xobject)
                 if (blanked == null) {
                     stats.pictures++
@@ -363,6 +406,7 @@ internal class PageRedactor(
                     emit(operands, operator)
                 } else {
                     frame.replaced += name
+                    replacedObjects += xobject.cosObject
                     stats.forms++
                     frame.tokens.add(frame.target.add(copy))
                     frame.tokens.add(operator)
@@ -376,7 +420,15 @@ internal class PageRedactor(
     }
 
     /** Called for a form that is drawn: copies and rewrites it if it reaches an area, else leaves [formCopy] empty. */
-    override fun showForm(form: PDFormXObject) {
+    override fun showForm(form: PDFormXObject) = rewrite(form)
+
+    /**
+     * Forms with a transparency group (how Word, Chrome and Illustrator often wrap a page's text)
+     * come here instead of [showForm], and get the same treatment.
+     */
+    override fun showTransparencyGroup(form: PDTransparencyGroup) = rewrite(form)
+
+    private fun rewrite(form: PDFormXObject) {
         val box = formBox(form)
         if (box == null || areas.none { overlaps(box, it) }) {
             formCopy = null
@@ -384,6 +436,7 @@ internal class PageRedactor(
         }
         val resources = copyOf(form.resources)
         frames += Frame(ArrayList(), resources)
+        // PDFStreamEngine.showForm plays the form's stream with its matrix and clip, whatever its kind.
         super.showForm(form)
         val done = frames.removeAt(frames.lastIndex)
         dropReplaced(done)
@@ -464,6 +517,9 @@ internal class PageRedactor(
         if (image.suffix == "jpg") JPEGFactory.createFromImage(document, blanked, 0.92f)
         else LosslessFactory.createFromImage(document, blanked)
     } catch (_: Exception) {
+        null
+    } catch (_: OutOfMemoryError) {
+        // A picture too big to decode here is removed whole rather than kept.
         null
     }
 
@@ -609,13 +665,24 @@ internal class PageRedactor(
          * True when [area] covers a real part of a glyph's [box]: a tenth of its width at least, so a
          * glyph that only touches the area's edge (the letter after a marked word) is left alone.
          */
-        fun cuts(box: PdfRect, area: PdfRect): Boolean {
+        fun cuts(glyph: PdfRect, area: PdfRect): Boolean {
+            // A glyph with no width (or no height) is a point or a line; give it a little so it can be hit.
+            val box = PdfRect(
+                if (glyph.width < MIN_GLYPH) glyph.left - MIN_GLYPH / 2 else glyph.left,
+                if (glyph.height < MIN_GLYPH) glyph.bottom - MIN_GLYPH / 2 else glyph.bottom,
+                if (glyph.width < MIN_GLYPH) glyph.left + MIN_GLYPH / 2 else glyph.right,
+                if (glyph.height < MIN_GLYPH) glyph.bottom + MIN_GLYPH / 2 else glyph.top,
+            )
             val across = minOf(box.right, area.right) - maxOf(box.left, area.left)
             val down = minOf(box.top, area.top) - maxOf(box.bottom, area.bottom)
             return down > 0f && across > 0f && across >= box.width * GLYPH_SHARE
         }
 
         const val GLYPH_SHARE = 0.1f
+        const val MIN_GLYPH = 0.2f
+
+        // A TJ move left of more than this (thousandths of an em) inside removed text counts as a space.
+        const val WORD_GAP = 200f
 
         fun overlaps(a: PdfRect, b: PdfRect) = a.left < b.right && a.right > b.left && a.bottom < b.top && a.top > b.bottom
 

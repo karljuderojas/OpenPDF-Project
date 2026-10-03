@@ -1,8 +1,8 @@
 package io.github.karljuderojas.freepdf.pdf.redact
 
-import android.graphics.Bitmap
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tom_roush.pdfbox.contentstream.operator.Operator
+import com.tom_roush.pdfbox.cos.COSFloat
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.pdfparser.PDFStreamParser
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -11,7 +11,7 @@ import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.common.PDStream
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
-import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
+import com.tom_roush.pdfbox.pdmodel.graphics.color.PDDeviceRGB
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationText
 import com.tom_roush.pdfbox.text.PDFTextStripper
@@ -41,12 +41,6 @@ import java.io.File
 class RedactorTest {
 
     private val helvetica = PDType1Font.HELVETICA
-
-    private companion object {
-        const val RED = 0xFFFF0000.toInt()
-        const val GREEN = 0xFF00FF00.toInt()
-        const val BLACK = 0xFF000000.toInt()
-    }
 
     // ---- helpers ----
 
@@ -288,11 +282,24 @@ class RedactorTest {
 
     // ---- pictures ----
 
-    /** A [size] x [size] picture whose left half is red and right half green. */
+    /** A [size] x [size] picture stored as plain RGB samples: left half red (255, 0, 0), right half green (0, 255, 0). */
     private fun twoColourPicture(document: PDDocument, size: Int = 100): PDImageXObject {
-        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        for (y in 0 until size) for (x in 0 until size) bitmap.setPixel(x, y, if (x < size / 2) RED else GREEN)
-        return LosslessFactory.createFromImage(document, bitmap)
+        val samples = ByteArray(size * size * 3)
+        for (y in 0 until size) for (x in 0 until size) {
+            val at = (y * size + x) * 3
+            if (x < size / 2) samples[at] = 255.toByte() else samples[at + 1] = 255.toByte()
+        }
+        val deflated = java.io.ByteArrayOutputStream().also { out ->
+            java.util.zip.DeflaterOutputStream(out).use { it.write(samples) }
+        }.toByteArray()
+        return PDImageXObject(document, ByteArrayInputStream(deflated), COSName.FLATE_DECODE, size, size, 8, PDDeviceRGB.INSTANCE)
+    }
+
+    /** The red, green and blue samples (0..255) of the pixel at ([x], [y]) as stored in the file, whatever the encoding. */
+    private fun storedPixel(picture: PDImageXObject, x: Int, y: Int): List<Int> {
+        val samples = picture.stream.createInputStream().use { it.readBytes() }
+        val at = (y * picture.width + x) * 3
+        return listOf(samples[at], samples[at + 1], samples[at + 2]).map { it.toInt() and 0xFF }
     }
 
     @Test
@@ -311,13 +318,12 @@ class RedactorTest {
                 // The original picture is gone from the file; only the new one is left.
                 assertEquals(1, resources.xObjectNames.count())
                 val picture = resources.getXObject(resources.xObjectNames.first()) as PDImageXObject
-                val pixels = picture.image
-                assertEquals(100, pixels.width)
-                assertEquals(BLACK, pixels.getPixel(10, 10))
-                assertEquals(BLACK, pixels.getPixel(48, 48))
+                assertEquals(100, picture.width)
+                assertEquals(listOf(0, 0, 0), storedPixel(picture, 10, 10))
+                assertEquals(listOf(0, 0, 0), storedPixel(picture, 48, 48))
                 // Below the area, and to the right of it, the picture is as it was.
-                assertEquals(RED, pixels.getPixel(10, 80))
-                assertEquals(GREEN, pixels.getPixel(80, 10))
+                assertEquals(listOf(255, 0, 0), storedPixel(picture, 10, 80))
+                assertEquals(listOf(0, 255, 0), storedPixel(picture, 80, 10))
             }
         }
     }
@@ -332,7 +338,7 @@ class RedactorTest {
             roundTrip(source).use { saved ->
                 val resources = saved.getPage(0).resources
                 val picture = resources.getXObject(resources.xObjectNames.first()) as PDImageXObject
-                assertEquals(RED, picture.image.getPixel(10, 10))
+                assertEquals(listOf(255, 0, 0), storedPixel(picture, 10, 10))
             }
         }
     }
@@ -394,8 +400,205 @@ class RedactorTest {
                 assertEquals("Keep me", annotations.single().contents)
                 assertNull(saved.documentInformation.title)
                 assertEquals("Records office", saved.documentInformation.author)
-                assertFalse(String(ByteArrayOutputStream().also { saved.save(it) }.toByteArray(), Charsets.ISO_8859_1).contains("Zebediah"))
+                assertFalse(everythingIn(saved).contains("Zebediah"))
             }
+        }
+    }
+
+    // ---- leaks found in review: each must leave nothing that can be read back ----
+
+    /**
+     * Everything a reader could dig out of [document] once saved: the file's bytes, with every
+     * stream in it decoded (content, forms, fonts, pictures, metadata), not just the page text.
+     */
+    private fun everythingIn(document: PDDocument): String {
+        val bytes = ByteArrayOutputStream().also { document.save(it) }.toByteArray()
+        val all = StringBuilder(String(bytes, Charsets.ISO_8859_1))
+        PDDocument.load(bytes).use { saved ->
+            for (entry in saved.document.objects) {
+                val stream = entry.`object` as? com.tom_roush.pdfbox.cos.COSStream ?: continue
+                runCatching { stream.createInputStream().use { all.append(String(it.readBytes(), Charsets.ISO_8859_1)) } }
+            }
+        }
+        return all.toString()
+    }
+
+    /** The pixel at (10, 10) of every colour picture left anywhere in the saved [document], reachable or not from a page. */
+    private fun picturesIn(document: PDDocument): List<List<Int>> {
+        val bytes = ByteArrayOutputStream().also { document.save(it) }.toByteArray()
+        return PDDocument.load(bytes).use { saved ->
+            saved.document.objects.mapNotNull { entry ->
+                val stream = entry.`object` as? com.tom_roush.pdfbox.cos.COSStream ?: return@mapNotNull null
+                if (stream.getCOSName(COSName.SUBTYPE) != COSName.IMAGE) return@mapNotNull null
+                // Only colour pictures: an alpha mask saved alongside a copy holds no picture.
+                if (stream.getCOSName(COSName.COLORSPACE) != COSName.DEVICERGB) return@mapNotNull null
+                storedPixel(PDImageXObject(PDStream(stream), null), 10, 10)
+            }
+        }
+    }
+
+    @Test
+    fun rewritesFormsThatAreTransparencyGroups() {
+        PDDocument().use { source ->
+            val form = PDFormXObject(source)
+            form.bBox = PDRectangle(0f, 0f, 300f, 100f)
+            form.resources = com.tom_roush.pdfbox.pdmodel.PDResources().also { it.put(COSName.getPDFName("F1"), helvetica) }
+            form.cosObject.setItem(COSName.GROUP, com.tom_roush.pdfbox.cos.COSDictionary().apply { setItem(COSName.S, COSName.TRANSPARENCY) })
+            form.stream.createOutputStream().use { it.write("BT /F1 12 Tf 10 50 Td (grouped secret) Tj ET".toByteArray()) }
+            val page = source.addPage("q 1 0 0 1 100 400 cm /Fm1 Do Q")
+            page.resources.put(COSName.getPDFName("Fm1"), form)
+
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(105f, 445f, 400f, 470f))))
+            assertEquals(1, result.forms)
+            roundTrip(source).use { assertFalse(textOf(it).contains("secret")) }
+            assertFalse(everythingIn(source).contains("grouped secret"))
+        }
+    }
+
+    @Test
+    fun leavesNoOriginalPictureBehindWhenResourcesAreInherited() {
+        PDDocument().use { source ->
+            val page = source.addPage("q 200 0 0 200 100 400 cm /Im1 Do Q")
+            // The page has no resources of its own: they live on the page tree, as many scanners write them.
+            val shared = com.tom_roush.pdfbox.pdmodel.PDResources()
+            shared.put(COSName.getPDFName("Im1"), twoColourPicture(source))
+            page.cosObject.removeItem(COSName.RESOURCES)
+            source.pages.cosObject.setItem(COSName.RESOURCES, shared)
+            assertEquals(listOf(listOf(255, 0, 0)), picturesIn(source))
+
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(100f, 500f, 200f, 600f))))
+            assertEquals(1, result.pictures)
+            // Only the blanked copy is left in the file: the red corner is nowhere to be found.
+            assertEquals(listOf(listOf(0, 0, 0)), picturesIn(source))
+        }
+    }
+
+    @Test
+    fun removesTextSetInAFontTheFileDoesNotHave() {
+        PDDocument().use { source ->
+            source.addPage("BT /F9 12 Tf 72 700 Td (lostfont secret) Tj ET")
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(60f, 690f, 400f, 720f))))
+            assertTrue(result.textCharacters > 0)
+            assertFalse(everythingIn(source).contains("lostfont"))
+        }
+    }
+
+    @Test
+    fun removesZeroWidthText() {
+        PDDocument().use { source ->
+            // Squeezed to no width: invisible on screen, still there for copy and search.
+            source.addPage("BT /F1 12 Tf 0 Tz 100 700 Td (squeezed secret) Tj 100 Tz 0 -40 Td (visible line) Tj ET")
+            Redactor.redact(source, mapOf(0 to listOf(PdfRect(95f, 695f, 110f, 712f))))
+            val everything = everythingIn(source)
+            assertFalse(everything.contains("squeezed"))
+            assertTrue(everything.contains("visible line"))
+        }
+    }
+
+    @Test
+    fun clearsTheTitleWhenTheRemovedTextCannotBeRead() {
+        PDDocument().use { source ->
+            // A Type 3 font whose glyph names mean nothing, with no ToUnicode map: the letters are unknown.
+            val glyph = PDStream(source, ByteArrayInputStream("500 0 d0 0 0 400 600 re f".toByteArray()))
+            val font = com.tom_roush.pdfbox.cos.COSDictionary().apply {
+                setItem(COSName.TYPE, COSName.FONT)
+                setItem(COSName.SUBTYPE, COSName.TYPE3)
+                setItem(COSName.FONT_BBOX, PDRectangle(0f, 0f, 1000f, 1000f).cosArray)
+                setItem(COSName.FONT_MATRIX, com.tom_roush.pdfbox.cos.COSArray().apply {
+                    listOf(0.001f, 0f, 0f, 0.001f, 0f, 0f).forEach { add(COSFloat(it)) }
+                })
+                setItem(COSName.CHAR_PROCS, com.tom_roush.pdfbox.cos.COSDictionary().apply { setItem(COSName.getPDFName("g7"), glyph) })
+                setItem(COSName.ENCODING, com.tom_roush.pdfbox.cos.COSDictionary().apply {
+                    setItem(COSName.DIFFERENCES, com.tom_roush.pdfbox.cos.COSArray().apply {
+                        add(com.tom_roush.pdfbox.cos.COSInteger.get(65)); add(COSName.getPDFName("g7"))
+                    })
+                })
+                setInt(COSName.FIRST_CHAR, 65)
+                setInt(COSName.LAST_CHAR, 65)
+                setItem(COSName.WIDTHS, com.tom_roush.pdfbox.cos.COSArray().apply { add(COSFloat(500f)) })
+            }
+            val page = source.addPage("BT /T3 12 Tf 72 700 Td (AAAA) Tj ET")
+            page.resources.cosObject.getCOSDictionary(COSName.FONT).setItem(COSName.getPDFName("T3"), font)
+            source.documentInformation.title = "Payroll for Zebediah"
+            source.documentInformation.author = "Records office"
+
+            Redactor.redact(source, mapOf(0 to listOf(PdfRect(60f, 690f, 200f, 720f))))
+            roundTrip(source).use { saved ->
+                assertNull(saved.documentInformation.title)
+                assertEquals("Records office", saved.documentInformation.author)
+            }
+        }
+    }
+
+    @Test
+    fun findsWordsShownOneLetterAtATimeInTheMetadata() {
+        PDDocument().use { source ->
+            val letters = "Zebediah".map { "($it) Tj" }.joinToString(" ")
+            source.addPage("BT /F1 12 Tf 72 700 Td (Client: ) Tj $letters ET")
+            source.documentInformation.title = "Statement for Zebediah"
+            source.documentInformation.subject = "Monthly statement"
+            val start = xOf(source, "Zebediah")
+            Redactor.redact(source, mapOf(0 to listOf(PdfRect(start + 0.5f, 695f, start + 60f, 712f))))
+            roundTrip(source).use { saved ->
+                assertNull(saved.documentInformation.title)
+                assertEquals("Monthly statement", saved.documentInformation.subject)
+            }
+            assertFalse(everythingIn(source).contains("Zebediah"))
+        }
+    }
+
+    @Test
+    fun removesLinksInTheAreaWithWhereTheyLead() {
+        PDDocument().use { source ->
+            val page = source.addPage("BT /F1 12 Tf 72 700 Td (Write to the clinic) Tj ET")
+            val link = com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink().apply {
+                rectangle = PDRectangle(72f, 695f, 100f, 15f)
+                action = com.tom_roush.pdfbox.pdmodel.interactive.action.PDActionURI().apply { uri = "mailto:hidden.patient@example.org" }
+            }
+            page.annotations = listOf(link)
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(70f, 690f, 180f, 715f))))
+            assertEquals(1, result.annotations)
+            assertFalse(everythingIn(source).contains("hidden.patient"))
+        }
+    }
+
+    @Test
+    fun removesFormFieldsInTheAreaAndTheirValues() {
+        PDDocument().use { source ->
+            val page = source.addPage("BT /F1 12 Tf 72 700 Td (SSN:) Tj ET")
+            val form = com.tom_roush.pdfbox.pdmodel.interactive.form.PDAcroForm(source)
+            source.documentCatalog.acroForm = form
+            val field = com.tom_roush.pdfbox.pdmodel.interactive.form.PDTextField(form).apply { partialName = "ssn" }
+            // Set the value directly, as a filled-in form stores it, so no appearance is generated here.
+            field.cosObject.setString(COSName.V, "987-65-4321")
+            val widget = field.widgets.single().apply {
+                rectangle = PDRectangle(110f, 695f, 120f, 18f)
+                setPage(page)
+            }
+            page.annotations = listOf(widget)
+            form.fields = listOf(field)
+
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(105f, 690f, 240f, 716f))))
+            assertEquals(1, result.annotations)
+            roundTrip(source).use { saved ->
+                assertTrue(saved.getPage(0).annotations.isEmpty())
+                assertTrue(saved.documentCatalog.acroForm?.fields.orEmpty().isEmpty())
+            }
+            assertFalse(everythingIn(source).contains("4321"))
+        }
+    }
+
+    @Test
+    fun stripsAlternateTextOnlyFromMarkedContentInTheArea() {
+        PDDocument().use { source ->
+            source.addPage(
+                "/Span <</ActualText (kept words)>> BDC BT /F1 12 Tf 72 700 Td (outside) Tj ET EMC " +
+                    "/Span <</ActualText (secret words)>> BDC BT /F1 12 Tf 72 500 Td (inside) Tj ET EMC",
+            )
+            Redactor.redact(source, mapOf(0 to listOf(PdfRect(60f, 490f, 200f, 520f))))
+            val everything = everythingIn(source)
+            assertTrue(everything.contains("kept words"))
+            assertFalse(everything.contains("secret words"))
         }
     }
 

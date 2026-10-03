@@ -114,6 +114,7 @@ sealed interface ViewerState {
      * indexes of those signed so far (signatures still being placed are not counted here).
      * [failedPageEdits] counts the page edits (moves, deletions, rotations, inserts, merges)
      * that left the document as it was, so Pages mode can put its selection back after one.
+     * [redactionsSaved] counts the redacted copies saved, so Redact can clear the marks it applied.
      */
     data class Ready(
         val pageSizes: List<PageSize>,
@@ -129,6 +130,7 @@ sealed interface ViewerState {
         val signedFields: Set<Int> = emptySet(),
         val signatures: List<SignatureReport> = emptyList(),
         val failedPageEdits: Int = 0,
+        val redactionsSaved: Int = 0,
     ) : ViewerState
 
     /** The PDF is password protected; [wrongPassword] after a password that did not open it. */
@@ -233,6 +235,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     /** See [ViewerState.Ready.failedPageEdits]. */
     private var failedPageEdits = 0
+
+    /** See [ViewerState.Ready.redactionsSaved]. */
+    private var redactionsSaved = 0
 
     /** The finished signed copy, in the cache, waiting for the user to pick where it goes. */
     private var pendingSignedCopy: File? = null
@@ -1090,6 +1095,10 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             }
+            if (result.isSuccess) {
+                redactionsSaved++
+                _state.update { if (it is ViewerState.Ready) it.copy(redactionsSaved = redactionsSaved) else it }
+            }
             val message = result.fold(
                 onSuccess = { if (it.foundNothing) R.string.redact_saved_blank else R.string.redact_saved },
                 onFailure = { R.string.redact_failed },
@@ -1435,7 +1444,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         return ViewerState.Ready(
             next.pageSizes, revision, current.canUndo, current.canRedo, current.hasUnsavedChanges, hasSignature, outline,
             isProtected = current.password.isNotEmpty(), formFields = formFields, signFields = places, signedFields = signed,
-            signatures = signatures, failedPageEdits = failedPageEdits,
+            signatures = signatures, failedPageEdits = failedPageEdits, redactionsSaved = redactionsSaved,
         )
     }
 

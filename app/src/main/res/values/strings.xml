@@ -467,8 +467,8 @@
     </plurals>
     <string name="redact_confirm_body">FreePDF saves a new copy with the text, pictures and drawings under each marked area removed from the file, not just covered, and paints the area black. This cannot be undone in the copy. The PDF you have open stays as it is.</string>
     <string name="redact_confirm_action">Save redacted copy</string>
-    <string name="redact_saved">Saved the redacted copy. Your original is unchanged.</string>
-    <string name="redact_saved_blank">Saved a copy with the marked areas painted black. There was no text or artwork under them.</string>
+    <string name="redact_saved">Saved the redacted copy.</string>
+    <string name="redact_saved_blank">Saved the redacted copy. No text, pictures or drawings were found under the marked areas, so they were painted black.</string>
     <string name="redact_failed">Could not save the redacted copy.</string>
     <string name="tool_about_redact">Permanently remove text, pictures and drawings from a copy, and paint over them.</string>
     <string name="tool_synonyms_redact">black out, blackout, censor, remove, hide, erase, private, sensitive, confidential</string>

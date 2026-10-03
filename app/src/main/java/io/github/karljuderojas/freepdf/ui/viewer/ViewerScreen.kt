@@ -584,6 +584,16 @@ fun ViewerContent(
     }
 
     val ready = state as? ViewerState.Ready
+    // Marks are places on the pages as they were drawn: a page edit, an undo or another change
+    // to the document can move what is under them, and a saved redaction has used them. Either
+    // way they go, rather than redact something the user did not mark.
+    var marksMadeOn by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(ready?.revision, ready?.redactionsSaved) {
+        val current = ready ?: return@LaunchedEffect
+        val now = "${current.revision}/${current.redactionsSaved}"
+        if (marksMadeOn != null && marksMadeOn != now) redactions = emptyList()
+        marksMadeOn = now
+    }
     val signedFields = ready?.let { signedPlaces(it, stamps) }.orEmpty()
     val pageCount = ready?.pageSizes?.size ?: 0
     // Stamps still being placed count as changes, for Undo and for offering Finish.
