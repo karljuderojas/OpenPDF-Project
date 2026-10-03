@@ -49,4 +49,14 @@ class DocumentsTest {
         assertEquals(emptyList<DocumentEntry>(), documents.open.value)
         assertEquals(emptyList<DocumentEntry>(), documents.recent.value)
     }
+
+    @Test
+    fun clearingHistoryKeepsOpenDocuments() {
+        val documents = documents()
+        documents.opened("content://a", "A.pdf", remember = true)
+        documents.clearHistory()
+        assertEquals(emptyList<DocumentEntry>(), documents.recent.value)
+        assertEquals(emptyList<DocumentEntry>(), documents().recent.value)
+        assertEquals(listOf("A.pdf"), documents.open.value.map { it.name })
+    }
 }
