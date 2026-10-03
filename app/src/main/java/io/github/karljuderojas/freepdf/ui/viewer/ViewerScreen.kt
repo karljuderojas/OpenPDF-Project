@@ -43,6 +43,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -117,9 +118,9 @@ sealed interface ViewerAction {
     data class InsertBlank(val afterPage: Int) : ViewerAction
     data class Move(val from: Int, val to: Int) : ViewerAction
     data object Merge : ViewerAction
+    data class Share(val option: ShareOption, val pages: List<Int>) : ViewerAction
     data class Extract(val pages: List<Int>) : ViewerAction
     data class Split(val parts: List<List<Int>>) : ViewerAction
-    data object Share : ViewerAction
     data object ShowInfo : ViewerAction
     data object Print : ViewerAction
     data class Search(val query: String) : ViewerAction
@@ -222,6 +223,7 @@ fun ViewerScreen(
                 is ViewerEffect.SaveAs -> saveAsPicker.launch(effect.suggestedName)
                 ViewerEffect.Close -> onBack()
                 is ViewerEffect.Share -> Sharing.shareFile(context, effect.file)
+                is ViewerEffect.ShareImages -> Sharing.shareImages(context, effect.files, effect.title)
                 is ViewerEffect.Print -> Printing.print(context, effect.file, effect.name, effect.pageCount)
                 is ViewerEffect.SaveSigned -> signedCopyPicker.launch(effect.suggestedName)
                 is ViewerEffect.SaveExtract -> extractPicker.launch(effect.suggestedName)
@@ -257,9 +259,9 @@ fun ViewerScreen(
                 is ViewerAction.InsertBlank -> viewModel.insertBlankPage(action.afterPage)
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
                 ViewerAction.Merge -> mergePicker.launch(arrayOf("application/pdf"))
+                is ViewerAction.Share -> viewModel.share(action.option, action.pages)
                 is ViewerAction.Extract -> viewModel.extract(action.pages)
                 is ViewerAction.Split -> viewModel.split(action.parts)
-                ViewerAction.Share -> viewModel.share()
                 ViewerAction.ShowInfo -> viewModel.documentInfo()
                 ViewerAction.Print -> viewModel.print()
                 is ViewerAction.Search -> viewModel.search(action.query)
@@ -343,6 +345,7 @@ fun ViewerContent(
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(false) }
     var choosingPassword by remember { mutableStateOf(false) }
     // Chosen here so the page preview follows at once; the view model remembers them for next time.
     var styles by remember { mutableStateOf(toolStyles) }
@@ -510,6 +513,9 @@ fun ViewerContent(
                             }) {
                                 Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.search))
                             }
+                            IconButton(onClick = { sharing = true }) {
+                                Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.tool_share))
+                            }
                             if (ready.outline.isNotEmpty()) {
                                 IconButton(onClick = { showingOutline = true }) {
                                     Icon(Icons.Filled.Menu, contentDescription = stringResource(R.string.contents))
@@ -607,7 +613,7 @@ fun ViewerContent(
                 }
                 else -> ToolStrip(mode, selectedTool = null, onToolSelected = {
                     when (it) {
-                        R.string.tool_share -> onAction(ViewerAction.Share)
+                        R.string.tool_share -> sharing = true
                         R.string.tool_password -> choosingPassword = true
                         R.string.tool_info -> onAction(ViewerAction.ShowInfo)
                         R.string.tool_print -> onAction(ViewerAction.Print)
@@ -804,6 +810,18 @@ fun ViewerContent(
                 finishing = false
                 backToReading()
                 onAction(ViewerAction.FinishSigning(name, consentText, seal))
+            },
+        )
+    }
+
+    if (sharing && ready != null) {
+        ShareSheet(
+            pageCount = pageCount,
+            currentPage = currentPage,
+            onDismiss = { sharing = false },
+            onShare = { option, pages ->
+                sharing = false
+                onAction(ViewerAction.Share(option, pages))
             },
         )
     }

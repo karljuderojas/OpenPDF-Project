@@ -50,6 +50,11 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils > /dev/null
           pdftoppm -png -f 1 -l 1 -scale-to 1080 -singlefile \
             app/build/outputs/qa/stamps-on-rotated-page.pdf app/build/outputs/roborazzi/pdf_stamps_on_rotated_page
+      # FlattenerTest flattens a highlight, a drawing, a note and a box into the sample's first page.
+      - name: Render the locked copy
+        run: |
+          pdftoppm -png -f 1 -l 1 -scale-to 1080 -singlefile \
+            app/build/outputs/qa/locked-copy.pdf app/build/outputs/roborazzi/pdf_locked_copy_page
       # SignedCopyTest writes a signed copy of the sample agreement. Show its signing certificate
       # page, and have poppler check the digital signature independently of our own code.
       - name: Render the signing certificate page

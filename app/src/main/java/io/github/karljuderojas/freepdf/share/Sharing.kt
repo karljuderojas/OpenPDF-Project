@@ -42,12 +42,40 @@ object Sharing {
         shareUri(context, uri, file.name)
     }
 
+    /** Shares page images (see [sharedFolder]) together, as one message where the app allows. */
+    fun shareImages(context: Context, files: List<File>, title: String) {
+        val uris = files.map { FileProvider.getUriForFile(context, "${context.packageName}.files", it) }
+        val send = if (uris.size == 1) {
+            Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris[0])
+        } else {
+            Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+        }
+        send.apply {
+            type = "image/jpeg"
+            clipData = ClipData.newRawUri(title, uris[0]).apply { uris.drop(1).forEach { addItem(ClipData.Item(it)) } }
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(send, context.getString(R.string.share_title, title))
+        if (context !is android.app.Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
+    }
+
     /** Where to put a copy for sharing, named [name] so the recipient sees a sensible file name. */
     fun sharedCopy(context: Context, name: String): File {
-        val dir = File(context.cacheDir, "shared").apply { mkdirs() }
-        // One shared copy at a time; older ones are only useful until the share completes.
-        dir.listFiles()?.forEach { it.delete() }
-        val safe = name.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "document.pdf" }
-        return File(dir, if (safe.endsWith(".pdf", ignoreCase = true)) safe else "$safe.pdf")
+        val safe = safeName(name).ifBlank { "document.pdf" }
+        return File(sharedFolder(context), if (safe.endsWith(".pdf", ignoreCase = true)) safe else "$safe.pdf")
     }
+
+    /**
+     * The empty folder that files being shared go in. One share at a time: older files are only
+     * useful until the share completes.
+     */
+    fun sharedFolder(context: Context): File {
+        val dir = File(context.cacheDir, "shared")
+        dir.deleteRecursively()
+        return dir.apply { mkdirs() }
+    }
+
+    /** [name] without characters that file systems refuse. */
+    fun safeName(name: String): String = name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
 }
