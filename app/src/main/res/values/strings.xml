@@ -525,6 +525,8 @@
     <string name="images_making">Making page %1$d of %2$d…</string>
     <string name="images_failed">Could not make the PDF. Check that there is room on your phone and try again.</string>
     <string name="images_default_name">Images</string>
+    <string name="images_unreadable">Page %1$d could not be read</string>
+    <string name="images_unreadable_remove">Remove the pictures that could not be read, then create the PDF.</string>
     <plurals name="images_count">
         <item quantity="one">%1$d picture</item>
         <item quantity="other">%1$d pictures</item>

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
@@ -81,6 +82,7 @@ import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
 import io.github.karljuderojas.freepdf.ui.create.DiscardPagesDialog
 import io.github.karljuderojas.freepdf.ui.create.ImagesToPdfContent
 import io.github.karljuderojas.freepdf.ui.create.ScannerContent
+import io.github.karljuderojas.freepdf.ui.create.moved
 import io.github.karljuderojas.freepdf.ui.create.thumbKey
 import io.github.karljuderojas.freepdf.pdf.scan.Corner
 import io.github.karljuderojas.freepdf.pdf.scan.PageDetector
@@ -195,6 +197,26 @@ class ScreenshotTest {
         val photos = listOf("content://a", "content://b", "content://c")
         val thumbs = photos.zip(listOf(samplePages[0], samplePages[1], samplePages[0])).toMap().mapValues { it.value.asImageBitmap() }
         ImagesToPdfContent(photos, thumbs, PageFit.Picture, 2, false, {}, { _, _ -> }, {}, {}, {}, {})
+    }
+
+    // One picture the phone could not decode: its row says so, and Create waits until it is removed.
+    @Test
+    fun imagesToPdfUnreadable() {
+        val start = listOf("content://a", "content://b", "content://c")
+        val thumbs = mapOf("content://a" to samplePages[0].asImageBitmap(), "content://c" to samplePages[1].asImageBitmap())
+        show {
+            var photos by remember { mutableStateOf(start) }
+            ImagesToPdfContent(photos, thumbs, PageFit.A4, null, false, {}, { from, to -> photos = photos.moved(from, to) }, {}, {}, {}, {}, unreadable = setOf("content://b"))
+        }
+        composeRule.onNodeWithTag("images-create").assertIsNotEnabled()
+        composeRule.onNodeWithText("Page 2 could not be read").assertExists()
+        captureRoot("images_to_pdf_unreadable")
+        // The mark follows the picture when it is moved, not the slot it was in.
+        composeRule.onNodeWithContentDescription("Move page 2 earlier").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Page 1 could not be read").assertExists()
+        composeRule.onNodeWithText("Page 2 could not be read").assertDoesNotExist()
+        composeRule.onNodeWithTag("images-create").assertIsNotEnabled()
     }
 
     // A skewed photo of the sample page on a desk, with the corners the app's own detector finds in it.
