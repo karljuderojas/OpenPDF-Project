@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
@@ -39,6 +40,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -68,6 +71,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -97,6 +101,7 @@ import kotlinx.coroutines.launch
 /** What the viewer asks its view model to do. Page numbers are zero-based. */
 sealed interface ViewerAction {
     data object Undo : ViewerAction
+    data object Redo : ViewerAction
     data object Save : ViewerAction
     data object SaveAndClose : ViewerAction
     data class Rotate(val page: Int) : ViewerAction
@@ -105,15 +110,17 @@ sealed interface ViewerAction {
     data class Move(val from: Int, val to: Int) : ViewerAction
     data object Merge : ViewerAction
     data object Share : ViewerAction
+    data class Search(val query: String) : ViewerAction
     data class Unlock(val password: String) : ViewerAction
 
     /** Locks the PDF with [password], or takes its password off when it is empty. */
     data class SetPassword(val password: String) : ViewerAction
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
-    data class Stroke(val page: Int, val tool: AnnotateTool, val points: List<Offset>) : ViewerAction
-    data class Box(val page: Int, val tool: AnnotateTool, val start: Offset, val end: Offset) : ViewerAction
-    data class Note(val page: Int, val at: Offset, val text: String) : ViewerAction
+    data class Stroke(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val points: List<Offset>) : ViewerAction
+    data class Box(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val start: Offset, val end: Offset) : ViewerAction
+    data class Note(val page: Int, val style: ToolStyle, val at: Offset, val text: String) : ViewerAction
+    data class SetToolStyle(val tool: AnnotateTool, val style: ToolStyle) : ViewerAction
     data class Erase(val page: Int, val at: Offset) : ViewerAction
 
     /** Sign actions. */
@@ -131,12 +138,21 @@ sealed interface ViewerAction {
     data object CommitStamps : ViewerAction
 }
 
+/** Opens [uri] in [initialMode] (Read unless a Home shortcut or the Tools tab asked otherwise). */
 @Composable
-fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = viewModel()) {
+fun ViewerScreen(
+    uri: Uri,
+    onBack: () -> Unit,
+    initialMode: ViewerMode = ViewerMode.Read,
+    initialTool: Int? = null,
+    viewModel: ViewerViewModel = viewModel(),
+) {
     LaunchedEffect(uri) { viewModel.open(uri) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val savedSignatures by viewModel.savedSignatures.collectAsStateWithLifecycle()
     val signerName by viewModel.signerName.collectAsStateWithLifecycle()
+    val toolStyles by viewModel.toolStyles.collectAsStateWithLifecycle()
+    val search by viewModel.search.collectAsStateWithLifecycle()
     val stamps by viewModel.stamps.collectAsStateWithLifecycle()
     val resources = LocalResources.current
     val context = LocalContext.current
@@ -169,13 +185,18 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
         onBack = onBack,
         loadPage = viewModel::page,
         loadRegion = viewModel::pageRegion,
+        initialMode = initialMode,
+        initialTool = initialTool,
         savedSignatures = savedSignatures,
         signerName = signerName,
+        toolStyles = toolStyles,
+        search = search,
         stamps = stamps,
         snackbarHostState = snackbarHostState,
         onAction = { action ->
             when (action) {
                 ViewerAction.Undo -> viewModel.undo()
+                ViewerAction.Redo -> viewModel.redo()
                 ViewerAction.Save -> viewModel.save()
                 ViewerAction.SaveAndClose -> viewModel.save(thenClose = true)
                 is ViewerAction.Rotate -> viewModel.rotatePage(action.page)
@@ -184,9 +205,10 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
                 ViewerAction.Merge -> mergePicker.launch(arrayOf("application/pdf"))
                 ViewerAction.Share -> viewModel.share()
+                is ViewerAction.Search -> viewModel.search(action.query)
                 is ViewerAction.Unlock -> viewModel.unlock(action.password)
                 is ViewerAction.SetPassword -> viewModel.setPassword(action.password)
-                is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.tool.rgb)
+                is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.style)
                 is ViewerAction.Box -> when (action.tool) {
                     AnnotateTool.Highlight -> Annotator.TextMarkup.Highlight
                     AnnotateTool.Underline -> Annotator.TextMarkup.Underline
@@ -194,12 +216,13 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                     else -> null
                 }.let { kind ->
                     if (kind != null) {
-                        viewModel.markText(action.page, action.start, action.end, kind, action.tool.rgb)
+                        viewModel.markText(action.page, action.start, action.end, kind, action.style)
                     } else {
-                        viewModel.shape(action.page, action.start, action.end, action.tool.rgb)
+                        viewModel.shape(action.page, action.start, action.end, action.style)
                     }
                 }
-                is ViewerAction.Note -> viewModel.note(action.page, action.at, action.text)
+                is ViewerAction.Note -> viewModel.note(action.page, action.at, action.text, action.style)
+                is ViewerAction.SetToolStyle -> viewModel.setToolStyle(action.tool, action.style)
                 is ViewerAction.Erase -> viewModel.erase(action.page, action.at)
                 is ViewerAction.SaveSignature -> viewModel.saveSignature(action.kind, action.image, action.method)
                 is ViewerAction.PlaceSignature -> viewModel.placeSignature(action.page, action.at, action.kind)
@@ -229,6 +252,9 @@ fun ViewerContent(
     initialTool: Int? = null,
     savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
     signerName: String = "",
+    toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
+    search: SearchResults = SearchResults(),
+    initialSearchQuery: String? = null,
     stamps: List<PlacedStamp> = emptyList(),
     initialSelectedStamp: Long? = null,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
@@ -246,6 +272,18 @@ fun ViewerContent(
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
     var choosingPassword by remember { mutableStateOf(false) }
+    // Chosen here so the page preview follows at once; the view model remembers them for next time.
+    var styles by remember { mutableStateOf(toolStyles) }
+    LaunchedEffect(toolStyles) { styles = styles + toolStyles }
+    fun styleOf(tool: AnnotateTool) = styles[tool] ?: tool.defaultStyle
+
+    var searching by rememberSaveable { mutableStateOf(initialSearchQuery != null) }
+    var query by rememberSaveable { mutableStateOf(initialSearchQuery.orEmpty()) }
+    var currentMatch by rememberSaveable { mutableIntStateOf(0) }
+    val searchFocus = remember { FocusRequester() }
+    var focusSearch by remember { mutableStateOf(false) }
+    var goingToPage by remember { mutableStateOf(false) }
+    var showingOutline by remember { mutableStateOf(false) }
     var selectedStamp by remember { mutableStateOf(initialSelectedStamp) }
     // A newly placed stamp starts out selected, so its handles show right away.
     var newestStamp by remember { mutableStateOf(stamps.maxOfOrNull { it.id } ?: 0L) }
@@ -306,8 +344,40 @@ fun ViewerContent(
         selectedTool = null
     }
 
-    BackHandler(enabled = mode != ViewerMode.Read || ready?.hasUnsavedChanges == true) {
-        if (mode != ViewerMode.Read) backToReading() else leave()
+    fun closeSearch() {
+        searching = false
+        query = ""
+        onAction(ViewerAction.Search(""))
+    }
+
+    // Typing pauses briefly before searching, so each keystroke does not start a new search.
+    LaunchedEffect(query, searching) {
+        if (!searching) return@LaunchedEffect
+        if (query.isNotBlank()) delay(SEARCH_DELAY_MS)
+        if (query.trim() != search.query) onAction(ViewerAction.Search(query))
+    }
+    LaunchedEffect(searching) {
+        if (searching && focusSearch) searchFocus.requestFocus()
+        focusSearch = false
+    }
+    LaunchedEffect(search.query) { currentMatch = 0 }
+    // Bring the current match into view, about a third of the way down the screen.
+    val shownMatch = search.matches.getOrNull(currentMatch)
+    LaunchedEffect(shownMatch?.page, currentMatch, search.query) {
+        val match = shownMatch ?: return@LaunchedEffect
+        val size = ready?.pageSizes?.getOrNull(match.page) ?: return@LaunchedEffect
+        val viewport = listState.layoutInfo.viewportSize
+        val pageHeight = viewport.width / size.aspectRatio
+        val top = match.boxes.minOfOrNull { it.top } ?: 0f
+        listState.animateScrollToItem(match.page, (top * pageHeight - viewport.height / 3f).toInt().coerceAtLeast(0))
+    }
+
+    BackHandler(enabled = mode != ViewerMode.Read || searching || ready?.hasUnsavedChanges == true) {
+        when {
+            mode != ViewerMode.Read -> backToReading()
+            searching -> closeSearch()
+            else -> leave()
+        }
     }
 
     Scaffold(
@@ -315,29 +385,59 @@ fun ViewerContent(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        when {
-                            mode != ViewerMode.Read -> stringResource(mode.label)
-                            ready != null -> stringResource(R.string.page_of, currentPage + 1, pageCount)
-                            else -> stringResource(R.string.app_name)
-                        },
-                    )
+                    when {
+                        mode == ViewerMode.Read && searching -> SearchField(
+                            query = query,
+                            onQueryChange = { query = it },
+                            focusRequester = searchFocus,
+                        )
+                        mode != ViewerMode.Read -> Text(stringResource(mode.label))
+                        // Tapping "Page 3 of 12" asks which page to go to.
+                        ready != null -> Text(
+                            stringResource(R.string.page_of, currentPage + 1, pageCount),
+                            modifier = Modifier
+                                .clickable(onClickLabel = stringResource(R.string.go_to_page)) { goingToPage = true }
+                                .testTag("page-indicator"),
+                        )
+                        else -> Text(stringResource(R.string.app_name))
+                    }
                 },
                 navigationIcon = {
                     if (mode == ViewerMode.Read) {
-                        IconButton(onClick = { leave() }) {
+                        IconButton(onClick = { if (searching) closeSearch() else leave() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                         }
                     }
                 },
                 actions = {
-                    if (mode == ViewerMode.Read) {
+                    if (mode == ViewerMode.Read && searching) {
+                        SearchStepper(search, currentMatch) { step ->
+                            val count = search.matches.size
+                            if (count > 0) currentMatch = (currentMatch + step + count) % count
+                        }
+                    } else if (mode == ViewerMode.Read) {
+                        if (ready != null) {
+                            IconButton(onClick = {
+                                focusSearch = true
+                                searching = true
+                            }) {
+                                Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.search))
+                            }
+                            if (ready.outline.isNotEmpty()) {
+                                IconButton(onClick = { showingOutline = true }) {
+                                    Icon(Icons.Filled.Menu, contentDescription = stringResource(R.string.contents))
+                                }
+                            }
+                        }
                         if (ready?.hasUnsavedChanges == true) {
                             TextButton(onClick = { onAction(ViewerAction.Save) }) { Text(stringResource(R.string.save)) }
                         }
                     } else {
-                        if (canUndo) {
-                            TextButton(onClick = { onAction(ViewerAction.Undo) }) { Text(stringResource(R.string.undo)) }
+                        IconButton(onClick = { onAction(ViewerAction.Undo) }, enabled = canUndo) {
+                            Icon(EditIcons.Undo, contentDescription = stringResource(R.string.undo))
+                        }
+                        IconButton(onClick = { onAction(ViewerAction.Redo) }, enabled = ready?.canRedo == true) {
+                            Icon(EditIcons.Redo, contentDescription = stringResource(R.string.redo))
                         }
                         TextButton(onClick = { backToReading() }) {
                             Text(stringResource(R.string.done))
@@ -355,6 +455,7 @@ fun ViewerContent(
         bottomBar = {
             when {
                 ready == null -> Unit
+                mode == ViewerMode.Read && searching -> Unit
                 mode == ViewerMode.Read -> ModeBar(onModeSelected = {
                     mode = it
                     if (it == ViewerMode.Pages) selectedPage = currentPage
@@ -362,12 +463,20 @@ fun ViewerContent(
                 // Page tools act once on the selected page, so none stays highlighted.
                 mode == ViewerMode.Pages -> ToolStrip(mode, selectedTool = null, onToolSelected = { onPagesTool(it) })
                 // Choosing the active Annotate tool again puts it down, so one finger scrolls again.
-                mode == ViewerMode.Annotate -> ToolStrip(mode, selectedTool, onToolSelected = {
-                    when {
-                        selectedTool == it -> selectedTool = null
-                        else -> selectedTool = it
+                mode == ViewerMode.Annotate -> Column {
+                    AnnotateTool.forLabel(selectedTool)?.takeIf { it.hasStyle }?.let { tool ->
+                        StyleBar(tool, styleOf(tool), onStyleChange = {
+                            styles = styles + (tool to it)
+                            onAction(ViewerAction.SetToolStyle(tool, it))
+                        })
                     }
-                })
+                    ToolStrip(mode, selectedTool, onToolSelected = {
+                        when {
+                            selectedTool == it -> selectedTool = null
+                            else -> selectedTool = it
+                        }
+                    })
+                }
                 mode == ViewerMode.Sign -> Column {
                     SignTool.forLabel(selectedTool)?.let { tool ->
                         SignHint(
@@ -421,6 +530,10 @@ fun ViewerContent(
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
                     val signTool = SignTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Sign }
                     PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState) { page ->
+                        if (mode == ViewerMode.Read && searching) {
+                            val onPage = search.matches.withIndex().filter { it.value.page == page }
+                            if (onPage.isNotEmpty()) SearchHighlights(onPage, currentMatch)
+                        }
                         val pageStamps = if (mode == ViewerMode.Sign) stamps.filter { it.page == page } else emptyList()
                         if (signTool != null || (selectedStamp != null && pageStamps.isNotEmpty())) {
                             TapLayer(page) { at ->
@@ -451,11 +564,14 @@ fun ViewerContent(
                             )
                         }
                         if (tool != null) {
+                            val style = styleOf(tool)
                             AnnotationLayer(
                                 page = page,
                                 tool = tool,
-                                onStroke = { onAction(ViewerAction.Stroke(page, tool, it)) },
-                                onBox = { start, end -> onAction(ViewerAction.Box(page, tool, start, end)) },
+                                style = style,
+                                pageWidthPt = ready.pageSizes[page].widthPt,
+                                onStroke = { onAction(ViewerAction.Stroke(page, tool, style, it)) },
+                                onBox = { start, end -> onAction(ViewerAction.Box(page, tool, style, start, end)) },
                                 onTap = { at ->
                                     if (tool == AnnotateTool.Note) pendingNote = page to at
                                     else onAction(ViewerAction.Erase(page, at))
@@ -466,6 +582,28 @@ fun ViewerContent(
                 }
             }
         }
+    }
+
+    if (goingToPage) {
+        GoToPageDialog(
+            pageCount = pageCount,
+            onDismiss = { goingToPage = false },
+            onGo = {
+                goingToPage = false
+                returnToPage = it
+            },
+        )
+    }
+
+    if (showingOutline && ready != null) {
+        OutlineDialog(
+            outline = ready.outline,
+            onDismiss = { showingOutline = false },
+            onGo = {
+                showingOutline = false
+                returnToPage = it
+            },
+        )
     }
 
     if (confirmDelete) {
@@ -539,7 +677,7 @@ fun ViewerContent(
             onDismiss = { pendingNote = null },
             onAdd = { text ->
                 pendingNote = null
-                onAction(ViewerAction.Note(page, at, text))
+                onAction(ViewerAction.Note(page, styleOf(AnnotateTool.Note), at, text))
             },
         )
     }
@@ -728,7 +866,7 @@ private fun TextEntryDialog(@StringRes title: Int, @StringRes hint: Int, onDismi
     )
 }
 
+private const val SEARCH_DELAY_MS = 300L
+
 /** How long the view must be still before zoomed pages are sharpened. */
 private const val SETTLE_MILLIS = 150L
-
-private val AnnotateTool.rgb get() = Annotator.Rgb(color.red, color.green, color.blue)

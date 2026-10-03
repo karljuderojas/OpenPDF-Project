@@ -65,6 +65,49 @@ class EditSessionTest {
     }
 
     @Test
+    fun redoPutsBackWhatUndoTookAway() {
+        session.edit { PageEditor.insertBlank(it, 1) }
+        session.edit { PageEditor.rotate(it, 0, 90) }
+        session.undo()
+        session.undo()
+        assertTrue(session.canRedo)
+        assertEquals(2, pageCount())
+
+        session.redo()
+        assertEquals(3, pageCount())
+        assertEquals(0, PDDocument.load(session.workingFile).use { it.getPage(0).rotation })
+        session.redo()
+        assertEquals(90, PDDocument.load(session.workingFile).use { it.getPage(0).rotation })
+        assertFalse(session.canRedo)
+        assertTrue(session.canUndo)
+    }
+
+    @Test
+    fun aNewEditDropsWhatCouldBeRedone() {
+        session.edit { PageEditor.insertBlank(it, 1) }
+        session.undo()
+        session.edit { PageEditor.rotate(it, 0, 90) }
+        assertFalse(session.canRedo)
+        session.redo()
+        assertEquals(2, pageCount())
+    }
+
+    @Test
+    fun undoingAndRedoingBackToTheSavedCopyCountsAsSaved() {
+        session.edit { PageEditor.insertBlank(it, 1) }
+        session.writeTo(ByteArrayOutputStream())
+        session.undo()
+        assertTrue(session.hasUnsavedChanges)
+        session.redo()
+        assertFalse(session.hasUnsavedChanges)
+
+        // A different edit after an undo is not the saved copy, even at the same undo depth.
+        session.undo()
+        session.edit { PageEditor.rotate(it, 0, 90) }
+        assertTrue(session.hasUnsavedChanges)
+    }
+
+    @Test
     fun aLockedPdfOpensWithItsPasswordAndStaysLockedAfterEdits() {
         val locked = File(dir, "locked.pdf")
         PDDocument.load(session.workingFile).use { document ->
