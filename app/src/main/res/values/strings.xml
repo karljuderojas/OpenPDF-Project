@@ -501,6 +501,7 @@
     <string name="redact_confirm_action">Save redacted copy</string>
     <string name="redact_saved">Saved the redacted copy.</string>
     <string name="redact_saved_blank">Saved the redacted copy. No text, pictures or drawings were found under the marked areas, so they were painted black.</string>
+    <string name="redact_saved_whole_pictures">Saved the redacted copy. A picture under a marked area could not be edited, so it was removed whole.</string>
     <string name="redact_failed">Could not save the redacted copy.</string>
     <string name="tool_about_redact">Permanently remove text, pictures and drawings from a copy, and paint over them.</string>
     <string name="tool_synonyms_redact">black out, blackout, censor, remove, hide, erase, private, sensitive, confidential</string>
