@@ -12,14 +12,14 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ✅ Pinch to zoom (basic: scales the whole list)
 - ⬜ Proper zoom and pan with sharp re-rendering at high zoom (tiled rendering)
 - ⬜ Text search, outline/bookmarks, go to page, page thumbnails
-- ⬜ Text selection with a Highlight / Underline / Note popup
+- ✅ Text selection: press and hold, drag, then Highlight / Underline / Strike / Note / Copy from a popup
 - ✅ Files tab: documents open this session on top, recent history grouped by Today / Yesterday / Earlier, "Open file" through Android's file picker (stored on the device only)
 - ⬜ Switcher between open documents, tab style
 - ⬜ Night mode, reading settings
 - ⬜ Password-protected PDFs
 
 ## Annotating (Annotate mode)
-- ✅ Highlight, underline, strikeout by dragging over the text (an area, until text selection lands)
+- ✅ Highlight, underline, strikeout by dragging over the text, snapping to whole words (an area on scans)
 - ✅ Pen, rectangles, sticky notes, eraser (tap a mark to remove it)
 - ✅ Sticky tools: one finger draws while a tool is chosen; choose it again to scroll
 - ✅ Undo (shared with page edits)

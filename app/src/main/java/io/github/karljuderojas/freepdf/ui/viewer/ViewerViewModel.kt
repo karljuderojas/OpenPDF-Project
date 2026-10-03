@@ -10,6 +10,7 @@ import android.provider.OpenableColumns
 import android.util.LruCache
 import androidx.annotation.StringRes
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.AndroidViewModel
@@ -28,6 +29,8 @@ import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import io.github.karljuderojas.freepdf.pdf.edit.PdfText
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
+import io.github.karljuderojas.freepdf.pdf.text.PageText
+import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.render.PdfRenderer
 import io.github.karljuderojas.freepdf.pdf.sign.AuditEvent
 import io.github.karljuderojas.freepdf.pdf.sign.AuditTrail
@@ -128,6 +131,10 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     private val context get() = getApplication<Application>()
 
+    // Text positions per page for the current revision, read with PdfBox from the working copy.
+    private val wordCache = HashMap<Int, List<PageWord>>()
+    private var textDocument: PDDocument? = null
+
     private val signatureStore = SignatureStore(File(application.filesDir, "signatures"))
     private val _savedSignatures = MutableStateFlow<Map<SignatureStore.Kind, Bitmap>>(emptyMap())
 
@@ -215,6 +222,26 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         edit { document ->
             Annotator.markText(document, page, listOf(boxOf(document, page, start, end)), kind, style.rgb, style.width)
         }
+
+    /**
+     * Marks text along [lines] (one box per line, as page fractions; see [PageText]). [comment]
+     * becomes the mark's note.
+     */
+    fun markLines(page: Int, lines: List<Rect>, kind: Annotator.TextMarkup, style: ToolStyle, comment: String? = null) =
+        edit { document ->
+            val boxes = lines.map { boxOf(document, page, it.topLeft, it.bottomRight) }
+            Annotator.markText(document, page, boxes, kind, style.rgb, style.width, comment)
+        }
+
+    /** The words on [page] and where they are, for selecting text. Empty for scanned pages. */
+    suspend fun words(page: Int): List<PageWord> = lock.withLock {
+        wordCache[page] ?: withContext(Dispatchers.IO) {
+            runCatching {
+                val document = textDocument ?: PDDocument.load(session?.workingFile ?: error("Nothing is open")).also { textDocument = it }
+                PageText.words(document, page)
+            }.getOrDefault(emptyList())
+        }.also { wordCache[page] = it }
+    }
 
     fun shape(page: Int, start: Offset, end: Offset, style: ToolStyle) = edit { document ->
         Annotator.shape(document, page, boxOf(document, page, start, end), color = style.rgb, lineWidth = style.width)
@@ -520,6 +547,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         renderer?.close()
         renderer = null
         cache.evictAll()
+        textDocument?.close()
+        textDocument = null
+        wordCache.clear()
         revision++
         val next = PdfRenderer.open(context, Uri.fromFile(current.workingFile))
         renderer = next
@@ -548,6 +578,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     override fun onCleared() {
         renderer?.close()
+        textDocument?.close()
         session?.close()
         cache.evictAll()
         pendingSignedCopy?.delete()
