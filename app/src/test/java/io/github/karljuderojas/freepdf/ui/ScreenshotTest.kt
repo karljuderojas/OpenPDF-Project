@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -208,7 +209,26 @@ class ScreenshotTest {
     }
 
     @Test
-    fun viewerMore()= capture("viewer_more") { viewer(ViewerMode.More) }
+    fun viewerMore() = capture("viewer_more") { viewer(ViewerMode.More) }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerShare() {
+        show { viewer(ViewerMode.Read) }
+        composeRule.onNodeWithContentDescription("Share").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_share.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerShareSomePages() {
+        show { viewer(ViewerMode.Read) }
+        composeRule.onNodeWithContentDescription("Share").performClick()
+        composeRule.onNodeWithText("Some pages only").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_share_some_pages.png")
+    }
 
     // 3 Oct 2026, 15:00 on the test machine's clock, so Today and Yesterday group the same way everywhere.
     private val now = Calendar.getInstance().apply { set(2026, Calendar.OCTOBER, 3, 15, 0, 0) }.timeInMillis

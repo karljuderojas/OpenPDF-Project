@@ -49,7 +49,7 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ⬜ Edit existing text (hard; needs font handling)
 
 ## More
-- ✅ Share: send the current PDF, unsaved changes included, to any app through Android's share sheet; also from a Recent row's menu
+- ✅ Share: a sheet (top bar or More) offers the PDF with your changes, a locked copy with marks and form fields flattened into the page, some pages only, or pages as images, then Android's share sheet; a Recent row's menu sends the file as it is
 - ⬜ Print
 - ⬜ Password protect / remove password
 - ⬜ Document info

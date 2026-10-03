@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -89,9 +90,9 @@ sealed interface ViewerAction {
     data class InsertBlank(val afterPage: Int) : ViewerAction
     data class Move(val from: Int, val to: Int) : ViewerAction
     data object Merge : ViewerAction
+    data class Share(val option: ShareOption, val pages: List<Int>) : ViewerAction
     data class Extract(val pages: List<Int>) : ViewerAction
     data class Split(val parts: List<List<Int>>) : ViewerAction
-    data object Share : ViewerAction
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
     data class Stroke(val page: Int, val tool: AnnotateTool, val points: List<Offset>) : ViewerAction
@@ -144,6 +145,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerEffect.SaveAs -> saveAsPicker.launch(effect.suggestedName)
                 ViewerEffect.Close -> onBack()
                 is ViewerEffect.Share -> Sharing.shareFile(context, effect.file)
+                is ViewerEffect.ShareImages -> Sharing.shareImages(context, effect.files, effect.title)
                 is ViewerEffect.SaveSigned -> signedCopyPicker.launch(effect.suggestedName)
                 is ViewerEffect.SaveExtract -> extractPicker.launch(effect.suggestedName)
                 ViewerEffect.PickSplitFolder -> splitFolderPicker.launch(null)
@@ -168,9 +170,9 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.InsertBlank -> viewModel.insertBlankPage(action.afterPage)
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
                 ViewerAction.Merge -> mergePicker.launch(arrayOf("application/pdf"))
+                is ViewerAction.Share -> viewModel.share(action.option, action.pages)
                 is ViewerAction.Extract -> viewModel.extract(action.pages)
                 is ViewerAction.Split -> viewModel.split(action.parts)
-                ViewerAction.Share -> viewModel.share()
                 is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.tool.rgb)
                 is ViewerAction.Box -> when (action.tool) {
                     AnnotateTool.Highlight -> Annotator.TextMarkup.Highlight
@@ -225,6 +227,7 @@ fun ViewerContent(
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(false) }
 
     val ready = state as? ViewerState.Ready
     val pageCount = ready?.pageSizes?.size ?: 0
@@ -297,6 +300,11 @@ fun ViewerContent(
                 },
                 actions = {
                     if (mode == ViewerMode.Read) {
+                        if (ready != null) {
+                            IconButton(onClick = { sharing = true }) {
+                                Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.tool_share))
+                            }
+                        }
                         if (ready?.hasUnsavedChanges == true) {
                             TextButton(onClick = { onAction(ViewerAction.Save) }) { Text(stringResource(R.string.save)) }
                         }
@@ -355,7 +363,7 @@ fun ViewerContent(
                     })
                 }
                 else -> ToolStrip(mode, selectedTool = null, onToolSelected = {
-                    if (it == R.string.tool_share) onAction(ViewerAction.Share)
+                    if (it == R.string.tool_share) sharing = true
                 })
             }
         },
@@ -468,6 +476,18 @@ fun ViewerContent(
                 finishing = false
                 backToReading()
                 onAction(ViewerAction.FinishSigning(name, consentText, seal))
+            },
+        )
+    }
+
+    if (sharing && ready != null) {
+        ShareSheet(
+            pageCount = pageCount,
+            currentPage = currentPage,
+            onDismiss = { sharing = false },
+            onShare = { option, pages ->
+                sharing = false
+                onAction(ViewerAction.Share(option, pages))
             },
         )
     }
