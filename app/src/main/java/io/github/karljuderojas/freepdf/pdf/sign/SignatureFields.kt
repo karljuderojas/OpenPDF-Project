@@ -21,6 +21,16 @@ data class SignField(val page: Int, val box: DisplayRect, val source: Source) {
     /** Whether a signature placed at ([x], [y]) on [page] fills this field. A little below counts: that is the line. */
     fun covers(page: Int, x: Float, y: Float): Boolean =
         page == this.page && x in box.left..box.right && y in box.top..box.bottom + (box.bottom - box.top) / 2
+
+    /** How much of this field's box [other] shares, as a fraction of it: 0 unless both are on the same page and overlap. */
+    fun overlapWith(other: SignField): Float {
+        if (page != other.page) return 0f
+        val width = minOf(box.right, other.box.right) - maxOf(box.left, other.box.left)
+        val height = minOf(box.bottom, other.box.bottom) - maxOf(box.top, other.box.top)
+        if (width <= 0f || height <= 0f) return 0f
+        val area = (box.right - box.left) * (box.bottom - box.top)
+        return if (area > 0f) width * height / area else 0f
+    }
 }
 
 /** Finds where a document wants signatures, for the "2 places to sign" banner and Next field. */
@@ -34,6 +44,32 @@ object SignatureFields {
         }
         return (formFields + cues.map { SignField(it.page, it.box, SignField.Source.TextCue) })
             .sortedWith(compareBy({ it.page }, { it.box.top }, { it.box.left }))
+    }
+
+    /**
+     * Where [field] is in [fields] once they have been found again. The places to sign are found
+     * afresh after pages move, when their order and number can change, so the one Next field went
+     * to is kept by what it is, not by its index: the field on the same page whose box overlaps it
+     * most. Null when [field] is null or no field is there any more.
+     */
+    fun indexOf(fields: List<SignField>, field: SignField?): Int? {
+        if (field == null) return null
+        return fields.withIndex()
+            .map { (index, candidate) -> index to field.overlapWith(candidate) }
+            .filter { (_, overlap) -> overlap > 0f }
+            .maxByOrNull { (_, overlap) -> overlap }
+            ?.first
+    }
+
+    /**
+     * Next field: the first of [fields] not among [signed] (their indexes) after [current], going
+     * round to the start, or the first unsigned one when [current] is gone. Null once all are signed.
+     */
+    fun nextUnsigned(fields: List<SignField>, signed: Set<Int>, current: SignField?): SignField? {
+        val remaining = fields.indices.filter { it !in signed }
+        val from = indexOf(fields, current) ?: -1
+        val next = remaining.firstOrNull { it > from } ?: remaining.firstOrNull() ?: return null
+        return fields[next]
     }
 
     private class Cue(val page: Int, val box: DisplayRect, val label: DisplayRect)
