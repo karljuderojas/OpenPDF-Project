@@ -404,6 +404,7 @@
     <string name="open_documents_close_all">Close all</string>
     <string name="open_documents_open_another">Open another</string>
     <!-- Reading modes -->
+    <string name="side_panel">Pages, contents and comments</string>
     <string name="page_colors">Page colors</string>
     <string name="page_colors_normal">Normal</string>
     <string name="page_colors_night">Night</string>

@@ -210,6 +210,14 @@ fun CommentsSheet(marks: List<Mark>, onDismiss: () -> Unit, onOpen: (Mark) -> Un
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
         )
+        CommentsList(marks, onOpen)
+    }
+}
+
+/** The marks page by page, or a hint when there are none. */
+@Composable
+internal fun CommentsList(marks: List<Mark>, onOpen: (Mark) -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier) {
         if (marks.isEmpty()) {
             Text(
                 stringResource(R.string.comments_empty),
