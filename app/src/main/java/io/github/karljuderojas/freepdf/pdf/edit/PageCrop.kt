@@ -1,7 +1,10 @@
 package io.github.karljuderojas.freepdf.pdf.edit
 
+import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import kotlin.math.abs
 import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.displayToPdf
 
@@ -43,16 +46,52 @@ object PageCrop {
             val b = displayToPdf(1f - margins.right, 1f - margins.bottom, page.rotation, box)
             val left = minOf(a.x, b.x)
             val bottom = minOf(a.y, b.y)
-            page.cropBox = PDRectangle(left, bottom, maxOf(a.x, b.x) - left, maxOf(a.y, b.y) - bottom)
+            val crop = PDRectangle(left, bottom, maxOf(a.x, b.x) - left, maxOf(a.y, b.y) - bottom)
+            page.cropBox = crop
+            // The print boxes, when the page has them, must not reach outside what is shown.
+            PRINT_BOXES.forEach { key ->
+                val printBox = page.cosObject.getCOSArray(key) ?: return@forEach
+                page.cosObject.setItem(key, intersect(PDRectangle(printBox), crop).cosArray)
+            }
         }
     }
 
-    /** Shows [pageIndexes] in full again, as far as the page itself goes (its /MediaBox). */
-    fun reset(document: PDDocument, pageIndexes: Collection<Int>) {
+    /**
+     * Shows [pageIndexes] in full again, as far as the page itself goes (its /MediaBox), and drops
+     * the print boxes that [crop] shrank with it. Returns false when none of the pages was cropped,
+     * so the caller can skip the undo step.
+     */
+    fun reset(document: PDDocument, pageIndexes: Collection<Int>): Boolean {
+        var changed = false
         pageIndexes.toSet().forEach { index ->
             val page = document.getPage(index)
+            if (!isCropped(page)) return@forEach
             val media = page.mediaBox
             page.cropBox = PDRectangle(media.lowerLeftX, media.lowerLeftY, media.width, media.height)
+            PRINT_BOXES.forEach { page.cosObject.removeItem(it) }
+            changed = true
         }
+        return changed
     }
+
+    /** True when [page] shows less than its /MediaBox. */
+    fun isCropped(page: PDPage): Boolean {
+        val crop = page.cropBox
+        val media = page.mediaBox
+        return listOf(
+            crop.lowerLeftX - media.lowerLeftX, crop.lowerLeftY - media.lowerLeftY,
+            crop.upperRightX - media.upperRightX, crop.upperRightY - media.upperRightY,
+        ).any { abs(it) > TOLERANCE }
+    }
+
+    private fun intersect(a: PDRectangle, b: PDRectangle): PDRectangle {
+        val left = maxOf(a.lowerLeftX, b.lowerLeftX)
+        val bottom = maxOf(a.lowerLeftY, b.lowerLeftY)
+        val right = minOf(a.upperRightX, b.upperRightX).coerceAtLeast(left)
+        val top = minOf(a.upperRightY, b.upperRightY).coerceAtLeast(bottom)
+        return PDRectangle(left, bottom, right - left, top - bottom)
+    }
+
+    private val PRINT_BOXES = listOf(COSName.TRIM_BOX, COSName.BLEED_BOX, COSName.ART_BOX)
+    private const val TOLERANCE = 0.01f
 }
