@@ -36,8 +36,18 @@ object PageText {
         val stripper = object : PDFTextStripper() {
             private var line = 0
 
+            // Called once per run of text, which is usually a whole line with its spaces in it,
+            // so the words are split out here at whitespace glyphs.
             override fun writeString(text: String, textPositions: List<TextPosition>) {
-                boxOf(text, textPositions)?.let { words += it }
+                val word = ArrayList<TextPosition>()
+                fun flush() {
+                    if (word.isNotEmpty()) boxOf(word.joinToString("") { it.unicode }, word)?.let { words += it }
+                    word.clear()
+                }
+                textPositions.forEach { glyph ->
+                    if (glyph.unicode.isNullOrBlank()) flush() else word += glyph
+                }
+                flush()
             }
 
             override fun writeLineSeparator() {
@@ -52,7 +62,7 @@ object PageText {
                 val right = horizontal.maxOf { it.textMatrix.translateX + it.widthDirAdj } + crop.left
                 val baseline = horizontal.maxOf { it.textMatrix.translateY } + crop.bottom
                 val size = horizontal.maxOf { glyph ->
-                    glyph.fontSizeInPt.toFloat().takeIf { it > 0f } ?: (glyph.heightDir * 1.4f)
+                    glyph.fontSizeInPt.takeIf { it > 0f } ?: (glyph.heightDir * 1.4f)
                 }
                 // Typical ascender and descender heights, so boxes cover capitals and tails.
                 val top = baseline + size * 0.8f
