@@ -12,6 +12,9 @@ import java.io.OutputStream
  */
 object SignedCopy {
 
+    /** What [write] is busy with, reported through its `onStep` as each begins. */
+    enum class Step { Signing, Timestamping }
+
     /**
      * What the audit page says the record does and does not prove, for a seal by [identity] and
      * signatures that are [locked] into the page or left editable.
@@ -45,8 +48,8 @@ object SignedCopy {
      * result is signed by it in [signerName]'s name, with a trusted timestamp if [timestamps] is
      * given and reachable. With [lock], signatures placed as annotations are drawn into their
      * pages first (see [SignatureAnnotation]). [scratch] is a file this may overwrite. A locked
-     * [source] opens with [password] and the copy stays locked with it. Returns whether the
-     * signature got a timestamp.
+     * [source] opens with [password] and the copy stays locked with it. [onStep] hears, on the
+     * calling thread, when each [Step] begins. Returns whether the signature got a timestamp.
      */
     fun write(
         source: File,
@@ -58,7 +61,9 @@ object SignedCopy {
         password: String = "",
         lock: Boolean = true,
         timestamps: TimestampClient? = null,
+        onStep: (Step) -> Unit = {},
     ): Boolean {
+        onStep(Step.Signing)
         PDDocument.load(source, password).use { document ->
             if (lock) SignatureAnnotation.lock(document)
             AuditPageWriter.append(document, trail, notes(identity, locked = lock))
@@ -72,7 +77,7 @@ object SignedCopy {
             }
             // Signing appends an incremental update, so PdfBox must read from a file.
             return PDDocument.load(scratch, password).use { document ->
-                val signer = DigitalSigner(identity, timestamps)
+                val signer = DigitalSigner(identity, timestamps) { onStep(Step.Timestamping) }
                 signer.sign(document, output, signerName, reason = "Signed with FreePDF")
                 signer.timestamped
             }

@@ -110,6 +110,7 @@ import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
+import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
 import io.github.karljuderojas.freepdf.settings.Tip
 import io.github.karljuderojas.freepdf.print.Printing
 import io.github.karljuderojas.freepdf.settings.PageColors
@@ -119,6 +120,7 @@ import io.github.karljuderojas.freepdf.ui.sign.CertificateDialog
 import io.github.karljuderojas.freepdf.ui.sign.CertificatePasswordDialog
 import io.github.karljuderojas.freepdf.ui.rememberPdfPicker
 import io.github.karljuderojas.freepdf.ui.sign.FinishOptions
+import io.github.karljuderojas.freepdf.ui.sign.FinishProgressDialog
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignatureBanner
 import io.github.karljuderojas.freepdf.ui.sign.SignatureDetailsDialog
@@ -231,6 +233,7 @@ fun ViewerScreen(
     val signerName by viewModel.signerName.collectAsStateWithLifecycle()
     val certificate by viewModel.certificate.collectAsStateWithLifecycle()
     val timestampsOn by viewModel.timestampsOn.collectAsStateWithLifecycle()
+    val finishStep by viewModel.finishing.collectAsStateWithLifecycle()
     var certificateFile by remember { mutableStateOf<Uri?>(null) }
     val toolStyles by viewModel.toolStyles.collectAsStateWithLifecycle()
     val marks by viewModel.marks.collectAsStateWithLifecycle()
@@ -313,6 +316,7 @@ fun ViewerScreen(
         signerName = signerName,
         certificate = certificate,
         timestampsOn = timestampsOn,
+        finishStep = finishStep,
         toolStyles = toolStyles,
         marks = marks,
         search = search,
@@ -437,6 +441,7 @@ fun ViewerContent(
     signerName: String = "",
     certificate: CertificateInfo? = null,
     timestampsOn: Boolean = false,
+    finishStep: SignedCopy.Step? = null,
     initialShowCertificate: Boolean = false,
     initialShowSignatures: Boolean = false,
     toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
@@ -1106,6 +1111,8 @@ fun ViewerContent(
             },
         )
     }
+
+    finishStep?.let { FinishProgressDialog(it) }
 
     if (sharing && ready != null) {
         ShareSheet(

@@ -108,11 +108,37 @@ class SignedCopyTest {
         assertEquals("notes (signed).pdf", SignedCopy.suggestedName("notes"))
     }
 
+    @Test
+    fun reportsEachStepAndSignsWithoutATimestampWhenTheServerIsDown() {
+        val steps = ArrayList<SignedCopy.Step>()
+        val client = TimestampClient(listOf(TestCertificates.deadUrl()), timeoutMs = 2_000)
+        val started = System.currentTimeMillis()
+        val timestamped = write(testIdentity("Dana Whitfield"), "Dana Whitfield", timestamps = client, onStep = { steps.add(it) }).second
+        assertFalse(timestamped)
+        assertEquals(listOf(SignedCopy.Step.Signing, SignedCopy.Step.Timestamping), steps)
+        assertTrue("took ${System.currentTimeMillis() - started} ms", System.currentTimeMillis() - started < 10_000)
+    }
+
+    @Test
+    fun reportsOnlySigningWithoutATimestampClient() {
+        val steps = ArrayList<SignedCopy.Step>()
+        write(testIdentity("Dana Whitfield"), "Dana Whitfield", timestamps = null, onStep = { steps.add(it) })
+        assertEquals(listOf(SignedCopy.Step.Signing), steps)
+    }
+
     /** The last page's text, with line breaks from wrapping folded into spaces. */
     private fun auditText(document: PDDocument): String =
         PDFTextStripper().apply { startPage = 3; endPage = 3 }.getText(document).replace(Regex("\\s+"), " ")
 
-    private fun write(identity: SigningIdentity?, name: String = "Dana Whitfield"): ByteArray {
+    private fun write(identity: SigningIdentity?, name: String = "Dana Whitfield"): ByteArray =
+        write(identity, name, timestamps = null, onStep = {}).first
+
+    private fun write(
+        identity: SigningIdentity?,
+        name: String,
+        timestamps: TimestampClient?,
+        onStep: (SignedCopy.Step) -> Unit,
+    ): Pair<ByteArray, Boolean> {
         val signedAt = Instant.parse("2026-10-03T15:04:00Z")
         val trail = AuditTrail(
             documentName = "agreement.pdf",
@@ -136,8 +162,10 @@ class SignedCopyTest {
             ),
         )
         val output = ByteArrayOutputStream()
-        SignedCopy.write(source, trail, name, identity, output, File(dir, "scratch.pdf"))
-        return output.toByteArray()
+        val timestamped = SignedCopy.write(
+            source, trail, name, identity, output, File(dir, "scratch.pdf"), timestamps = timestamps, onStep = onStep,
+        )
+        return output.toByteArray() to timestamped
     }
 
     /** A software key with a self-signed certificate, standing in for the Keystore one. */
