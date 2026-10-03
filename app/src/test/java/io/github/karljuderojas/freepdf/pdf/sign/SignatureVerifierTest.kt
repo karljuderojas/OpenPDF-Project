@@ -58,6 +58,19 @@ class SignatureVerifierTest {
     }
 
     @Test
+    fun aSignatureWithABrokenByteRangeIsMalformedNotFatal() {
+        val signed = sign(original, TestCertificates.selfSigned("Dana Whitfield"))
+        // Rewrite "/ByteRange [0 a b c]" in place as three entries, keeping the file the same length.
+        val text = String(signed, Charsets.ISO_8859_1)
+        val start = text.indexOf("/ByteRange [")
+        val end = text.indexOf(']', start)
+        val broken = text.substring(0, start) + "/ByteRange [0 10 20".padEnd(end - start, ' ') + text.substring(end)
+        val reports = SignatureVerifier(emptySet()).verify(broken.toByteArray(Charsets.ISO_8859_1))
+        assertEquals(SignatureReport.Integrity.Malformed, reports.single().integrity)
+        assertEquals(SignaturesVerdict.CannotCheck, SignaturesVerdict.of(reports))
+    }
+
+    @Test
     fun changesSavedAfterSigningAreFlagged() {
         val signed = sign(original, TestCertificates.selfSigned("Dana Whitfield"))
         val edited = ByteArrayOutputStream().also { out ->

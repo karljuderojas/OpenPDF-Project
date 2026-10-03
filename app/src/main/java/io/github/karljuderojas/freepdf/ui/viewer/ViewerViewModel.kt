@@ -330,6 +330,8 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             _state.value = lock.withLock {
                 val current = session ?: return@withLock ViewerState.Failed(null)
                 if (withContext(Dispatchers.IO) { current.unlock(password) }) {
+                    // Opening could not read a locked file's signatures; check them now it is open.
+                    withContext(Dispatchers.IO) { signatures = SignatureVerifier().verify(current.workingFile, password) }
                     runCatching { reloadLocked() }.getOrElse { ViewerState.Failed(it.message) }
                 } else {
                     ViewerState.Locked(wrongPassword = true)
