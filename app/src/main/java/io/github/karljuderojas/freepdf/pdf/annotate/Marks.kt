@@ -3,6 +3,7 @@ package io.github.karljuderojas.freepdf.pdf.annotate
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotation
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLine
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationMarkup
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationSquareCircle
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationText
@@ -39,7 +40,7 @@ data class Mark(
     val author: String?,
     val modified: Long?,
 ) {
-    enum class Kind { Highlight, Underline, StrikeOut, Ink, Square, Circle, Note, TextBox, Stamp, Other }
+    enum class Kind { Highlight, Underline, StrikeOut, Ink, Square, Circle, Line, Arrow, Note, TextBox, Stamp, Other }
 }
 
 /** Lists, restyles, comments on and deletes the marks in a document. */
@@ -153,6 +154,12 @@ object Marks {
         PDAnnotationMarkup.SUB_TYPE_INK -> Mark.Kind.Ink
         PDAnnotationSquareCircle.SUB_TYPE_SQUARE -> Mark.Kind.Square
         PDAnnotationSquareCircle.SUB_TYPE_CIRCLE -> Mark.Kind.Circle
+        // An arrowhead at either end makes it an arrow.
+        PDAnnotationLine.SUB_TYPE -> {
+            val line = annotation as? PDAnnotationLine
+            val ends = listOfNotNull(line?.startPointEndingStyle, line?.endPointEndingStyle)
+            if (ends.any { it in ArrowEndings }) Mark.Kind.Arrow else Mark.Kind.Line
+        }
         PDAnnotationText.SUB_TYPE -> Mark.Kind.Note
         PDAnnotationMarkup.SUB_TYPE_FREETEXT -> Mark.Kind.TextBox
         // A signature placed in Sign mode is a stamp too, but it is managed there, not as a mark.
@@ -163,9 +170,14 @@ object Marks {
             else -> Mark.Kind.Other
         }
         "Link", "Widget", "Popup" -> null
-        // Lines, polygons, carets and the like still show in the list, under a general name.
+        // Polygons, carets and the like still show in the list, under a general name.
         else -> if (annotation is PDAnnotationMarkup) Mark.Kind.Other else null
     }
+
+    private val ArrowEndings = setOf(
+        PDAnnotationLine.LE_OPEN_ARROW, PDAnnotationLine.LE_CLOSED_ARROW,
+        PDAnnotationLine.LE_R_OPEN_ARROW, PDAnnotationLine.LE_R_CLOSED_ARROW,
+    )
 
     /** The words whose middles fall inside the mark's line boxes. */
     private fun coveredText(page: PDPage, mark: PDAnnotationTextMarkup, words: List<PageWord>): String {

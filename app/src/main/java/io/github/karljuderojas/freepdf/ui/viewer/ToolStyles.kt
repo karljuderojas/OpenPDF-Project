@@ -1,5 +1,6 @@
 package io.github.karljuderojas.freepdf.ui.viewer
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -22,8 +23,13 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.platform.testTag
@@ -129,6 +135,59 @@ fun StampBar(selected: Stamps.Kind, onSelect: (Stamps.Kind) -> Unit) {
         }
     }
 }
+
+/** Above the tool strip while Shapes is chosen: what a drag draws, each with a small picture of it. */
+@Composable
+fun ShapeBar(selected: Annotator.Shape, onSelect: (Annotator.Shape) -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("shape-bar")
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val ink = MaterialTheme.colorScheme.onSurface
+            Annotator.Shape.entries.forEach { shape ->
+                FilterChip(
+                    selected = shape == selected,
+                    onClick = { onSelect(shape) },
+                    label = { Text(stringResource(shape.labelRes)) },
+                    leadingIcon = { Canvas(Modifier.size(18.dp)) { drawShapeIcon(shape, ink) } },
+                    modifier = Modifier.testTag("shape-${shape.name.lowercase()}"),
+                )
+            }
+        }
+    }
+}
+
+/** A small picture of [shape]: lines and arrows run corner to corner, up to the right. */
+private fun DrawScope.drawShapeIcon(shape: Annotator.Shape, ink: Color) {
+    val line = 1.5.dp.toPx()
+    val pad = 2.dp.toPx()
+    val box = Rect(pad, 4.dp.toPx(), size.width - pad, size.height - 4.dp.toPx())
+    val start = Offset(pad, size.height - pad)
+    val end = Offset(size.width - pad, pad)
+    when (shape) {
+        Annotator.Shape.Rectangle -> drawRect(ink, box.topLeft, box.size, style = Stroke(line))
+        Annotator.Shape.Ellipse -> drawOval(ink, box.topLeft, box.size, style = Stroke(line))
+        Annotator.Shape.Line -> drawLine(ink, start, end, strokeWidth = line, cap = StrokeCap.Round)
+        Annotator.Shape.Arrow -> {
+            drawLine(ink, start, end, strokeWidth = line, cap = StrokeCap.Round)
+            arrowWings(start, end, 6.dp.toPx()).forEach { drawLine(ink, end, it, strokeWidth = line, cap = StrokeCap.Round) }
+        }
+    }
+}
+
+/** The shape's name in the app's language. */
+val Annotator.Shape.labelRes: Int
+    get() = when (this) {
+        Annotator.Shape.Rectangle -> R.string.mark_rectangle
+        Annotator.Shape.Ellipse -> R.string.mark_ellipse
+        Annotator.Shape.Line -> R.string.mark_line
+        Annotator.Shape.Arrow -> R.string.mark_arrow
+    }
 
 /** The stamp's name in the app's language; the PDF itself keeps the English label. */
 val Stamps.Kind.labelRes: Int

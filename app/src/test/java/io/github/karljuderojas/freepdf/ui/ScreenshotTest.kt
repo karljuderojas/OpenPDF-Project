@@ -110,6 +110,7 @@ import io.github.karljuderojas.freepdf.ui.viewer.AddLinkDialog
 import io.github.karljuderojas.freepdf.ui.viewer.DocumentInfoDialog
 import io.github.karljuderojas.freepdf.ui.viewer.AnnotateTool
 import io.github.karljuderojas.freepdf.ui.viewer.ToolStyle
+import io.github.karljuderojas.freepdf.ui.viewer.arrowWings
 import io.github.karljuderojas.freepdf.ui.viewer.GoToPageDialog
 import io.github.karljuderojas.freepdf.ui.viewer.SearchResults
 import io.github.karljuderojas.freepdf.ui.viewer.TextMatch
@@ -840,6 +841,56 @@ class ScreenshotTest {
             for (i in 1..40) moveTo(Offset(200f + i * 12f, 900f + 40f * kotlin.math.sin(i / 6f)))
         }
         captureRoot("viewer_annotate_pen_styled")
+    }
+
+    /** Shapes with [shape] picked, mid-drag across the middle of the first page. */
+    private fun shapeDrag(name: String, shape: Annotator.Shape) {
+        show {
+            viewer(
+                ViewerMode.Annotate,
+                tool = R.string.tool_shapes,
+                shape = shape,
+                toolStyles = mapOf(AnnotateTool.Shapes to ToolStyle(Color(0xFF2166E5), 4f)),
+            )
+        }
+        composeRule.onNodeWithTag("annotation-layer-0").performTouchInput {
+            down(Offset(180f, 1080f))
+            for (i in 1..20) moveTo(Offset(180f + i * 28f, 1080f - i * 14f))
+        }
+        captureRoot(name)
+    }
+
+    @Test
+    fun viewerAnnotateShapes() = shapeDrag("viewer_annotate_shapes", Annotator.Shape.Rectangle)
+
+    @Test
+    fun viewerAnnotateShapeEllipse() = shapeDrag("viewer_annotate_shape_ellipse", Annotator.Shape.Ellipse)
+
+    @Test
+    fun viewerAnnotateShapeLine() = shapeDrag("viewer_annotate_shape_line", Annotator.Shape.Line)
+
+    @Test
+    fun viewerAnnotateShapeArrow() {
+        // Picked from the shape bar, then dragged: the arrowhead is where the finger is.
+        show { viewer(ViewerMode.Annotate, tool = R.string.tool_shapes) }
+        composeRule.onNodeWithTag("shape-arrow").performClick()
+        composeRule.onNodeWithTag("annotation-layer-0").performTouchInput {
+            down(Offset(180f, 1080f))
+            for (i in 1..20) moveTo(Offset(180f + i * 28f, 1080f - i * 14f))
+        }
+        captureRoot("viewer_annotate_shape_arrow")
+    }
+
+    @Test
+    fun viewerShapesDrawn() {
+        // One of each shape on the page; tapping the arrow picks it, with its colours and sizes to change.
+        show { viewer(ViewerMode.Read, marks = shapeMarks) }
+        val arrow = shapeMarks.last()
+        composeRule.onNodeWithTag("mark-layer-0").performTouchInput {
+            click(Offset((arrow.left + arrow.right) / 2 * width, (arrow.top + arrow.bottom) / 2 * height))
+        }
+        composeRule.waitForIdle()
+        captureRoot("viewer_shapes_drawn")
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
@@ -1825,12 +1876,31 @@ class ScreenshotTest {
         )
     }
 
+    /** A rectangle, an ellipse, a line and an arrow on the first page, as Marks.list would report them. */
+    private val shapeMarks: List<Mark> by lazy {
+        val modified = Calendar.getInstance().apply { set(2026, Calendar.OCTOBER, 3, 14, 20, 0) }.timeInMillis
+        fun shape(index: Int, kind: Mark.Kind, box: Rect, color: Annotator.Rgb, width: Float) = Mark(
+            page = 0, index = index, kind = kind, left = box.left, top = box.top, right = box.right, bottom = box.bottom,
+            color = color, width = width, comment = "", markedText = "", author = null, modified = modified,
+        )
+        listOf(
+            shape(0, Mark.Kind.Square, Rect(0.08f, 0.6f, 0.42f, 0.7f), Annotator.Rgb.Red, 2f),
+            shape(1, Mark.Kind.Circle, Rect(0.55f, 0.58f, 0.92f, 0.72f), Annotator.Rgb.Blue, 2f),
+            shape(2, Mark.Kind.Line, Rect(0.08f, 0.77f, 0.42f, 0.83f), Annotator.Rgb(0.18f, 0.62f, 0.27f), 2f),
+            shape(3, Mark.Kind.Arrow, Rect(0.55f, 0.76f, 0.92f, 0.88f), Annotator.Rgb.Red, 4f),
+        )
+    }
+
     /** [page] with the sample marks painted on, as PDFium would show them. */
     private fun withMarks(page: Bitmap, index: Int, marks: List<Mark>): Bitmap {
         val copy = page.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = android.graphics.Canvas(copy)
         marks.filter { it.page == index }.forEach { mark ->
             val c = mark.color ?: return@forEach
+            if (mark.kind in listOf(Mark.Kind.Square, Mark.Kind.Circle, Mark.Kind.Line, Mark.Kind.Arrow)) {
+                drawShape(canvas, mark, copy.width, copy.height)
+                return@forEach
+            }
             val paint = android.graphics.Paint().apply {
                 color = android.graphics.Color.argb(if (mark.kind == Mark.Kind.Highlight) 110 else 255, (c.r * 255).toInt(), (c.g * 255).toInt(), (c.b * 255).toInt())
                 style = if (mark.kind == Mark.Kind.Ink) android.graphics.Paint.Style.STROKE else android.graphics.Paint.Style.FILL
@@ -1839,6 +1909,33 @@ class ScreenshotTest {
             canvas.drawRect(mark.left * copy.width, mark.top * copy.height, mark.right * copy.width, mark.bottom * copy.height, paint)
         }
         return copy
+    }
+
+    /** A shape mark outlined in its colour and width; lines run from the box's bottom-left to its top-right. */
+    private fun drawShape(canvas: android.graphics.Canvas, mark: Mark, width: Int, height: Int) {
+        val c = mark.color ?: return
+        val stroke = mark.width * width / 612f
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.rgb((c.r * 255).toInt(), (c.g * 255).toInt(), (c.b * 255).toInt())
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = stroke
+        }
+        val left = mark.left * width
+        val top = mark.top * height
+        val right = mark.right * width
+        val bottom = mark.bottom * height
+        when (mark.kind) {
+            Mark.Kind.Square -> canvas.drawRect(left, top, right, bottom, paint)
+            Mark.Kind.Circle -> canvas.drawOval(left, top, right, bottom, paint)
+            else -> {
+                canvas.drawLine(left, bottom, right, top, paint)
+                if (mark.kind == Mark.Kind.Arrow) {
+                    arrowWings(Offset(left, bottom), Offset(right, top), Annotator.ARROW_LENGTH * stroke).forEach {
+                        canvas.drawLine(right, top, it.x, it.y, paint)
+                    }
+                }
+            }
+        }
     }
 
     private fun wordIndex(page: Int, text: String) = sampleWords[page].indexOfFirst { it.text == text }.also { check(it >= 0) { "No $text" } }
@@ -1887,6 +1984,7 @@ class ScreenshotTest {
         selectedPage: Int = 0,
         selectedPages: Set<Int> = setOf(selectedPage),
         tool: Int? = null,
+        shape: Annotator.Shape = Annotator.Shape.Rectangle,
         savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
         signerName: String = "",
         certificate: CertificateInfo? = null,
@@ -1948,6 +2046,7 @@ class ScreenshotTest {
             initialSelectedPage = selectedPage,
             initialSelectedPages = selectedPages,
             initialTool = tool,
+            initialShape = shape,
             initialSignField = signField,
             savedSignatures = savedSignatures,
             signerName = signerName,
