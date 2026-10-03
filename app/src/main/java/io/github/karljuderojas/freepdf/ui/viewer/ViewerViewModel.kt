@@ -21,8 +21,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
-import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink
-import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget
 import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
@@ -467,17 +465,15 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         )
     }.toMap()
 
-    /** Removes the topmost mark under [at]. Links and form fields are left alone. */
+    /**
+     * Removes the topmost mark under [at], with its pop-up. Links, form fields and signatures
+     * placed in Sign mode are left alone (signatures are taken back with Undo there).
+     */
     fun erase(page: Int, at: Offset) {
         edit(onNoChange = R.string.nothing_to_erase) { document ->
             val point = displayMapper(document, page)(at)
-            val pdfPage = document.getPage(page)
-            val annotations = pdfPage.annotations
-            val target = annotations.lastOrNull { annotation ->
-                annotation !is PDAnnotationLink && annotation !is PDAnnotationWidget &&
-                    annotation.rectangle?.contains(point.x, point.y) == true
-            } ?: throw NothingChanged()
-            pdfPage.annotations = annotations.filter { it !== target }
+            val index = Marks.indexAt(document, page, point.x, point.y) ?: throw NothingChanged()
+            Marks.delete(document, page, index)
         }
     }
 

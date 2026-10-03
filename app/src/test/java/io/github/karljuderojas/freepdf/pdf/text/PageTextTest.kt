@@ -2,6 +2,9 @@ package io.github.karljuderojas.freepdf.pdf.text
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import io.github.karljuderojas.freepdf.pdf.PdfRect
+import io.github.karljuderojas.freepdf.pdf.displayToPdf
+import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -45,6 +48,24 @@ class PageTextTest {
         val services = words.first { it.text == "Services" }
         assertTrue(services.line > words[0].line)
         assertEquals(words.map { it.line }.sorted(), words.map { it.line })
+    }
+
+    @Test
+    fun textDrawnUprightOnARotatedPageIsBoxedWhereItIsShown() {
+        val words = sample().use { document ->
+            // A scan-like page: shown turned a quarter clockwise, with text drawn so it reads upright.
+            val page = document.getPage(0)
+            page.rotation = 90
+            PageEditor.addText(document, 0, "Upright", displayToPdf(0.10f, 0.50f, 90, page.cropBox.let {
+                PdfRect(it.lowerLeftX, it.lowerLeftY, it.upperRightX, it.upperRightY)
+            }), fontSize = 14f)
+            PageText.words(document, 0)
+        }
+        val word = words.first { it.text == "Upright" }
+        // Its left edge is where the tap was, a tenth of the way across the displayed page.
+        assertEquals(0.10f, word.left, 0.005f)
+        assertTrue("box sits on its baseline", word.top < 0.50f && word.bottom > 0.50f)
+        assertTrue("reads left to right", word.right - word.left > word.bottom - word.top)
     }
 
     @Test
