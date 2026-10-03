@@ -38,7 +38,7 @@ enum class ViewerMode(@StringRes val label: Int, val icon: ImageVector?, val too
     ),
     More(
         R.string.mode_more, Icons.Filled.MoreVert,
-        listOf(R.string.tool_share, R.string.tool_print, R.string.tool_info),
+        listOf(R.string.tool_share, R.string.tool_print, R.string.tool_info, R.string.tool_password),
     );
 
     companion object {

@@ -122,6 +122,9 @@ sealed interface ViewerAction {
     data class Search(val query: String) : ViewerAction
     data class Unlock(val password: String) : ViewerAction
 
+    /** Locks the PDF with [password], or takes its password off when it is empty. */
+    data class SetPassword(val password: String) : ViewerAction
+
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
     data class Stroke(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val points: List<Offset>) : ViewerAction
     data class Box(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val start: Offset, val end: Offset) : ViewerAction
@@ -233,6 +236,7 @@ fun ViewerScreen(
                 ViewerAction.Print -> viewModel.print()
                 is ViewerAction.Search -> viewModel.search(action.query)
                 is ViewerAction.Unlock -> viewModel.unlock(action.password)
+                is ViewerAction.SetPassword -> viewModel.setPassword(action.password)
                 is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.style)
                 is ViewerAction.Box -> action.tool.markup.let { kind ->
                     if (kind != null) {
@@ -305,6 +309,7 @@ fun ViewerContent(
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
+    var choosingPassword by remember { mutableStateOf(false) }
     // Chosen here so the page preview follows at once; the view model remembers them for next time.
     var styles by remember { mutableStateOf(toolStyles) }
     LaunchedEffect(toolStyles) { styles = styles + toolStyles }
@@ -539,6 +544,7 @@ fun ViewerContent(
                 else -> ToolStrip(mode, selectedTool = null, onToolSelected = {
                     when (it) {
                         R.string.tool_share -> onAction(ViewerAction.Share)
+                        R.string.tool_password -> choosingPassword = true
                         R.string.tool_info -> onAction(ViewerAction.ShowInfo)
                         R.string.tool_print -> onAction(ViewerAction.Print)
                     }
@@ -707,6 +713,17 @@ fun ViewerContent(
                 finishing = false
                 backToReading()
                 onAction(ViewerAction.FinishSigning(name, consentText, seal))
+            },
+        )
+    }
+
+    if (choosingPassword) {
+        PasswordDialog(
+            isProtected = ready?.isProtected == true,
+            onDismiss = { choosingPassword = false },
+            onSetPassword = {
+                choosingPassword = false
+                onAction(ViewerAction.SetPassword(it))
             },
         )
     }

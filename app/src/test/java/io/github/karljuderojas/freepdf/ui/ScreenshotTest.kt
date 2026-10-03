@@ -431,6 +431,30 @@ class ScreenshotTest {
 
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
+    fun viewerPasswordAdd() {
+        show { viewer(ViewerMode.More) }
+        // The dialog's fields never let Compose go idle, so drive the clock by hand and capture
+        // without further input, like the Extract and Split dialogs.
+        composeRule.onNodeWithText("Password").performScrollTo()
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Password").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_password_add.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPasswordLocked() {
+        show { viewer(ViewerMode.More, sample.copy(isProtected = true)) }
+        composeRule.onNodeWithText("Password").performScrollTo()
+        composeRule.onNodeWithText("Password").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_password_locked.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
     fun viewerDocumentInfo() {
         fun at(day: Int, hour: Int, minute: Int) =
             Calendar.getInstance().apply { set(2026, Calendar.SEPTEMBER, day, hour, minute, 0) }.toInstant()

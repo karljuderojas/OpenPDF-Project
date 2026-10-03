@@ -135,6 +135,20 @@
     <string name="forget_recent">Remove from recent</string>
     <string name="share_title">Share %1$s</string>
     <string name="share_failed">Could not prepare this PDF for sharing.</string>
+    <string name="password_add_title">Add a password</string>
+    <string name="password_add_body">Anyone opening this PDF will need this password. FreePDF can\'t recover it if you forget it.</string>
+    <string name="password_add_confirm">Add password</string>
+    <string name="password_change_title">Change password</string>
+    <string name="password_confirm_label">Type it again</string>
+    <string name="password_too_short">Use at least 4 characters.</string>
+    <string name="password_mismatch">The two passwords do not match.</string>
+    <string name="password_locked_body">Anyone opening this PDF needs its password. You can change it or take it off.</string>
+    <string name="password_remove">Remove password</string>
+    <string name="password_remove_title">Remove the password?</string>
+    <string name="password_remove_body">Once you save, anyone can open this PDF without a password.</string>
+    <string name="password_added">Password added. Save to keep it.</string>
+    <string name="password_changed">Password changed. Save to keep it.</string>
+    <string name="password_removed">Password removed. Save to keep it.</string>
     <string name="info_failed">Could not read the details of this PDF.</string>
     <string name="info_close">Close</string>
     <string name="info_title">Title</string>
@@ -188,6 +202,7 @@
     <string name="tool_about_delete">Remove a page.</string>
     <string name="tool_about_merge">Add another PDF\'s pages to this one.</string>
     <string name="tool_about_share">Send the PDF to another app.</string>
+    <string name="tool_about_password">Lock the PDF with a password, or change or remove one.</string>
     <string name="tool_about_info">See the title, author, page size and other details.</string>
     <string name="tool_about_print">Print it, or save it as a PDF from the print screen.</string>
     <!-- Other words people search the Tools tab with, comma-separated. Translate freely; add local terms. -->
@@ -209,6 +224,7 @@
     <string name="tool_synonyms_delete">remove page, delete page</string>
     <string name="tool_synonyms_merge">combine, join, append, add pdf, attach</string>
     <string name="tool_synonyms_share">send, email, export, upload</string>
+    <string name="tool_synonyms_password">lock, unlock, protect, encrypt, secure</string>
     <string name="tool_synonyms_info">details, properties, metadata, author, title, size</string>
     <string name="tool_synonyms_print">printer, paper, hard copy</string>
     <string name="settings_appearance">Appearance</string>
