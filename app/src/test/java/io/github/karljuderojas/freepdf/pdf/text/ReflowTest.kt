@@ -52,4 +52,33 @@ class ReflowTest {
         val words = line(0, 0.10f, "the Anglo-") + line(1, 0.125f, "Saxon period")
         assertEquals(listOf("the Anglo- Saxon period"), Reflow.paragraphs(words))
     }
+
+    @Test
+    fun sentencesSplitAtEndingsButNotInsideNumbers() {
+        val text = "It costs 3.5 million. Is that right? Yes!"
+        assertEquals(
+            listOf("It costs 3.5 million.", "Is that right?", "Yes!"),
+            Reflow.sentences(listOf(text)),
+        )
+    }
+
+    @Test
+    fun sentencesKeepClosingQuotesAndTextWithNoEnding() {
+        assertEquals(listOf("He said \"stop.\"", "Then left"), Reflow.sentences(listOf("He said \"stop.\" Then left")))
+    }
+
+    @Test
+    fun rangesPointAtTheSentencesInTheirParagraph() {
+        val text = "First one. Second one."
+        assertEquals(listOf(0..9, 11..21), Reflow.sentenceRanges(text))
+    }
+
+    @Test
+    fun aVeryLongRunIsCutAtASpace() {
+        val text = "word ".repeat(200).trim()
+        val parts = Reflow.sentences(listOf(text))
+        assertTrue(parts.size >= 2)
+        assertTrue(parts.all { it.length <= 400 && !it.startsWith(" ") })
+        assertEquals(text, parts.joinToString(" "))
+    }
 }
