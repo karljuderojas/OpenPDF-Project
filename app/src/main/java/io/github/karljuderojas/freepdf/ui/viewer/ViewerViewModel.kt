@@ -42,6 +42,7 @@ import io.github.karljuderojas.freepdf.pdf.form.FormField
 import io.github.karljuderojas.freepdf.pdf.form.FormFiller
 import io.github.karljuderojas.freepdf.pdf.edit.Splitting
 import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
+import io.github.karljuderojas.freepdf.pdf.redact.Redactor
 import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
 import io.github.karljuderojas.freepdf.pdf.render.PageBox
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
@@ -162,6 +163,9 @@ sealed interface ViewerEffect {
 
     /** Ask which folder the split PDFs go in; see [ViewerViewModel.splitInto]. */
     data object PickSplitFolder : ViewerEffect
+
+    /** Asks where to save the redacted copy of the open PDF; the user's answer goes to saveRedacted. */
+    data class SaveRedacted(val suggestedName: String) : ViewerEffect
     /** Show [info] about the open PDF, titled with its file [name]. */
     data class ShowInfo(val name: String, val info: DocumentInfo) : ViewerEffect
 }
@@ -233,6 +237,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     private var shareSignedCopy = false
     /** Pages to extract, or the parts to split into, waiting for the user to pick where they go. */
     private var pendingExtract: List<Int>? = null
+    private var pendingRedaction: List<RedactBox>? = null
     private var pendingSplit: List<List<Int>>? = null
 
     private val signingPrefs = application.getSharedPreferences("signing", Context.MODE_PRIVATE)
@@ -1020,6 +1025,61 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         pendingExtract = null
     }
 
+    /** Asks where to save the redacted copy; [saveRedacted] then writes it. */
+    fun redact(boxes: List<RedactBox>) {
+        val uri = openedUri ?: return
+        if (boxes.isEmpty()) return
+        pendingRedaction = boxes
+        viewModelScope.launch {
+            val name = withContext(Dispatchers.IO) { displayName(uri) }
+            _effects.send(ViewerEffect.SaveRedacted(Redactor.suggestedName(name)))
+        }
+    }
+
+    /**
+     * Writes a copy of the PDF as it is now, unsaved changes included, with everything under the
+     * areas chosen in [redact] removed (see [Redactor]). The open PDF and its undo history are untouched.
+     */
+    fun saveRedacted(target: Uri) {
+        val boxes = pendingRedaction ?: return
+        pendingRedaction = null
+        viewModelScope.launch {
+            val result = runCatching {
+                lock.withLock {
+                    withContext(Dispatchers.IO) {
+                        val current = session ?: error("Nothing is open")
+                        var redacted: Redactor.Result? = null
+                        SafeWrite.write(context, target) { out ->
+                            PDDocument.load(current.workingFile, current.password).use { document ->
+                                val areas = boxes.groupBy { it.page }.mapValues { (page, onPage) ->
+                                    onPage.map { box ->
+                                        // A point of margin so a word's box fully covers its letters.
+                                        boxOf(document, page, box.rect.topLeft, box.rect.bottomRight).let {
+                                            PdfRect(it.left - REDACT_MARGIN, it.bottom - REDACT_MARGIN, it.right + REDACT_MARGIN, it.top + REDACT_MARGIN)
+                                        }
+                                    }
+                                }
+                                redacted = Redactor.redact(document, areas)
+                                PdfDocuments.keepProtection(document, current.password)
+                                document.save(out)
+                            }
+                        }
+                        redacted ?: error("Nothing was redacted")
+                    }
+                }
+            }
+            val message = result.fold(
+                onSuccess = { if (it.foundNothing) R.string.redact_saved_blank else R.string.redact_saved },
+                onFailure = { R.string.redact_failed },
+            )
+            _effects.send(ViewerEffect.Message(message))
+        }
+    }
+
+    fun cancelRedaction() {
+        pendingRedaction = null
+    }
+
     /** Asks which folder to split into; [splitInto] then writes one PDF per part. */
     fun split(parts: List<List<Int>>) {
         pendingSplit = parts
@@ -1399,6 +1459,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         // 96 MB is more than low-end phones with a 128 MB heap can give without an OutOfMemoryError.
         val CACHE_BYTES = (Runtime.getRuntime().maxMemory() / 4).coerceAtMost(96L * 1024 * 1024).toInt()
         const val KEY_SIGNER_NAME = "name"
+
+        // Points added around each redacted area, so a word's box fully covers its letters.
+        const val REDACT_MARGIN = 1f
 
         // Who placed things is only known at Finish, where this is replaced by the typed name.
         const val SIGNER = "signer"

@@ -13,10 +13,10 @@ data class ToolEntry(val mode: ViewerMode, @StringRes val label: Int) {
     @get:StringRes val synonyms: Int? get() = synonymLists[label]
 
     /**
-     * Annotate and Sign tools, and Edit's Add text, stay selected; Pages and More tools and Add
+     * Annotate and Sign tools, and Edit's Add text and Redact, stay selected; Pages and More tools and Add
      * image act once, so only the mode opens.
      */
-    val preselects: Boolean get() = mode == ViewerMode.Annotate || mode == ViewerMode.Sign || label == R.string.tool_add_text
+    val preselects: Boolean get() = mode == ViewerMode.Annotate || mode == ViewerMode.Sign || label == R.string.tool_add_text || label == R.string.tool_redact
 }
 
 /**
@@ -57,6 +57,7 @@ private val descriptions = mapOf(
     R.string.tool_eraser to R.string.tool_about_eraser,
     R.string.tool_add_text to R.string.tool_about_add_text,
     R.string.tool_add_image to R.string.tool_about_add_image,
+    R.string.tool_redact to R.string.tool_about_redact,
     R.string.tool_rotate to R.string.tool_about_rotate,
     R.string.tool_move_earlier to R.string.tool_about_move_earlier,
     R.string.tool_move_later to R.string.tool_about_move_later,
@@ -84,6 +85,7 @@ private val synonymLists = mapOf(
     R.string.tool_eraser to R.string.tool_synonyms_eraser,
     R.string.tool_add_text to R.string.tool_synonyms_add_text,
     R.string.tool_add_image to R.string.tool_synonyms_add_image,
+    R.string.tool_redact to R.string.tool_synonyms_redact,
     R.string.tool_rotate to R.string.tool_synonyms_rotate,
     R.string.tool_move_earlier to R.string.tool_synonyms_reorder,
     R.string.tool_move_later to R.string.tool_synonyms_reorder,

@@ -51,7 +51,8 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ✅ Edit mode: Add text and Add image (photo picker), moved, resized or deleted on the page, then written into the PDF on Done; photos are stored as JPEG, transparent pictures losslessly
 - ⬜ Drag to reorder in the page grid, multi-select
 - ✅ Extract and split: save chosen pages (typed like 1-3, 5) as a new PDF, or split into two after the selected page or every few pages into a folder you pick; the open PDF stays as it is
-- ⬜ Redact (true removal, not a black box), links
+- ✅ Redact (Edit → Redact): drag over text (snaps to words) or an area on a scan, tap Apply, and a new copy is saved with the text, pictures and line art under each area removed from the file, not just covered, then painted black. Invisible OCR text, notes and form fields in the area go too, and so do the same words in the title, author, keywords, XMP metadata, bookmarks and tagged-PDF alternate text. The open PDF is untouched. Limits: a picture is blanked pixel by pixel (stencil masks are removed whole), line art touching an area is removed whole, and shadings and pattern fills are left as they are
+- ⬜ Links
 - ⬜ Edit existing text (hard; needs font handling)
 
 ## More
