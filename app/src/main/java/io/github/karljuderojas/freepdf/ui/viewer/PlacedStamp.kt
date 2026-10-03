@@ -64,7 +64,7 @@ data class StampBox(val left: Float, val top: Float, val width: Float, val heigh
 
 /**
  * Sizes and anchors for stamps, in page points. The PDF layer draws each stamp from an anchor
- * point (see SignatureStamper and PageEditor), so these convert between that and a [StampBox].
+ * point (see SignatureAnnotation and PageEditor), so these convert between that and a [StampBox].
  */
 object StampGeometry {
 
@@ -138,7 +138,7 @@ object StampGeometry {
         return StampBox(at.x - 0.4f * width, at.y - height, width, height).moved(0f, 0f)
     }
 
-    /** Where SignatureStamper anchors a signature filling [box]: the middle of its bottom edge. */
+    /** Where SignatureAnnotation anchors a signature filling [box]: the middle of its bottom edge. */
     fun signatureAnchor(box: StampBox) = Offset(box.left + box.width / 2, box.bottom)
 
     /** The font size, in points, at which [lines] of text fill [box]. */

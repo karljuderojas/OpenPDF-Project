@@ -34,7 +34,7 @@ object SignatureAnnotation {
     data class Placed(val page: Int, val x: Float, val y: Float)
 
     /**
-     * Adds [signature] to the page the same way [SignatureStamper.stamp] draws it: fitted into
+     * Adds [signature] to the page as a stamp annotation: fitted into
      * [maxWidth] by [maxHeight] points, centred over [at] with its bottom on [at], and upright as
      * the page is shown. [initials] marks it as initials rather than a full signature.
      */
