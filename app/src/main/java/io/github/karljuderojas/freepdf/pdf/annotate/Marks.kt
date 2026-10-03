@@ -1,0 +1,149 @@
+package io.github.karljuderojas.freepdf.pdf.annotate
+
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotation
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationMarkup
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationSquareCircle
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationText
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationTextMarkup
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDBorderStyleDictionary
+import com.tom_roush.pdfbox.util.DateConverter
+import io.github.karljuderojas.freepdf.pdf.PdfRect
+import io.github.karljuderojas.freepdf.pdf.pdfToDisplay
+import io.github.karljuderojas.freepdf.pdf.text.PageText
+import io.github.karljuderojas.freepdf.pdf.text.PageWord
+import java.util.Calendar
+
+/**
+ * One mark on a page (a highlight, drawing, note and so on, made here or in another app), as the
+ * viewer shows it: where it is as fractions of the displayed page, and what it says.
+ * [index] is its place in the page's annotation list, which is how [Marks.edit] finds it again.
+ */
+data class Mark(
+    val page: Int,
+    val index: Int,
+    val kind: Kind,
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+    val color: Annotator.Rgb?,
+    val width: Float,
+    val comment: String,
+    /** The text a highlight, underline or strikeout covers. */
+    val markedText: String,
+    val author: String?,
+    val modified: Long?,
+) {
+    enum class Kind { Highlight, Underline, StrikeOut, Ink, Square, Circle, Note, TextBox, Stamp, Other }
+}
+
+/** Lists, restyles, comments on and deletes the marks in a document. */
+object Marks {
+
+    /** Every mark in [document], page by page in drawing order. Links, form fields and pop-ups are left out. */
+    fun list(document: PDDocument): List<Mark> = document.pages.flatMapIndexed { pageIndex, page ->
+        val annotations = page.annotations
+        // Only pages with marked text need their words.
+        val words by lazy { runCatching { PageText.words(document, pageIndex) }.getOrDefault(emptyList()) }
+        annotations.mapIndexedNotNull { index, annotation ->
+            val kind = kindOf(annotation) ?: return@mapIndexedNotNull null
+            val box = annotation.rectangle ?: return@mapIndexedNotNull null
+            val (x1, y1) = page.toDisplay(box.lowerLeftX, box.lowerLeftY)
+            val (x2, y2) = page.toDisplay(box.upperRightX, box.upperRightY)
+            val markup = annotation as? PDAnnotationMarkup
+            Mark(
+                page = pageIndex,
+                index = index,
+                kind = kind,
+                left = minOf(x1, x2), top = minOf(y1, y2), right = maxOf(x1, x2), bottom = maxOf(y1, y2),
+                color = annotation.color?.components?.takeIf { it.size == 3 }?.let { Annotator.Rgb(it[0], it[1], it[2]) },
+                width = markup?.borderStyle?.width ?: 1f,
+                comment = annotation.contents.orEmpty(),
+                markedText = (annotation as? PDAnnotationTextMarkup)?.let { coveredText(page, it, words) }.orEmpty(),
+                author = markup?.titlePopup?.takeIf { it.isNotBlank() },
+                modified = (annotation.modifiedDate?.let { runCatching { DateConverter.toCalendar(it) }.getOrNull() }
+                    ?: markup?.creationDate)?.timeInMillis,
+            )
+        }
+    }
+
+    /**
+     * Changes the mark at [index] on [pageIndex]: its colour, its line width (for marks drawn with
+     * a line), and its comment. Null leaves that part as it was. The mark is redrawn so other
+     * viewers show the change.
+     */
+    fun edit(
+        document: PDDocument,
+        pageIndex: Int,
+        index: Int,
+        color: Annotator.Rgb? = null,
+        width: Float? = null,
+        comment: String? = null,
+    ) {
+        val annotation = document.getPage(pageIndex).annotations[index]
+        require(kindOf(annotation) != null) { "Not a mark" }
+        if (color != null) annotation.color = color.toPdColor()
+        if (width != null && annotation is PDAnnotationMarkup) {
+            annotation.borderStyle = (annotation.borderStyle ?: PDBorderStyleDictionary()).apply { this.width = width }
+        }
+        if (comment != null) annotation.contents = comment.ifBlank { null }
+        annotation.setModifiedDate(Calendar.getInstance())
+        // Only redraw kinds this app knows how to draw; others keep their own appearance.
+        if (color != null || width != null) {
+            when (kindOf(annotation)) {
+                Mark.Kind.TextBox, Mark.Kind.Stamp, Mark.Kind.Other, null -> Unit
+                else -> annotation.constructAppearances(document)
+            }
+        }
+    }
+
+    /** Removes the mark at [index] on [pageIndex], and the pop-up window that belongs to it, if any. */
+    fun delete(document: PDDocument, pageIndex: Int, index: Int) {
+        val page = document.getPage(pageIndex)
+        val annotations = page.annotations
+        val target = annotations[index]
+        require(kindOf(target) != null) { "Not a mark" }
+        val popup = (target as? PDAnnotationMarkup)?.popup?.cosObject
+        page.annotations = annotations.filterIndexed { i, it -> i != index && (popup == null || it.cosObject !== popup) }
+    }
+
+    private fun kindOf(annotation: PDAnnotation): Mark.Kind? = when (annotation.subtype) {
+        PDAnnotationTextMarkup.SUB_TYPE_HIGHLIGHT -> Mark.Kind.Highlight
+        PDAnnotationTextMarkup.SUB_TYPE_UNDERLINE -> Mark.Kind.Underline
+        PDAnnotationTextMarkup.SUB_TYPE_STRIKEOUT -> Mark.Kind.StrikeOut
+        PDAnnotationMarkup.SUB_TYPE_INK -> Mark.Kind.Ink
+        PDAnnotationSquareCircle.SUB_TYPE_SQUARE -> Mark.Kind.Square
+        PDAnnotationSquareCircle.SUB_TYPE_CIRCLE -> Mark.Kind.Circle
+        PDAnnotationText.SUB_TYPE -> Mark.Kind.Note
+        PDAnnotationMarkup.SUB_TYPE_FREETEXT -> Mark.Kind.TextBox
+        "Stamp" -> Mark.Kind.Stamp
+        "Link", "Widget", "Popup" -> null
+        // Lines, polygons, carets and the like still show in the list, under a general name.
+        else -> if (annotation is PDAnnotationMarkup) Mark.Kind.Other else null
+    }
+
+    /** The words whose middles fall inside the mark's line boxes. */
+    private fun coveredText(page: PDPage, mark: PDAnnotationTextMarkup, words: List<PageWord>): String {
+        val quads = mark.quadPoints ?: return ""
+        // Each quad's bounds, as fractions of the displayed page: left, top, right, bottom.
+        val lines = (0 until quads.size / 8).map { q ->
+            val xs = (0 until 4).map { quads[q * 8 + it * 2] }
+            val ys = (0 until 4).map { quads[q * 8 + it * 2 + 1] }
+            val (x1, y1) = page.toDisplay(xs.min(), ys.min())
+            val (x2, y2) = page.toDisplay(xs.max(), ys.max())
+            floatArrayOf(minOf(x1, x2), minOf(y1, y2), maxOf(x1, x2), maxOf(y1, y2))
+        }
+        return words.filter { word ->
+            val cx = (word.left + word.right) / 2
+            val cy = (word.top + word.bottom) / 2
+            lines.any { (left, top, right, bottom) -> cx in left..right && cy in top..bottom }
+        }.joinToString(" ") { it.text }
+    }
+
+    private fun PDPage.toDisplay(x: Float, y: Float): Pair<Float, Float> {
+        val crop = cropBox.let { PdfRect(it.lowerLeftX, it.lowerLeftY, it.upperRightX, it.upperRightY) }
+        return pdfToDisplay(x, y, rotation, crop)
+    }
+}

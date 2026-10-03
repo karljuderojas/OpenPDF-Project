@@ -28,6 +28,8 @@ import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
 import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
+import io.github.karljuderojas.freepdf.pdf.annotate.Mark
+import io.github.karljuderojas.freepdf.pdf.annotate.Marks
 import io.github.karljuderojas.freepdf.pdf.displayToPdf
 import io.github.karljuderojas.freepdf.pdf.edit.EditSession
 import io.github.karljuderojas.freepdf.pdf.edit.Flattener
@@ -349,6 +351,18 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             val boxes = lines.map { boxOf(document, page, it.topLeft, it.bottomRight) }
             Annotator.markText(document, page, boxes, kind, style.rgb, style.width, comment)
         }
+
+    private val _marks = MutableStateFlow<List<Mark>>(emptyList())
+
+    /** Every mark in the document as it is now, for tapping to edit and the Comments list. */
+    val marks: StateFlow<List<Mark>> = _marks.asStateFlow()
+
+    /** Changes a mark's colour, line width or comment; null leaves that part alone. */
+    fun editMark(page: Int, index: Int, color: Annotator.Rgb?, width: Float?, comment: String?) = edit { document ->
+        Marks.edit(document, page, index, color, width, comment)
+    }
+
+    fun deleteMark(page: Int, index: Int) = edit { document -> Marks.delete(document, page, index) }
 
     /** The words on [page] and where they are, for selecting text. Empty for scanned pages. */
     suspend fun words(page: Int): List<PageWord> = lock.withLock {
@@ -964,6 +978,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         _search.value = SearchResults()
         revision++
         val next = PdfRenderer.open(context, Uri.fromFile(current.workingFile), current.password.ifEmpty { null })
+        _marks.value = withContext(Dispatchers.IO) {
+            runCatching { PDDocument.load(current.workingFile, current.password).use { Marks.list(it) } }.getOrDefault(emptyList())
+        }
         renderer = next
         val hasSignature = editLog.any { it?.type == AuditEvent.Type.Signed }
         val outline = runCatching { next.outline() }.getOrDefault(emptyList())
