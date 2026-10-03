@@ -9,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -57,6 +58,10 @@ fun AnnotationLayer(
     onTap: (Offset) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // The gesture loops outlive recompositions, so always call the latest callbacks.
+    val currentOnStroke by rememberUpdatedState(onStroke)
+    val currentOnBox by rememberUpdatedState(onBox)
+    val currentOnTap by rememberUpdatedState(onTap)
     val stroke = remember(tool) { mutableStateListOf<Offset>() }
     var box by remember(tool) { mutableStateOf<Rect?>(null) }
     var size by remember { mutableStateOf(IntSize.Zero) }
@@ -68,14 +73,14 @@ fun AnnotationLayer(
 
     val gestures = when (tool.gesture) {
         AnnotateTool.Gesture.Tap -> Modifier.pointerInput(tool) {
-            detectTapGestures { onTap(it.normalised()) }
+            detectTapGestures { currentOnTap(it.normalised()) }
         }
         AnnotateTool.Gesture.Draw -> Modifier.pointerInput(tool) {
             detectDragGestures(
                 onDragStart = { stroke.clear(); stroke.add(it) },
                 onDrag = { change, _ -> change.consume(); stroke.add(change.position) },
                 onDragEnd = {
-                    if (stroke.isNotEmpty()) onStroke(stroke.map { it.normalised() })
+                    if (stroke.isNotEmpty()) currentOnStroke(stroke.map { it.normalised() })
                     stroke.clear()
                 },
                 onDragCancel = { stroke.clear() },
@@ -90,7 +95,7 @@ fun AnnotationLayer(
                     box = Rect(start, change.position)
                 },
                 onDragEnd = {
-                    box?.let { onBox(it.topLeft.normalised(), it.bottomRight.normalised()) }
+                    box?.let { currentOnBox(it.topLeft.normalised(), it.bottomRight.normalised()) }
                     box = null
                 },
                 onDragCancel = { box = null },
