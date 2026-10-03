@@ -10,13 +10,13 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ✅ Open from the file picker and from other apps (file managers, email, browsers)
 - ✅ Continuous vertical scroll with PDFium rendering and a bitmap cache
 - ✅ Pinch to zoom (basic: scales the whole list)
-- ⬜ Proper zoom and pan with sharp re-rendering at high zoom (tiled rendering)
+- ✅ Sharp re-rendering when zoomed: the visible part of each page is rendered at the zoom level
 - ⬜ Text search, outline/bookmarks, go to page, page thumbnails
 - ✅ Text selection: press and hold, drag, then Highlight / Underline / Strike / Note / Copy from a popup
 - ✅ Files tab: documents open this session on top, recent history grouped by Today / Yesterday / Earlier, "Open file" through Android's file picker (stored on the device only)
 - ⬜ Switcher between open documents, tab style
 - ⬜ Night mode, reading settings
-- ⬜ Password-protected PDFs
+- ✅ Password-protected PDFs: asks for the password, and edits and saves keep the file locked with it
 
 ## Annotating (Annotate mode)
 - ✅ Highlight, underline, strikeout by dragging over the text, snapping to whole words (an area on scans)
