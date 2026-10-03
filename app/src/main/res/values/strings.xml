@@ -494,4 +494,30 @@
         <item quantity="one">%1$d picture</item>
         <item quantity="other">%1$d pictures</item>
     </plurals>
+    <string name="tool_scan_document">Scan document</string>
+    <string name="tool_about_scan_document">Photograph pages, straighten them and save a PDF.</string>
+    <string name="tool_synonyms_scan_document">scanner, scan, camera, photo, paper, page, document, black and white, crop</string>
+    <string name="scan_title">Scan document</string>
+    <string name="scan_adjust_title">Adjust edges</string>
+    <string name="scan_adjust_hint">Drag the corners to the edges of the page.</string>
+    <string name="scan_whole_photo">Use whole photo</string>
+    <string name="scan_retake">Retake</string>
+    <string name="scan_empty_title">Scan paper with your camera</string>
+    <string name="scan_empty_body">FreePDF finds the page, straightens it, and saves every page into one PDF. Nothing leaves your phone.</string>
+    <string name="scan_take_photo">Take a photo</string>
+    <string name="scan_from_gallery">Choose from gallery</string>
+    <string name="scan_camera">Camera</string>
+    <string name="scan_gallery">Gallery</string>
+    <string name="scan_save">Save PDF</string>
+    <string name="scan_tap_to_adjust">Tap to adjust the edges</string>
+    <string name="scan_filter_color">Color</string>
+    <string name="scan_filter_gray">Grayscale</string>
+    <string name="scan_filter_bw">Black and white</string>
+    <string name="scan_no_camera">No camera app was found on this phone.</string>
+    <string name="scan_photo_failed">Could not use that photo.</string>
+    <string name="scan_default_name">Scan</string>
+    <plurals name="scan_page_count">
+        <item quantity="one">%1$d page</item>
+        <item quantity="other">%1$d pages</item>
+    </plurals>
 </resources>
