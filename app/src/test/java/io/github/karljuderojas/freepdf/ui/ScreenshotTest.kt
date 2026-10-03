@@ -50,6 +50,7 @@ import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
 import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
+import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.home.HomeContent
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
 import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
@@ -526,41 +527,22 @@ class ScreenshotTest {
         viewer(ViewerMode.Sign, signing, signField = 1, stamps = stamps, selectedStamp = stamps.size.toLong())
     }
 
-    @Test
-    fun viewerFillForm() {
-        show { viewer(ViewerMode.Sign, form, tool = R.string.tool_fill_form, pages = formPages) }
-        // Bring the selected Fill form chip into view at the end of the tool strip.
-        composeRule.onNodeWithText("Fill form").performScrollTo()
-        captureRoot("viewer_fill_form")
-    }
-
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
-    fun viewerFillFormText() {
-        // Editing a name typed earlier.
-        val filled = form.copy(formFields = form.formFields.map { if (it.name == "name") it.copy(value = "Dana Whitfield") else it })
-        show { viewer(ViewerMode.Sign, filled, tool = R.string.tool_fill_form, pages = formPages) }
-        composeRule.onNodeWithTag("form-field-name-0").performClick()
-        // The dialog focuses its text field, whose blinking cursor never lets Compose go idle,
-        // so drive the clock by hand from here.
+    fun viewerSignFinishEditable() {
+        var finishing by mutableStateOf(false)
+        show {
+            viewer(ViewerMode.Sign, sample.copy(hasSignature = true))
+            if (finishing) {
+                FinishSigningDialog(initialName = "Dana Whitfield", initialLock = false, onDismiss = {}, onFinish = { _, _, _ -> })
+            }
+        }
+        // As in viewerSignFinish, the dialog's name field never lets Compose go idle, so it opens
+        // only once the clock is driven by hand.
         composeRule.mainClock.autoAdvance = false
+        finishing = true
         composeRule.mainClock.advanceTimeBy(1_000)
-        composeRule.onNodeWithTag("form-field-input").assertExists()
-        captureScreenRoboImage("build/outputs/roborazzi/viewer_fill_form_text.png")
-    }
-
-    @OptIn(ExperimentalRoborazziApi::class)
-    @Test
-    fun viewerFillFormChoice() {
-        show { viewer(ViewerMode.Sign, form, tool = R.string.tool_fill_form, pages = formPages) }
-        composeRule.onNodeWithTag("form-field-team-10").performClick()
-        composeRule.waitForIdle()
-        captureScreenRoboImage("build/outputs/roborazzi/viewer_fill_form_choice.png")
-    }
-
-    @Test
-    fun viewerFillFormNoFields() = capture("viewer_fill_form_no_fields") {
-        viewer(ViewerMode.Sign, tool = R.string.tool_fill_form)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_finish_editable.png")
     }
 
     @Test

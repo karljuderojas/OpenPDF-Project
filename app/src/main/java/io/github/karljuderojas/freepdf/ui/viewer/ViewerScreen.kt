@@ -115,6 +115,7 @@ import io.github.karljuderojas.freepdf.print.Printing
 import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.rememberPdfPicker
+import io.github.karljuderojas.freepdf.ui.sign.FinishOptions
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
 import kotlinx.coroutines.flow.first
@@ -189,7 +190,7 @@ sealed interface ViewerAction {
 
     /** Signs the place to sign at [index] in [ViewerState.Ready.signFields] with the saved signature. */
     data class SignField(val index: Int) : ViewerAction
-    data class FinishSigning(val name: String, val consentText: String, val seal: Boolean) : ViewerAction
+    data class FinishSigning(val name: String, val consentText: String, val options: FinishOptions) : ViewerAction
 
     /** Placed stamps; see [StampLayer]. Moves are fractions of the page. */
     data class MoveStamp(val id: Long, val delta: Offset) : ViewerAction
@@ -371,7 +372,7 @@ fun ViewerScreen(
                 is ViewerAction.AddCheckmark -> viewModel.addCheckmark(action.page, action.at)
                 is ViewerAction.FillField -> viewModel.fillField(action.field, action.value)
                 is ViewerAction.SignField -> viewModel.signField(action.index)
-                is ViewerAction.FinishSigning -> viewModel.finishSigning(action.name, action.consentText, action.seal)
+                is ViewerAction.FinishSigning -> viewModel.finishSigning(action.name, action.consentText, action.options)
                 is ViewerAction.MoveStamp -> viewModel.moveStamp(action.id, action.delta.x, action.delta.y)
                 is ViewerAction.ResizeStamp -> viewModel.resizeStamp(action.id, action.factor)
                 is ViewerAction.DeleteStamp -> viewModel.deleteStamp(action.id)
@@ -1039,10 +1040,10 @@ fun ViewerContent(
         FinishSigningDialog(
             initialName = signerName,
             onDismiss = { finishing = false },
-            onFinish = { name, consentText, seal ->
+            onFinish = { name, consentText, options ->
                 finishing = false
                 backToReading()
-                onAction(ViewerAction.FinishSigning(name, consentText, seal))
+                onAction(ViewerAction.FinishSigning(name, consentText, options))
             },
         )
     }
