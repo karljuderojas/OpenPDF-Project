@@ -115,7 +115,7 @@ fun PageGrid(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            items(drag.order, key = { PageKey(revision, it) }) { page ->
+            items(drag.order, key = { pageKey(revision, it) }) { page ->
                 val selected = page in selectedPages
                 val dragged = drag.page == page
                 val shape = RoundedCornerShape(4.dp)
@@ -223,8 +223,13 @@ private fun SelectionCircle(page: Int, selected: Boolean, onToggle: () -> Unit, 
     }
 }
 
-/** Grid keys change with every edit, so a page number is never mistaken for the page it replaced. */
-private data class PageKey(val revision: Int, val page: Int)
+/**
+ * Grid keys change with every edit, so a page number is never mistaken for the page it replaced.
+ * Strings, because Android needs lazy-grid keys it can put in a Bundle.
+ */
+private fun pageKey(revision: Int, page: Int) = "page:$revision:$page"
+
+private fun pageOfKey(key: Any): Int? = (key as? String)?.takeIf { it.startsWith("page:") }?.substringAfterLast(':')?.toIntOrNull()
 
 /**
  * A page being dragged to a new place. [order] is how the grid shows the pages (by their index in
@@ -241,7 +246,7 @@ private class PageDrag(private val grid: LazyGridState, private val revision: In
     private var startOffset = Offset.Zero
     private var delta by mutableStateOf(Offset.Zero)
 
-    private fun slot(page: Int) = grid.layoutInfo.visibleItemsInfo.firstOrNull { it.key == PageKey(revision, page) }
+    private fun slot(page: Int) = grid.layoutInfo.visibleItemsInfo.firstOrNull { it.key == pageKey(revision, page) }
 
     fun start(page: Int) {
         val slot = slot(page) ?: return
@@ -273,11 +278,10 @@ private class PageDrag(private val grid: LazyGridState, private val revision: In
     fun swapIfOver() {
         val held = page ?: return
         val center = center() ?: return
-        val target = grid.layoutInfo.visibleItemsInfo.firstOrNull {
-            val key = it.key as? PageKey ?: return@firstOrNull false
-            key.page != held && Rect(it.offset.toOffset(), it.size.toSize()).contains(center)
+        val target = grid.layoutInfo.visibleItemsInfo.firstNotNullOfOrNull { slot ->
+            pageOfKey(slot.key)?.takeIf { it != held && Rect(slot.offset.toOffset(), slot.size.toSize()).contains(center) }
         } ?: return
-        val to = order.indexOf((target.key as PageKey).page)
+        val to = order.indexOf(target)
         order = order.toMutableList().apply {
             remove(held)
             add(to, held)
