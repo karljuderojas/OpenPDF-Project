@@ -68,6 +68,9 @@ import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.home.HomeContent
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
 import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
+import io.github.karljuderojas.freepdf.ui.create.ImagesToPdfContent
+import io.github.karljuderojas.freepdf.pdf.create.PageFit
+import androidx.compose.ui.graphics.asImageBitmap
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
 import io.github.karljuderojas.freepdf.ui.viewer.DocumentInfoDialog
 import io.github.karljuderojas.freepdf.ui.viewer.AnnotateTool
@@ -140,6 +143,25 @@ class ScreenshotTest {
 
     @Test
     fun tools() = capture("tools") { shell(MainTab.Tools) { ToolsContent(onToolPicked = {}, modifier = it) } }
+
+    @Test
+    fun imagesToPdfEmpty() = capture("images_to_pdf_empty") {
+        ImagesToPdfContent(emptyList(), emptyMap(), PageFit.A4, null, false, {}, { _, _ -> }, {}, {}, {}, {})
+    }
+
+    @Test
+    fun imagesToPdfPicked() = capture("images_to_pdf_picked") {
+        val photos = listOf("content://a", "content://b", "content://c")
+        val thumbs = photos.zip(listOf(samplePages[0], samplePages[1], samplePages[0])).toMap().mapValues { it.value.asImageBitmap() }
+        ImagesToPdfContent(photos, thumbs, PageFit.A4, null, false, {}, { _, _ -> }, {}, {}, {}, {})
+    }
+
+    @Test
+    fun imagesToPdfMaking() = capture("images_to_pdf_making") {
+        val photos = listOf("content://a", "content://b", "content://c")
+        val thumbs = photos.zip(listOf(samplePages[0], samplePages[1], samplePages[0])).toMap().mapValues { it.value.asImageBitmap() }
+        ImagesToPdfContent(photos, thumbs, PageFit.Picture, 2, false, {}, { _, _ -> }, {}, {}, {}, {})
+    }
 
     @Test
     fun toolsSearch() = capture("tools_search_tick") {
@@ -224,6 +246,17 @@ class ScreenshotTest {
             recent = sampleRecent,
         )
     }
+
+    @Test
+    fun viewerReflow() = capture("viewer_reflow") { viewer(ViewerMode.Read, reflow = true) }
+
+    @Test
+    fun viewerReflowNightLarge() = capture("viewer_reflow_night_large") {
+        viewer(ViewerMode.Read, reflow = true, pageColors = PageColors.Night, readingTextSize = 26)
+    }
+
+    @Test
+    fun viewerReflowSepia() = capture("viewer_reflow_sepia") { viewer(ViewerMode.Read, reflow = true, pageColors = PageColors.Sepia) }
 
     @Test
     fun filesCloseUnsaved() = capture("files_close_unsaved") {
@@ -1212,6 +1245,8 @@ class ScreenshotTest {
         openDocuments: List<DocumentEntry> = emptyList(),
         unsavedDocuments: Set<String> = emptySet(),
         pageColors: PageColors = PageColors.Normal,
+        reflow: Boolean = false,
+        readingTextSize: Int = 18,
         tip: Int? = null,
         stamps: List<PlacedStamp> = emptyList(),
         selectedStamp: Long? = null,
@@ -1248,6 +1283,8 @@ class ScreenshotTest {
             unsavedDocuments = unsavedDocuments,
             currentUri = openDocuments.firstOrNull()?.uri,
             pageColors = pageColors,
+            initialReflow = reflow,
+            readingTextSize = readingTextSize,
             tip = tip,
             stamps = stamps,
             initialSelectedStamp = selectedStamp,

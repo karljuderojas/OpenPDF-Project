@@ -31,6 +31,16 @@ class AppSettings(private val prefs: SharedPreferences) {
     /** Applies to every document, so a reader who likes Night keeps it for the next file too. */
     val pageColors: StateFlow<PageColors> = _pageColors.asStateFlow()
 
+    private val _readingTextSize = MutableStateFlow(prefs.getInt(KEY_TEXT_SIZE, DEFAULT_TEXT_SIZE).coerceIn(MIN_TEXT_SIZE, MAX_TEXT_SIZE))
+
+    /** The size, in sp, of the text in reading mode. */
+    val readingTextSize: StateFlow<Int> = _readingTextSize.asStateFlow()
+
+    fun setReadingTextSize(size: Int) {
+        _readingTextSize.value = size.coerceIn(MIN_TEXT_SIZE, MAX_TEXT_SIZE)
+        prefs.edit().putInt(KEY_TEXT_SIZE, _readingTextSize.value).apply()
+    }
+
     fun setTheme(theme: ThemeChoice) {
         _theme.value = theme
         prefs.edit().putString(KEY_THEME, theme.name).apply()
@@ -46,9 +56,14 @@ class AppSettings(private val prefs: SharedPreferences) {
         prefs.edit().putString(KEY_PAGE_COLORS, colors.name).apply()
     }
 
-    private companion object {
-        const val KEY_THEME = "theme"
-        const val KEY_HISTORY = "remember_history"
-        const val KEY_PAGE_COLORS = "page_colors"
+    companion object {
+        const val MIN_TEXT_SIZE = 12
+        const val MAX_TEXT_SIZE = 36
+        const val DEFAULT_TEXT_SIZE = 18
+        const val TEXT_SIZE_STEP = 2
+        private const val KEY_TEXT_SIZE = "reading_text_size"
+        private const val KEY_THEME = "theme"
+        private const val KEY_HISTORY = "remember_history"
+        private const val KEY_PAGE_COLORS = "page_colors"
     }
 }

@@ -17,15 +17,15 @@ object PickedImage {
     const val MAX_SIDE = 2048
 
     /**
-     * Decodes [uri] into a software bitmap (PdfBox reads its pixels) no larger than [MAX_SIDE] on
-     * its long side. On Android 9 and later the photo is also turned the way the camera held it.
+     * Decodes [uri] into a software bitmap (PdfBox reads its pixels) no larger than [maxSide] (by default
+     * [MAX_SIDE]) on its long side. On Android 9 and later the photo is also turned the way the camera held it.
      */
-    fun load(context: Context, uri: Uri): Bitmap {
+    fun load(context: Context, uri: Uri, maxSide: Int = MAX_SIDE): Bitmap {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val source = ImageDecoder.createSource(context.contentResolver, uri)
             return ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                val scale = scaleFor(info.size.width, info.size.height)
+                val scale = scaleFor(info.size.width, info.size.height, maxSide)
                 if (scale < 1f) {
                     decoder.setTargetSize((info.size.width * scale).toInt().coerceAtLeast(1), (info.size.height * scale).toInt().coerceAtLeast(1))
                 }
@@ -34,14 +34,14 @@ object PickedImage {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_SIDE) sample *= 2
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxSide) sample *= 2
         val options = BitmapFactory.Options().apply { inSampleSize = sample }
         val decoded = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
             ?: error("Cannot decode $uri")
-        val scale = scaleFor(decoded.width, decoded.height)
+        val scale = scaleFor(decoded.width, decoded.height, maxSide)
         if (scale >= 1f) return decoded
         return Bitmap.createScaledBitmap(decoded, (decoded.width * scale).toInt().coerceAtLeast(1), (decoded.height * scale).toInt().coerceAtLeast(1), true)
     }
 
-    private fun scaleFor(width: Int, height: Int): Float = minOf(1f, MAX_SIDE.toFloat() / maxOf(width, height, 1))
+    private fun scaleFor(width: Int, height: Int, maxSide: Int): Float = minOf(1f, maxSide.toFloat() / maxOf(width, height, 1))
 }
