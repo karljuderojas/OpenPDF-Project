@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Looper
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,8 +42,12 @@ import io.github.karljuderojas.freepdf.pdf.text.PageText
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
+import io.github.karljuderojas.freepdf.settings.ThemeChoice
 import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
+import io.github.karljuderojas.freepdf.ui.home.HomeContent
+import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
+import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
 import io.github.karljuderojas.freepdf.ui.viewer.AnnotateTool
 import io.github.karljuderojas.freepdf.ui.viewer.ToolStyle
@@ -64,6 +69,8 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.util.Calendar
+
+private const val HOUR = 60 * 60 * 1000L
 
 /**
  * Renders each screen to a PNG. CI runs `recordRoborazziDebug` on every pull request and posts
@@ -87,25 +94,49 @@ class ScreenshotTest {
     private val sample = ViewerState.Ready(List(samplePages.size) { PageSize(612f, 792f) })
 
     @Test
+    fun home() = capture("home") { shell(MainTab.Home) { HomeContent(sampleRecent, {}, {}, {}, {}, {}, {}, modifier = it) } }
+
+    @Test
+    fun homeEmpty() = capture("home_empty") { shell(MainTab.Home) { HomeContent(emptyList(), {}, {}, {}, {}, {}, {}, modifier = it) } }
+
+    @Test
+    fun tools() = capture("tools") { shell(MainTab.Tools) { ToolsContent(onToolPicked = {}, modifier = it) } }
+
+    @Test
+    fun toolsSearch() = capture("tools_search_tick") {
+        shell(MainTab.Tools) { ToolsContent(onToolPicked = {}, modifier = it, initialQuery = "tick") }
+    }
+
+    @Test
+    fun toolsSearchNothing() = capture("tools_search_none") {
+        shell(MainTab.Tools) { ToolsContent(onToolPicked = {}, modifier = it, initialQuery = "spreadsheet") }
+    }
+
+    @Test
+    fun settings() = capture("settings") {
+        shell(MainTab.Settings) {
+            SettingsContent(
+                theme = ThemeChoice.System,
+                onTheme = {},
+                rememberHistory = true,
+                onRememberHistory = {},
+                onClearHistory = {},
+                version = "0.1.0",
+                onSourceCode = {},
+                modifier = it,
+            )
+        }
+    }
+
+    @Test
     fun filesEmpty() = capture("files_empty") { files(open = emptyList(), recent = emptyList()) }
 
     @Test
-    fun files() {
-        val hour = 60 * 60 * 1000L
-        val agreement = DocumentEntry("content://a", "Service Agreement.pdf", now - 1 * hour)
-        capture("files") {
-            files(
-                open = listOf(agreement, DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * hour)),
-                recent = listOf(
-                    agreement,
-                    DocumentEntry("content://c", "W-9 form.pdf", now - 5 * hour),
-                    DocumentEntry("content://d", "Bakery menu draft.pdf", now - 20 * hour),
-                    DocumentEntry("content://e", "Invoice 1042.pdf", now - 30 * hour),
-                    DocumentEntry("content://f", "Lease renewal 2027.pdf", now - 4 * 24 * hour),
-                    DocumentEntry("content://g", "Insurance claim.pdf", now - 9 * 24 * hour),
-                ),
-            )
-        }
+    fun files() = capture("files") {
+        files(
+            open = listOf(sampleRecent[0], DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * HOUR)),
+            recent = sampleRecent,
+        )
     }
 
     @Test
@@ -480,9 +511,24 @@ class ScreenshotTest {
     // 3 Oct 2026, 15:00 on the test machine's clock, so Today and Yesterday group the same way everywhere.
     private val now = Calendar.getInstance().apply { set(2026, Calendar.OCTOBER, 3, 15, 0, 0) }.timeInMillis
 
+    private val sampleRecent = listOf(
+        DocumentEntry("content://a", "Service Agreement.pdf", now - 1 * HOUR),
+        DocumentEntry("content://c", "W-9 form.pdf", now - 5 * HOUR),
+        DocumentEntry("content://d", "Bakery menu draft.pdf", now - 20 * HOUR),
+        DocumentEntry("content://e", "Invoice 1042.pdf", now - 30 * HOUR),
+        DocumentEntry("content://f", "Lease renewal 2027.pdf", now - 4 * 24 * HOUR),
+        DocumentEntry("content://g", "Insurance claim.pdf", now - 9 * 24 * HOUR),
+    )
+
     @Composable
-    private fun files(open: List<DocumentEntry>, recent: List<DocumentEntry>) {
-        FilesContent(open, recent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {}, now = now)
+    private fun files(open: List<DocumentEntry>, recent: List<DocumentEntry>) = shell(MainTab.Files) {
+        FilesContent(open, recent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {}, modifier = it, now = now)
+    }
+
+    /** A tab's screen inside the bottom tab bar, as the app shows it. */
+    @Composable
+    private fun shell(tab: MainTab, content: @Composable (Modifier) -> Unit) {
+        AppShell(selected = tab, onSelect = {}) { _, modifier -> content(modifier) }
     }
 
     @Composable
