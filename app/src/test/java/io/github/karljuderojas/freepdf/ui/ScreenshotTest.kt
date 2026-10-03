@@ -31,6 +31,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import androidx.core.content.res.ResourcesCompat
@@ -45,7 +46,10 @@ import io.github.karljuderojas.freepdf.pdf.form.FormFiller
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
+import io.github.karljuderojas.freepdf.pdf.DisplayRect
 import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
+import io.github.karljuderojas.freepdf.pdf.links.LinkTarget
+import io.github.karljuderojas.freepdf.pdf.links.PageLink
 import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
 import io.github.karljuderojas.freepdf.pdf.render.PageBox
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
@@ -55,7 +59,6 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureFields
 import io.github.karljuderojas.freepdf.pdf.text.PageText
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.edit.TextEditing.EditableLine
-import io.github.karljuderojas.freepdf.pdf.DisplayRect
 import io.github.karljuderojas.freepdf.ui.viewer.nearest
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
@@ -932,6 +935,35 @@ class ScreenshotTest {
 
     @Test
     fun viewerEditAddText() = capture("viewer_edit_add_text") { viewer(ViewerMode.Edit, tool = R.string.tool_add_text) }
+
+    @Test
+    fun viewerEditAddLink() = capture("viewer_edit_add_link") { viewer(ViewerMode.Edit, tool = R.string.tool_add_link) }
+
+    // Dragging a box over the page asks where the link should go.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerEditAddLinkAsk() {
+        show { viewer(ViewerMode.Edit, tool = R.string.tool_add_link) }
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("link-box-layer-0").performTouchInput {
+            swipe(Offset(width * 0.1f, height * 0.2f), Offset(width * 0.6f, height * 0.25f))
+        }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_edit_add_link_ask.png")
+    }
+
+    // Tapping a web link in a PDF asks before leaving the app.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerLinkOpen() {
+        val linked = sample.copy(links = listOf(PageLink(0, DisplayRect(0.1f, 0.1f, 0.6f, 0.15f), LinkTarget.Web("https://example.com/terms"))))
+        show { viewer(ViewerMode.Read, linked) }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("link-0-0").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_link_open.png")
+    }
 
     @Test
     fun viewerEditText() = capture("viewer_edit_text") { viewer(ViewerMode.Edit, tool = R.string.tool_edit_text) }
