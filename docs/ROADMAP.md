@@ -11,7 +11,7 @@ Goal: the features people use in PDFGear and Xodo, free, offline and open source
 - ⬜ Proper zoom and pan with sharp re-rendering at high zoom (tiled rendering)
 - ⬜ Text search, outline/bookmarks, go to page, page thumbnails
 - ⬜ Text selection with a Highlight / Underline / Note popup
-- ⬜ Files tab: open documents on top, recent history grouped by day, "Open file" through Android's file picker (stored on the device only)
+- ✅ Files tab: documents open this session on top, recent history grouped by Today / Yesterday / Earlier, "Open file" through Android's file picker (stored on the device only)
 - ⬜ Switcher between open documents, tab style
 - ⬜ Night mode, reading settings
 - ⬜ Password-protected PDFs
@@ -47,7 +47,7 @@ Goal: the features people use in PDFGear and Xodo, free, offline and open source
 - ⬜ Edit existing text (hard; needs font handling)
 
 ## More
-- ⬜ Share: send the current PDF (or the signed copy) to any app through Android's share sheet
+- ✅ Share: send the current PDF, unsaved changes included, to any app through Android's share sheet; also from a Recent row's menu
 - ⬜ Print
 - ⬜ Password protect / remove password
 - ⬜ Document info

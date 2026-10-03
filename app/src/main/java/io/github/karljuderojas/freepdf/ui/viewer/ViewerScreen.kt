@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -70,6 +71,7 @@ import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
+import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
 import kotlinx.coroutines.launch
 
@@ -83,6 +85,7 @@ sealed interface ViewerAction {
     data class InsertBlank(val afterPage: Int) : ViewerAction
     data class Move(val from: Int, val to: Int) : ViewerAction
     data object Merge : ViewerAction
+    data object Share : ViewerAction
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
     data class Stroke(val page: Int, val tool: AnnotateTool, val points: List<Offset>) : ViewerAction
@@ -104,6 +107,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
     val state by viewModel.state.collectAsStateWithLifecycle()
     val savedSignatures by viewModel.savedSignatures.collectAsStateWithLifecycle()
     val resources = LocalResources.current
+    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
     val saveAsPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) {
@@ -119,6 +123,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerEffect.Message -> launch { snackbarHostState.showSnackbar(resources.getString(effect.text)) }
                 is ViewerEffect.SaveAs -> saveAsPicker.launch(effect.suggestedName)
                 ViewerEffect.Close -> onBack()
+                is ViewerEffect.Share -> Sharing.shareFile(context, effect.file)
             }
         }
     }
@@ -139,6 +144,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.InsertBlank -> viewModel.insertBlankPage(action.afterPage)
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
                 ViewerAction.Merge -> mergePicker.launch(arrayOf("application/pdf"))
+                ViewerAction.Share -> viewModel.share()
                 is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.tool.rgb)
                 is ViewerAction.Box -> when (action.tool) {
                     AnnotateTool.Highlight -> Annotator.TextMarkup.Highlight
@@ -317,7 +323,9 @@ fun ViewerContent(
                         }
                     })
                 }
-                else -> ToolStrip(mode, selectedTool = null, onToolSelected = { comingSoon() })
+                else -> ToolStrip(mode, selectedTool = null, onToolSelected = {
+                    if (it == R.string.tool_share) onAction(ViewerAction.Share) else comingSoon()
+                })
             }
         },
     ) { padding ->
