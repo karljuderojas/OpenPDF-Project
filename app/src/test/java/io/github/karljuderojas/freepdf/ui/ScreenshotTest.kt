@@ -21,7 +21,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
 import androidx.compose.ui.unit.IntRect
@@ -704,15 +703,14 @@ class ScreenshotTest {
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerPagesSplitEvery() {
-        show { viewer(ViewerMode.Pages, sixPages, selectedPage = 0) }
+        // With the last page selected there is nothing to split after it, so the dialog opens in
+        // "every few pages" mode. Its text field never lets Compose go idle (see viewerPasswordAdd),
+        // so no further taps are possible once it is open; the clock is driven by hand instead.
+        show { viewer(ViewerMode.Pages, sixPages, selectedPage = 5) }
         composeRule.onNodeWithText("Split").performScrollTo()
         composeRule.waitForIdle()
         composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithText("Split").performClick()
-        composeRule.mainClock.advanceTimeBy(1_000)
-        // Every two pages, so the six-page document comes out as three PDFs.
-        composeRule.onNodeWithTag("split-every").performClick()
-        composeRule.onNodeWithTag("split-pages-each").performTextReplacement("2")
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_split_every.png")
     }
