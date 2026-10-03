@@ -188,6 +188,17 @@ class EditSessionTest {
     }
 
     @Test
+    fun redoingAnUndonePasswordLocksTheFileAgain() {
+        session.setPassword("lease2026")
+        session.undo()
+        session.redo()
+
+        assertEquals("lease2026", session.password)
+        assertFalse(PdfDocuments.opens(session.workingFile, ""))
+        assertTrue(PdfDocuments.opens(session.workingFile, "lease2026"))
+    }
+
+    @Test
     fun aPasswordCanBeChangedAndRemoved() {
         session.setPassword("lease2026")
         session.setPassword("renewal2027")
