@@ -41,7 +41,7 @@ private const val NO_TOOL = 0
 fun FreePdfNavHost(incomingPdf: Uri?, onIncomingPdfHandled: () -> Unit) {
     val navController = rememberNavController()
     val openPdf: (Uri, ViewerMode, Int?) -> Unit = { uri, mode, tool ->
-        navController.navigate("viewer?uri=${Uri.encode(uri.toString())}&mode=${mode.name}&tool=${tool ?: NO_TOOL}")
+        navController.navigate(viewerRoute(uri, mode, tool))
     }
 
     LaunchedEffect(incomingPdf) {
@@ -67,10 +67,24 @@ fun FreePdfNavHost(incomingPdf: Uri?, onIncomingPdfHandled: () -> Unit) {
             val uri = Uri.parse(args?.getString("uri").orEmpty())
             val mode = ViewerMode.entries.firstOrNull { it.name == args?.getString("mode") } ?: ViewerMode.Read
             val tool = args?.getInt("tool")?.takeIf { it != NO_TOOL }
-            ViewerScreen(uri = uri, onBack = { navController.popBackStack() }, initialMode = mode, initialTool = tool)
+            ViewerScreen(
+                uri = uri,
+                onBack = { navController.popBackStack() },
+                initialMode = mode,
+                initialTool = tool,
+                // The other document takes this one's place, so Back still returns to the tabs.
+                onSwitchTo = { other ->
+                    navController.navigate(viewerRoute(other, ViewerMode.Read, null)) {
+                        popUpTo(VIEWER) { inclusive = true }
+                    }
+                },
+            )
         }
     }
 }
+
+private fun viewerRoute(uri: Uri, mode: ViewerMode, tool: Int?): String =
+    "viewer?uri=${Uri.encode(uri.toString())}&mode=${mode.name}&tool=${tool ?: NO_TOOL}"
 
 /** The four tabs. Home's shortcuts and the Tools tab ask for a PDF, then open it in a mode. */
 @Composable
@@ -121,6 +135,7 @@ private fun MainScreen(openPdf: (Uri, ViewerMode, Int?) -> Unit) {
             MainTab.Settings -> {
                 val theme by app.settings.theme.collectAsStateWithLifecycle()
                 val rememberHistory by app.settings.rememberHistory.collectAsStateWithLifecycle()
+                val pageColors by app.settings.pageColors.collectAsStateWithLifecycle()
                 val showTips by app.tips.enabled.collectAsStateWithLifecycle()
                 SettingsContent(
                     theme = theme,
@@ -139,6 +154,8 @@ private fun MainScreen(openPdf: (Uri, ViewerMode, Int?) -> Unit) {
                         Toast.makeText(context, R.string.settings_reset_tips_done, Toast.LENGTH_SHORT).show()
                     },
                     modifier = modifier,
+                    pageColors = pageColors,
+                    onPageColors = app.settings::setPageColors,
                 )
             }
         }

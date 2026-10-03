@@ -4,7 +4,7 @@ Goal: the features people use in PDFGear and Xodo, free, offline and open source
 
 ✅ done in the scaffold · 🧱 code exists, no UI yet · ⬜ not started
 
-The app shows no button for ⬜ items: each tool joins its mode's strip (`ViewerMode`) when it ships, and Edit mode stays off the bar until its first tool does.
+The app shows no button for ⬜ items: each tool joins its mode's strip (`ViewerMode`) when it ships, and a mode with no working tools stays off the bar.
 
 ## Viewing
 - ✅ Open from the file picker and from other apps (file managers, email, browsers)
@@ -46,10 +46,10 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 ## Editing (Edit and Pages modes)
 - ✅ Pages mode: thumbnail grid; rotate, move, insert blank, delete and merge the selected page
 - ✅ Edits go to a private working copy with undo; Save writes back, or asks where to save when the file is read-only; leaving with unsaved changes asks first
-- 🧱 Add text (`PageEditor.addText`)
+- ✅ Edit mode: Add text and Add image (photo picker), moved, resized or deleted on the page, then written into the PDF on Done; photos are stored as JPEG, transparent pictures losslessly
 - ⬜ Drag to reorder in the page grid, multi-select
 - ✅ Extract and split: save chosen pages (typed like 1-3, 5) as a new PDF, or split into two after the selected page or every few pages into a folder you pick; the open PDF stays as it is
-- ⬜ Add image, redact (true removal, not a black box), links
+- ⬜ Redact (true removal, not a black box), links
 - ⬜ Edit existing text (hard; needs font handling)
 
 ## More
