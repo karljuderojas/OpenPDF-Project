@@ -32,7 +32,7 @@ class WatermarksTest {
     fun textLandsOnlyOnTheNamedPages() {
         sample().use { document ->
             PageEditor.insertBlank(document, 1)
-            Watermarks.addText(document, listOf(1), "CONFIDENTIAL", WatermarkStyle())
+            Watermarks.addText(document, listOf(1), "CONFIDENTIAL", WatermarkStyle(angle = 0f))
             assertTrue(text(document, page = 2).contains("CONFIDENTIAL"))
             assertFalse(text(document, page = 1).contains("CONFIDENTIAL"))
         }
@@ -44,8 +44,9 @@ class WatermarksTest {
             Watermarks.addText(document, listOf(0), "DRAFT", WatermarkStyle(opacity = 0.25f, angle = 45f))
             val page = document.getPage(0)
             val content = page.contents.use { it.readBytes() }.toString(Charsets.ISO_8859_1)
-            // 45 degrees turned: cos and sin are both about 0.7071 in the rotation matrix.
-            assertTrue(content, content.contains("0.70710"))
+            // 45 degrees turned: cos and sin are both about 0.70711 in the rotation matrix. (Turned text
+            // is also what text extraction splits up, so the tests that read text use an angle of 0.)
+            assertTrue(content, content.contains("0.70711"))
             val states = page.resources.extGStateNames.map { page.resources.getExtGState(it) }
             assertTrue(states.any { it.nonStrokingAlphaConstant == 0.25f })
         }
@@ -63,7 +64,7 @@ class WatermarksTest {
     @Test
     fun lettersOutsideLatinDoNotThrow() {
         sample().use { document ->
-            Watermarks.addText(document, listOf(0), "СЕКРЕТНО", WatermarkStyle())
+            Watermarks.addText(document, listOf(0), "СЕКРЕТНО", WatermarkStyle(angle = 0f))
             assertTrue(text(document, page = 1).contains("СЕКРЕТНО"))
         }
     }
