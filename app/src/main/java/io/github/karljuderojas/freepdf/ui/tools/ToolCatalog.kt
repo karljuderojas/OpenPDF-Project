@@ -16,7 +16,7 @@ data class ToolEntry(val mode: ViewerMode, @StringRes val label: Int) {
      * Annotate and Sign tools, and Edit's Add text, stay selected; Pages and More tools and Add
      * image act once, so only the mode opens.
      */
-    val preselects: Boolean get() = mode == ViewerMode.Annotate || mode == ViewerMode.Sign || label == R.string.tool_add_text
+    val preselects: Boolean get() = mode == ViewerMode.Annotate || mode == ViewerMode.Sign || label == R.string.tool_add_text || label == R.string.tool_edit_text
 }
 
 /**
@@ -64,6 +64,7 @@ private val descriptions = mapOf(
     R.string.tool_note to R.string.tool_about_note,
     R.string.tool_shapes to R.string.tool_about_shapes,
     R.string.tool_eraser to R.string.tool_about_eraser,
+    R.string.tool_edit_text to R.string.tool_about_edit_text,
     R.string.tool_add_text to R.string.tool_about_add_text,
     R.string.tool_add_image to R.string.tool_about_add_image,
     R.string.tool_rotate to R.string.tool_about_rotate,
@@ -73,6 +74,7 @@ private val descriptions = mapOf(
     R.string.tool_insert to R.string.tool_about_insert,
     R.string.tool_delete to R.string.tool_about_delete,
     R.string.tool_merge to R.string.tool_about_merge,
+    R.string.tool_watermark to R.string.tool_about_watermark,
     R.string.tool_share to R.string.tool_about_share,
     R.string.tool_password to R.string.tool_about_password,
     R.string.tool_info to R.string.tool_about_info,
@@ -92,6 +94,7 @@ private val synonymLists = mapOf(
     R.string.tool_note to R.string.tool_synonyms_note,
     R.string.tool_shapes to R.string.tool_synonyms_shapes,
     R.string.tool_eraser to R.string.tool_synonyms_eraser,
+    R.string.tool_edit_text to R.string.tool_synonyms_edit_text,
     R.string.tool_add_text to R.string.tool_synonyms_add_text,
     R.string.tool_add_image to R.string.tool_synonyms_add_image,
     R.string.tool_rotate to R.string.tool_synonyms_rotate,
@@ -101,6 +104,7 @@ private val synonymLists = mapOf(
     R.string.tool_insert to R.string.tool_synonyms_insert,
     R.string.tool_delete to R.string.tool_synonyms_delete,
     R.string.tool_merge to R.string.tool_synonyms_merge,
+    R.string.tool_watermark to R.string.tool_synonyms_watermark,
     R.string.tool_share to R.string.tool_synonyms_share,
     R.string.tool_password to R.string.tool_synonyms_password,
     R.string.tool_info to R.string.tool_synonyms_info,
