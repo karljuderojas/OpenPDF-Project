@@ -150,6 +150,16 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_pad.png")
     }
 
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerSignFinish() {
+        show { viewer(ViewerMode.Sign, sample.copy(canUndo = true, hasUnsavedChanges = true, hasSignature = true), signerName = "Dana Whitfield") }
+        composeRule.onNodeWithText("Finish").performClick()
+        composeRule.onNodeWithTag("consent").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_finish.png")
+    }
+
     @Test
     fun viewerPages() = capture("viewer_pages") {
         viewer(ViewerMode.Pages, sample.copy(canUndo = true, hasUnsavedChanges = true), selectedPage = 1)
@@ -183,6 +193,7 @@ class ScreenshotTest {
         selectedPage: Int = 0,
         tool: Int? = null,
         savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
+        signerName: String = "",
     ) {
         ViewerContent(
             state = state,
@@ -192,6 +203,7 @@ class ScreenshotTest {
             initialSelectedPage = selectedPage,
             initialTool = tool,
             savedSignatures = savedSignatures,
+            signerName = signerName,
         )
     }
 

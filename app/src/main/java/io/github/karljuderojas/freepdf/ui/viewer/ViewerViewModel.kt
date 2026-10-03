@@ -1,9 +1,11 @@
 package io.github.karljuderojas.freepdf.ui.viewer
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import android.util.LruCache
 import androidx.annotation.StringRes
@@ -24,8 +26,15 @@ import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.render.PdfRenderer
+import io.github.karljuderojas.freepdf.pdf.sign.AuditEvent
+import io.github.karljuderojas.freepdf.pdf.sign.AuditTrail
+import io.github.karljuderojas.freepdf.pdf.sign.DocumentHash
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStamper
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
+import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
+import io.github.karljuderojas.freepdf.pdf.sign.SignerRecord
+import io.github.karljuderojas.freepdf.pdf.sign.SigningIdentity
 import io.github.karljuderojas.freepdf.share.Sharing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -40,18 +49,23 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.DateFormat
+import java.time.Instant
 import java.util.Date
 import java.util.UUID
 
 sealed interface ViewerState {
     data object Loading : ViewerState
 
-    /** [revision] changes after every edit, so pages already on screen are rendered again. */
+    /**
+     * [revision] changes after every edit, so pages already on screen are rendered again.
+     * [hasSignature] is true once a signature or initials are placed, which offers Finish.
+     */
     data class Ready(
         val pageSizes: List<PageSize>,
         val revision: Int = 0,
         val canUndo: Boolean = false,
         val hasUnsavedChanges: Boolean = false,
+        val hasSignature: Boolean = false,
     ) : ViewerState
 
     data class Failed(val message: String?) : ViewerState
@@ -63,6 +77,9 @@ sealed interface ViewerEffect {
     data class SaveAs(val suggestedName: String) : ViewerEffect
     data object Close : ViewerEffect
     data class Share(val file: File) : ViewerEffect
+
+    /** Ask where to save the signed copy; see [ViewerViewModel.saveSignedCopy]. */
+    data class SaveSigned(val suggestedName: String) : ViewerEffect
 }
 
 class ViewerViewModel(application: Application) : AndroidViewModel(application) {
@@ -78,6 +95,21 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     private var openedUri: Uri? = null
     private var revision = 0
     private var closeAfterSave = false
+
+    // For the audit page: the original's fingerprint, when it was opened, and one entry per
+    // edit (null for edits that are not part of signing), so undo can drop the matching entry.
+    private var originalSha256 = ""
+    private var openedAt = Instant.now()
+    private val editLog = ArrayList<AuditEvent?>()
+
+    /** The finished signed copy, in the cache, waiting for the user to pick where it goes. */
+    private var pendingSignedCopy: File? = null
+
+    private val signingPrefs = application.getSharedPreferences("signing", Context.MODE_PRIVATE)
+    private val _signerName = MutableStateFlow(signingPrefs.getString(KEY_SIGNER_NAME, "").orEmpty())
+
+    /** The name typed at the last Finish, to fill in next time. */
+    val signerName: StateFlow<String> = _signerName.asStateFlow()
 
     // Guards the renderer and the working copy: PDFium renders one page at a time, and an edit
     // swaps both the file and the renderer underneath any page that is mid-render.
@@ -117,6 +149,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         val newSession = input.use { EditSession(dir, it) }
                         session?.close()
                         session = newSession
+                        originalSha256 = newSession.workingFile.inputStream().use { DocumentHash.sha256(it) }
+                        openedAt = Instant.now()
+                        editLog.clear()
                     }
                     reloadLocked()
                 }
@@ -199,7 +234,8 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     /** Stamps the saved signature or initials so they sit on the line the user tapped. */
     fun placeSignature(page: Int, at: Offset, kind: SignatureStore.Kind) {
         val image = _savedSignatures.value[kind] ?: return
-        edit { document ->
+        val what = if (kind == SignatureStore.Kind.Initials) "initials" else "signature"
+        edit(event = AuditEvent(AuditEvent.Type.Signed, SIGNER, detail = "$what on page ${page + 1}")) { document ->
             val point = displayMapper(document, page)(at)
             val maxWidth = if (kind == SignatureStore.Kind.Initials) 60f else 160f
             val maxHeight = if (kind == SignatureStore.Kind.Initials) 32f else 56f
@@ -213,15 +249,110 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addDate(page: Int, at: Offset) {
         val today = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date())
-        addText(page, at, today)
+        placeText(page, at, today, "date")
     }
 
-    fun addText(page: Int, at: Offset, text: String) = edit { document ->
+    fun addText(page: Int, at: Offset, text: String) = placeText(page, at, text, "text")
+
+    private fun placeText(page: Int, at: Offset, text: String, what: String) = edit(event = filled(what, page)) { document ->
         PageEditor.addText(document, page, text, displayMapper(document, page)(at), fontSize = 11f)
     }
 
-    fun addCheckmark(page: Int, at: Offset) = edit { document ->
+    fun addCheckmark(page: Int, at: Offset) = edit(event = filled("checkmark", page)) { document ->
         PageEditor.addCheckmark(document, page, displayMapper(document, page)(at))
+    }
+
+    private fun filled(what: String, page: Int) =
+        AuditEvent(AuditEvent.Type.FieldFilled, SIGNER, detail = "$what on page ${page + 1}")
+
+    /**
+     * Builds the signed copy: everything placed so far, a signing certificate page naming
+     * [name] with the [consentText] they agreed to, and, if [seal], a digital signature from a
+     * key kept in this phone's Keystore. The user then picks where to save it.
+     */
+    fun finishSigning(name: String, consentText: String, seal: Boolean) {
+        val uri = openedUri ?: return
+        _signerName.value = name
+        signingPrefs.edit().putString(KEY_SIGNER_NAME, name).apply()
+        viewModelScope.launch {
+            val copy = runCatching {
+                lock.withLock {
+                    withContext(Dispatchers.IO) {
+                        val current = session ?: error("Nothing is open")
+                        val now = Instant.now()
+                        val documentName = displayName(uri)
+                        val trail = AuditTrail(
+                            documentName = documentName,
+                            originalSha256 = originalSha256,
+                            events = buildList {
+                                add(AuditEvent(AuditEvent.Type.Opened, name, openedAt))
+                                editLog.filterNotNull().forEach { add(it.copy(actor = name)) }
+                                add(AuditEvent(AuditEvent.Type.Completed, name, now))
+                            },
+                        ).withSigner(
+                            SignerRecord(
+                                name = name,
+                                email = null,
+                                signedAt = now,
+                                method = SignatureMethod.Drawn,
+                                reason = null,
+                                device = "${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}",
+                                consentText = consentText,
+                            ),
+                        )
+                        // One key per name, so the certificate always names whoever is signing.
+                        val identity = if (seal) {
+                            SigningIdentity.deviceIdentity(name, "freepdf-signing-" + DocumentHash.sha256(name.toByteArray()).take(16))
+                        } else {
+                            null
+                        }
+                        val out = File(context.cacheDir, "signed/${UUID.randomUUID()}.pdf").apply { parentFile?.mkdirs() }
+                        out.outputStream().use { output ->
+                            SignedCopy.write(current.workingFile, trail, name, identity, output, File(out.path + ".tmp"))
+                        }
+                        pendingSignedCopy?.delete()
+                        pendingSignedCopy = out
+                        SignedCopy.suggestedName(documentName)
+                    }
+                }
+            }
+            copy.onSuccess { _effects.send(ViewerEffect.SaveSigned(it)) }
+                .onFailure { _effects.send(ViewerEffect.Message(R.string.sign_failed)) }
+        }
+    }
+
+    /**
+     * Writes the signed copy to [target] and opens it in place of the original, which is left
+     * as it was. Further edits would break the digital signature, so the viewer starts clean.
+     */
+    fun saveSignedCopy(target: Uri) {
+        val copy = pendingSignedCopy ?: return
+        pendingSignedCopy = null
+        viewModelScope.launch {
+            val saved = runCatching {
+                withContext(Dispatchers.IO) {
+                    val output = context.contentResolver.openOutputStream(target, "wt") ?: error("Cannot write $target")
+                    output.use { out -> copy.inputStream().use { it.copyTo(out) } }
+                    copy.delete()
+                }
+            }.isSuccess
+            if (saved) {
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        target, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                    )
+                }
+                open(target)
+                _effects.send(ViewerEffect.Message(R.string.signed_copy_saved))
+            } else {
+                _effects.send(ViewerEffect.Message(R.string.save_failed))
+            }
+        }
+    }
+
+    fun cancelSignedCopy() {
+        pendingSignedCopy?.delete()
+        pendingSignedCopy = null
     }
 
     /** Shares the PDF as it is now, unsaved changes included, under the file's own name. */
@@ -244,7 +375,12 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     fun undo() {
         viewModelScope.launch {
             lock.withLock {
-                withContext(Dispatchers.IO) { session?.undo() }
+                withContext(Dispatchers.IO) {
+                    session?.takeIf { it.canUndo }?.let {
+                        it.undo()
+                        editLog.removeLastOrNull()
+                    }
+                }
                 _state.value = reloadLocked()
             }
         }
@@ -301,12 +437,16 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     /** Thrown from an edit that turns out to have nothing to do, so no undo step is recorded. */
     private class NothingChanged : Exception()
 
-    private fun edit(@StringRes onNoChange: Int? = null, change: (PDDocument) -> Unit) {
+    /** Applies [change] as one undo step. [event] goes on the audit page if the user finishes signing. */
+    private fun edit(@StringRes onNoChange: Int? = null, event: AuditEvent? = null, change: (PDDocument) -> Unit) {
         viewModelScope.launch {
             lock.withLock {
                 val result = runCatching { withContext(Dispatchers.IO) { session?.edit(change) } }
                 when (val error = result.exceptionOrNull()) {
-                    null -> _state.value = reloadLocked()
+                    null -> {
+                        editLog += event?.copy(at = Instant.now())
+                        _state.value = reloadLocked()
+                    }
                     is NothingChanged -> onNoChange?.let { _effects.send(ViewerEffect.Message(it)) }
                     else -> _effects.send(ViewerEffect.Message(R.string.edit_failed))
                 }
@@ -337,7 +477,8 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         revision++
         val next = PdfRenderer.open(context, Uri.fromFile(current.workingFile))
         renderer = next
-        return ViewerState.Ready(next.pageSizes, revision, current.canUndo, current.hasUnsavedChanges)
+        val hasSignature = editLog.any { it?.type == AuditEvent.Type.Signed }
+        return ViewerState.Ready(next.pageSizes, revision, current.canUndo, current.hasUnsavedChanges, hasSignature)
     }
 
     /** Lists [uri] in the Files tab; in the history too if the app can reopen it later. */
@@ -361,9 +502,14 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         renderer?.close()
         session?.close()
         cache.evictAll()
+        pendingSignedCopy?.delete()
     }
 
     private companion object {
         const val CACHE_BYTES = 96 * 1024 * 1024
+        const val KEY_SIGNER_NAME = "name"
+
+        // Who placed things is only known at Finish, where this is replaced by the typed name.
+        const val SIGNER = "signer"
     }
 }
