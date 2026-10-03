@@ -205,6 +205,11 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
 
     private var renderer: PdfRenderer? = null
 
+    private val pendingInk = PendingInk()
+
+    /** Pen strokes drawn but not yet on the rendered page, which the screen draws over it meanwhile. */
+    val pendingStrokes: StateFlow<List<PendingStroke>> = pendingInk.strokes
+
     // The open documents' sessions live in the application, so they survive this view model
     // (switching documents replaces it) and switching back finds edits, undo and place as left.
     private val sessions = getApplication<FreePdfApp>().sessions
@@ -407,6 +412,7 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
         if (uri == requestedUri) return
         requestedUri = uri
         _state.value = ViewerState.Loading
+        pendingInk.clear()
         viewModelScope.launch {
             _state.value = runCatching {
                 lock.withLock {
@@ -512,9 +518,9 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
     }
 
     suspend fun page(index: Int, widthPx: Int): Bitmap? {
-        val key = "$revision/$index@$widthPx"
-        cache.get(key)?.let { return it }
-        return lock.withLock {
+        val shown = revision
+        val key = "$shown/$index@$widthPx"
+        val bitmap = cache.get(key) ?: lock.withLock {
             val current = renderer ?: return@withLock null
             if (index >= current.pageCount) return@withLock null
             cache.get(key) ?: runCatching { current.renderPage(index, widthPx) }
@@ -522,6 +528,9 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
                 // A page too big for the heap stays blank rather than taking the app down.
                 .getOrElse { if (it is OutOfMemoryError) null else throw it }
         }
+        // The pen strokes saved by then are in this picture, so the screen stops drawing them itself.
+        if (bitmap != null) pendingInk.rendered(index, shown)
+        return bitmap
     }
 
     /**
@@ -599,9 +608,18 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
         PdfDocuments.load(context, other).use { PageEditor.append(document, it) }
     }
 
-    fun ink(page: Int, strokes: List<List<Offset>>, style: ToolStyle) = mark { document ->
-        val toPdf = displayMapper(document, page)
-        Annotator.ink(document, page, strokes.map { stroke -> stroke.map(toPdf) }, style.rgb, style.width)
+    /**
+     * Adds [strokes] to [page] as one ink mark. They show over the page at once (see [pendingStrokes])
+     * and stay there until the page is rendered with them.
+     */
+    fun ink(page: Int, strokes: List<List<Offset>>, style: ToolStyle) {
+        val ids = strokes.map { pendingInk.add(page, it, style) }
+        mark(onDone = { landedAt ->
+            ids.forEach { id -> if (landedAt != null) pendingInk.landed(id, landedAt) else pendingInk.dropped(id) }
+        }) { document ->
+            val toPdf = displayMapper(document, page)
+            Annotator.ink(document, page, strokes.map { stroke -> stroke.map(toPdf) }, style.rgb, style.width)
+        }
     }
 
     fun markText(page: Int, start: Offset, end: Offset, kind: Annotator.TextMarkup, style: ToolStyle) =
@@ -1513,18 +1531,25 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
 
     /**
      * [edit] for a change that only adds, alters or removes marks, so the pages' text is as it
-     * was and the words already read from them need not be read again.
+     * was and the words already read from them need not be read again. [onDone] is as for [update].
      */
-    private fun mark(@StringRes onNoChange: Int? = null, change: (PDDocument) -> Unit) =
-        update(onNoChange, keepsText = true) { it.edit(change) }
+    private fun mark(
+        @StringRes onNoChange: Int? = null,
+        onDone: (revision: Int?) -> Unit = {},
+        change: (PDDocument) -> Unit,
+    ) = update(onNoChange, keepsText = true, onDone = onDone) { it.edit(change) }
 
-    /** Makes one undo step through [step], like [edit] does, then shows [done] if given. */
+    /**
+     * Makes one undo step through [step], like [edit] does, then shows [done] if given. [onDone]
+     * hears the revision the change is in once it is on screen, or null if it was not made.
+     */
     private fun update(
         @StringRes onNoChange: Int? = null,
         event: AuditEvent? = null,
         @StringRes done: Int? = null,
         movesPages: Boolean = false,
         keepsText: Boolean = false,
+        onDone: (revision: Int?) -> Unit = {},
         step: (EditSession) -> Unit,
     ) {
         viewModelScope.launch {
@@ -1536,14 +1561,17 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
                         redoLog.clear()
                         if (movesPages) signFields = null
                         _state.value = reloadOrFail(pageEdit = movesPages, keepText = keepsText)
+                        onDone(revision)
                         done?.let { _effects.send(ViewerEffect.Message(it)) }
                     }
                     is NothingChanged -> {
                         if (movesPages) failedPageEdit()
+                        onDone(null)
                         onNoChange?.let { _effects.send(ViewerEffect.Message(it)) }
                     }
                     else -> {
                         if (movesPages) failedPageEdit()
+                        onDone(null)
                         _effects.send(ViewerEffect.Message(R.string.edit_failed))
                     }
                 }
