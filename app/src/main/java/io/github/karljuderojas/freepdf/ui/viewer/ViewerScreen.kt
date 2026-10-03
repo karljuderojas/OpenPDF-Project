@@ -117,6 +117,7 @@ sealed interface ViewerAction {
     data class Move(val from: Int, val to: Int) : ViewerAction
     data object Merge : ViewerAction
     data object Share : ViewerAction
+    data object ShowInfo : ViewerAction
     data object Print : ViewerAction
     data class Search(val query: String) : ViewerAction
     data class Unlock(val password: String) : ViewerAction
@@ -172,6 +173,7 @@ fun ViewerScreen(
     val resources = LocalResources.current
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    var shownInfo by remember { mutableStateOf<ViewerEffect.ShowInfo?>(null) }
     val scope = rememberCoroutineScope()
     fun launchMessage(@StringRes text: Int) {
         scope.launch { snackbarHostState.showSnackbar(resources.getString(text)) }
@@ -196,6 +198,7 @@ fun ViewerScreen(
                 is ViewerEffect.Share -> Sharing.shareFile(context, effect.file)
                 is ViewerEffect.Print -> Printing.print(context, effect.file, effect.name, effect.pageCount)
                 is ViewerEffect.SaveSigned -> signedCopyPicker.launch(effect.suggestedName)
+                is ViewerEffect.ShowInfo -> shownInfo = effect
             }
         }
     }
@@ -226,6 +229,7 @@ fun ViewerScreen(
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
                 ViewerAction.Merge -> mergePicker.launch(arrayOf("application/pdf"))
                 ViewerAction.Share -> viewModel.share()
+                ViewerAction.ShowInfo -> viewModel.documentInfo()
                 ViewerAction.Print -> viewModel.print()
                 is ViewerAction.Search -> viewModel.search(action.query)
                 is ViewerAction.Unlock -> viewModel.unlock(action.password)
@@ -264,6 +268,8 @@ fun ViewerScreen(
             }
         },
     )
+
+    shownInfo?.let { DocumentInfoDialog(it.name, it.info, onDismiss = { shownInfo = null }) }
 }
 
 /** Stateless viewer UI, so it can be previewed and screenshot-tested without a real PDF. */
@@ -533,6 +539,7 @@ fun ViewerContent(
                 else -> ToolStrip(mode, selectedTool = null, onToolSelected = {
                     when (it) {
                         R.string.tool_share -> onAction(ViewerAction.Share)
+                        R.string.tool_info -> onAction(ViewerAction.ShowInfo)
                         R.string.tool_print -> onAction(ViewerAction.Print)
                     }
                 })

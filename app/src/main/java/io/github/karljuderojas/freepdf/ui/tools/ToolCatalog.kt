@@ -59,6 +59,7 @@ private val descriptions = mapOf(
     R.string.tool_delete to R.string.tool_about_delete,
     R.string.tool_merge to R.string.tool_about_merge,
     R.string.tool_share to R.string.tool_about_share,
+    R.string.tool_info to R.string.tool_about_info,
     R.string.tool_print to R.string.tool_about_print,
 )
 
@@ -82,5 +83,6 @@ private val synonymLists = mapOf(
     R.string.tool_delete to R.string.tool_synonyms_delete,
     R.string.tool_merge to R.string.tool_synonyms_merge,
     R.string.tool_share to R.string.tool_synonyms_share,
+    R.string.tool_info to R.string.tool_synonyms_info,
     R.string.tool_print to R.string.tool_synonyms_print,
 )
