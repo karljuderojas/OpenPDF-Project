@@ -71,6 +71,21 @@ class Documents(
         writeRecent()
     }
 
+    /**
+     * After the file behind [oldUri] was renamed: the history entry and the open-list entry (same
+     * place, same time) take the new URI and name. Only called for a document without unsaved
+     * changes, whose session the caller has closed, since sessions are keyed by URI.
+     */
+    fun renamed(oldUri: String, newUri: String, newName: String) {
+        fun swap(list: List<DocumentEntry>) = list.map { if (it.uri == oldUri) it.copy(uri = newUri, name = newName) else it }
+            .distinctBy { it.uri }
+        _open.update(::swap)
+        if (_recent.value.any { it.uri == oldUri }) {
+            _recent.update(::swap)
+            writeRecent()
+        }
+    }
+
     /** Empties the history. Files open right now stay open. */
     fun clearHistory() {
         _recent.value = emptyList()
