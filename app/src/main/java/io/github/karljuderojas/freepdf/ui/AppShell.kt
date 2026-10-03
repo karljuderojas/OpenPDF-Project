@@ -13,6 +13,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
@@ -38,10 +39,13 @@ enum class MainTab(@StringRes val label: Int) {
 
 /**
  * The home level of the app: one tab's screen above the bottom tab bar. Each tab draws its own
- * top bar; [content] gets a modifier that keeps it clear of the tab bar.
+ * top bar; [content] gets a modifier that keeps it clear of the tab bar. Each tab's saveable
+ * state (scroll positions, search text, open menus) is kept while another tab is shown, so
+ * coming back finds it as it was left.
  */
 @Composable
 fun AppShell(selected: MainTab, onSelect: (MainTab) -> Unit, content: @Composable (MainTab, Modifier) -> Unit) {
+    val tabStates = rememberSaveableStateHolder()
     Scaffold(
         bottomBar = {
             NavigationBar {
@@ -56,6 +60,8 @@ fun AppShell(selected: MainTab, onSelect: (MainTab) -> Unit, content: @Composabl
             }
         },
     ) { padding ->
-        content(selected, Modifier.padding(padding).consumeWindowInsets(padding))
+        tabStates.SaveableStateProvider(key = selected.name) {
+            content(selected, Modifier.padding(padding).consumeWindowInsets(padding))
+        }
     }
 }

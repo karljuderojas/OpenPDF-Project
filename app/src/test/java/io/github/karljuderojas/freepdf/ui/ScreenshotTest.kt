@@ -136,6 +136,27 @@ class ScreenshotTest {
     }
 
     @Test
+    fun toolsSearchKeptAcrossTabs() {
+        // Tabs keep their state while another is shown: the search typed in Tools is still there
+        // after a trip to Home, so this matches tools_search_tick.
+        show {
+            var tab by remember { mutableStateOf(MainTab.Tools) }
+            AppShell(selected = tab, onSelect = { tab = it }) { selected, modifier ->
+                when (selected) {
+                    MainTab.Tools -> ToolsContent(onToolPicked = {}, modifier = modifier)
+                    else -> HomeContent(emptyList(), {}, {}, {}, {}, {}, {}, modifier = modifier)
+                }
+            }
+        }
+        composeRule.onNodeWithTag("tools-search").performTextInput("tick")
+        composeRule.onNodeWithText("Home").performClick()
+        composeRule.onNodeWithText("Tools").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("tools-search").assertTextContains("tick")
+        captureRoot("tools_search_kept")
+    }
+
+    @Test
     fun toolsSearchNothing() = capture("tools_search_none") {
         shell(MainTab.Tools) { ToolsContent(onToolPicked = {}, modifier = it, initialQuery = "spreadsheet") }
     }
