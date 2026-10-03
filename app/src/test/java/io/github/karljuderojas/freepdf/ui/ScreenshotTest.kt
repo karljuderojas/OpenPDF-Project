@@ -135,9 +135,6 @@ class ScreenshotTest {
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_go_to_page.png")
     }
-        composeRule.mainClock.advanceTimeBy(1_000)
-        captureScreenRoboImage("build/outputs/roborazzi/viewer_go_to_page.png")
-    }
 
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
