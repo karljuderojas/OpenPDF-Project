@@ -184,11 +184,6 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     /** What [SignatureVerifier] found in the file as opened. */
     private var signatures: List<SignatureReport> = emptyList()
 
-    // Alongside editLog and redoLog: where each edit put a signature (page and display point),
-    // if it did, so a place to sign counts as done once one is in it, and not after undo.
-    private val signedLog = ArrayList<Pair<Int, Offset>?>()
-    private val redoSignedLog = ArrayList<Pair<Int, Offset>?>()
-
     // Finding the places to sign reads all the text, so it is done again only when pages change.
     private var signFields: List<SignField>? = null
 
@@ -285,8 +280,6 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         editLog.clear()
                         signatures = SignatureVerifier().verify(newSession.workingFile)
                         redoLog.clear()
-                        signedLog.clear()
-                        redoSignedLog.clear()
                         signFields = null
                     }
                     _stamps.value = emptyList()
@@ -577,9 +570,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         runCatching { current.edit { document -> drawStamp(document, stamp) } }
                             .onSuccess {
                                 editLog += auditEventFor(stamp)?.copy(at = Instant.now())
-                                signedLog += signedPlace(stamp)
                                 redoLog.clear()
-                                redoSignedLog.clear()
                             }
                             .onFailure { failed = true }
                     }
@@ -603,13 +594,6 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun pageSize(page: Int) = (_state.value as? ViewerState.Ready)?.pageSizes?.getOrNull(page)
 
-    /** Where [stamp] signs, for matching it to a place to sign, if it is a signature. */
-    private fun signedPlace(stamp: PlacedStamp): Pair<Int, Offset>? {
-        val content = stamp.content as? StampContent.Signature ?: return null
-        if (content.kind != SignatureStore.Kind.Signature) return null
-        return stamp.page to Offset(stamp.box.left + stamp.box.width / 2, stamp.box.top + stamp.box.height / 2)
-    }
-
     private fun drawStamp(document: PDDocument, stamp: PlacedStamp) {
         val size = displaySize(document, stamp.page)
         val toPdf = displayMapper(document, stamp.page)
@@ -619,6 +603,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             is StampContent.Signature -> SignatureAnnotation.add(
                 document, stamp.page, content.image, toPdf(StampGeometry.signatureAnchor(box)),
                 maxWidth = box.width * size.widthPt, maxHeight = box.height * size.heightPt,
+                initials = content.kind == SignatureStore.Kind.Initials,
             )
             is StampContent.Text -> {
                 val fontSize = StampGeometry.fontSize(box, content.lines.size, size)
@@ -1012,7 +997,6 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         it.undo()
                         // An undone edit that was not logged leaves the log as it is.
                         if (editLog.isNotEmpty()) redoLog += editLog.removeAt(editLog.lastIndex)
-                        if (signedLog.isNotEmpty()) redoSignedLog += signedLog.removeAt(signedLog.lastIndex)
                     }
                 }
                 // The undone edit may have moved pages around.
@@ -1029,7 +1013,6 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                     session?.takeIf { it.canRedo }?.let {
                         it.redo()
                         if (redoLog.isNotEmpty()) editLog += redoLog.removeAt(redoLog.lastIndex)
-                        if (redoSignedLog.isNotEmpty()) signedLog += redoSignedLog.removeAt(redoSignedLog.lastIndex)
                     }
                 }
                 signFields = null
@@ -1113,8 +1096,6 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                     null -> {
                         editLog += event?.copy(at = Instant.now())
                         redoLog.clear()
-                        signedLog += null
-                        redoSignedLog.clear()
                         if (movesPages) signFields = null
                         _state.value = reloadLocked()
                         done?.let { _effects.send(ViewerEffect.Message(it)) }
@@ -1167,18 +1148,20 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         }
         renderer = next
         val hasSignature = editLog.any { it?.type == AuditEvent.Type.Signed }
-        // A form that PdfBox cannot read just offers nothing to fill.
-        val formFields = withContext(Dispatchers.IO) {
-            runCatching { PDDocument.load(current.workingFile, current.password).use { FormFiller.fields(it) } }.getOrDefault(emptyList())
+        // A form that PdfBox cannot read just offers nothing to fill. The signatures placed so far
+        // are read from the pages too, so they follow the pages they are on through moves,
+        // deletions, rotations and undo.
+        val (formFields, placedSignatures) = withContext(Dispatchers.IO) {
+            runCatching {
+                PDDocument.load(current.workingFile, current.password).use { FormFiller.fields(it) to SignatureAnnotation.placed(it) }
+            }.getOrDefault(emptyList<FormField>() to emptyList())
         }
         val outline = runCatching { next.outline() }.getOrDefault(emptyList())
         // Likewise, a document whose text cannot be read just has no places to sign.
         val places = signFields ?: withContext(Dispatchers.IO) {
             runCatching { PDDocument.load(current.workingFile, current.password).use { SignatureFields.find(it) } }.getOrDefault(emptyList())
         }.also { signFields = it }
-        val signed = places.indices.filter { i ->
-            signedLog.any { it != null && places[i].covers(it.first, it.second.x, it.second.y) }
-        }.toSet()
+        val signed = places.indices.filter { i -> placedSignatures.any { places[i].covers(it.page, it.x, it.y) } }.toSet()
         return ViewerState.Ready(
             next.pageSizes, revision, current.canUndo, current.canRedo, current.hasUnsavedChanges, hasSignature, outline,
             isProtected = current.password.isNotEmpty(), formFields = formFields, signFields = places, signedFields = signed,
