@@ -135,6 +135,8 @@ sealed interface ViewerState {
         val hasSignature: Boolean = false,
         val outline: List<OutlineItem> = emptyList(),
         val isProtected: Boolean = false,
+        /** What the PDF's permissions hold back (print, copy, edit...); empty if nothing is restricted. */
+        val restrictions: List<PdfDocuments.Restriction> = emptyList(),
         val formFields: List<FormField> = emptyList(),
         val signFields: List<SignField> = emptyList(),
         val signedFields: Set<Int> = emptySet(),
@@ -1384,6 +1386,20 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
         update(done = done) { it.setPassword(password) }
     }
 
+    /**
+     * Lifts the PDF's restrictions (and password) when [ownerPassword] is its owner password, as one
+     * undo step. [onResult] gets false, and nothing changes, for any other password.
+     */
+    fun removeRestrictions(ownerPassword: String, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val isOwner = lock.withLock {
+                withContext(Dispatchers.IO) { session?.let { PdfDocuments.isOwnerPassword(it.workingFile, ownerPassword) } == true }
+            }
+            if (!isOwner) return@launch onResult(false)
+            update(done = R.string.restrictions_removed, onDone = { onResult(it != null) }) { it.removeRestrictions(ownerPassword) }
+        }
+    }
+
     /** Reads the details of the PDF as it is now, unsaved changes included, for Document info. */
     fun documentInfo() {
         val uri = openedUri ?: return
@@ -1671,6 +1687,9 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
             }.getOrDefault(Triple(emptyList<FormField>(), emptyList<SignatureAnnotation.Placed>(), emptyList<PageLink>()))
         }
         val outline = runCatching { next.outline() }.getOrDefault(emptyList())
+        val restrictions = withContext(Dispatchers.IO) {
+            runCatching { PdfDocuments.restrictions(current.workingFile, current.password) }.getOrDefault(emptyList())
+        }
         // Likewise, a document whose text cannot be read just has no places to sign.
         val places = signFields ?: withContext(Dispatchers.IO) {
             runCatching { PDDocument.load(current.workingFile, current.password).use { SignatureFields.find(it) } }.getOrDefault(emptyList())
@@ -1678,7 +1697,7 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
         val signed = places.indices.filter { i -> placedSignatures.any { places[i].covers(it.page, it.x, it.y) } }.toSet()
         return ViewerState.Ready(
             next.pageSizes, revision, current.canUndo, current.canRedo, current.hasUnsavedChanges, hasSignature, outline,
-            isProtected = current.password.isNotEmpty(), formFields = formFields, signFields = places, signedFields = signed,
+            isProtected = current.password.isNotEmpty(), restrictions = restrictions, formFields = formFields, signFields = places, signedFields = signed,
             signatures = signatures, failedPageEdits = failedPageEdits, redactionsSaved = redactionsSaved,
             links = links,
         )

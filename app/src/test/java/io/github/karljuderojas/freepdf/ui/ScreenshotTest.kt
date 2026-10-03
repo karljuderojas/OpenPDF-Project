@@ -1889,6 +1889,34 @@ class ScreenshotTest {
 
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
+    fun viewerRestrictions() {
+        val restricted = sample.copy(
+            restrictions = listOf(PdfDocuments.Restriction.Print, PdfDocuments.Restriction.Copy, PdfDocuments.Restriction.Edit),
+        )
+        show { viewer(ViewerMode.More, restricted) }
+        composeRule.onNodeWithText("Restrictions").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_restrictions.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerRestrictionsOwnerPassword() {
+        val restricted = sample.copy(
+            restrictions = listOf(PdfDocuments.Restriction.Print, PdfDocuments.Restriction.Copy, PdfDocuments.Restriction.Edit),
+        )
+        show { viewer(ViewerMode.More, restricted) }
+        composeRule.onNodeWithText("Restrictions").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        // The password field never lets Compose go idle, as in viewerPasswordAdd.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Remove restrictions").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_restrictions_owner_password.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
     fun viewerDocumentInfo() {
         fun at(day: Int, hour: Int, minute: Int) =
             Calendar.getInstance().apply { set(2026, Calendar.SEPTEMBER, day, hour, minute, 0) }.toInstant()

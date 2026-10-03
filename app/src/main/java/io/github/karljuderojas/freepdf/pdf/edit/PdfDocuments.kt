@@ -31,6 +31,33 @@ object PdfDocuments {
         false
     }
 
+    /** What a PDF's permissions hold back from someone who opened it with [password]. */
+    enum class Restriction { Print, Copy, Edit, Annotate, FillForms, Assemble }
+
+    /** The [Restriction]s in force when [file] is opened with [password]; none for an unlocked or owner-opened file. */
+    fun restrictions(file: File, password: String): List<Restriction> = PDDocument.load(file, password).use { restrictions(it) }
+
+    fun restrictions(document: PDDocument): List<Restriction> {
+        if (!document.isEncrypted) return emptyList()
+        val permissions = document.currentAccessPermission
+        if (permissions.isOwnerPermission) return emptyList()
+        return buildList {
+            if (!permissions.canPrint() && !permissions.canPrintFaithful()) add(Restriction.Print)
+            if (!permissions.canExtractContent()) add(Restriction.Copy)
+            if (!permissions.canModify()) add(Restriction.Edit)
+            if (!permissions.canModifyAnnotations()) add(Restriction.Annotate)
+            if (!permissions.canFillInForm()) add(Restriction.FillForms)
+            if (!permissions.canAssembleDocument()) add(Restriction.Assemble)
+        }
+    }
+
+    /** True if [ownerPassword] is the PDF's owner password, which alone may lift its restrictions. */
+    fun isOwnerPassword(file: File, ownerPassword: String): Boolean = try {
+        PDDocument.load(file, ownerPassword).use { it.isEncrypted && it.currentAccessPermission.isOwnerPermission }
+    } catch (e: InvalidPasswordException) {
+        false
+    }
+
     /**
      * PdfBox refuses to save an encrypted document without a protection policy, so this sets one
      * that keeps the file locked as before: [password] (the one it was opened with) still opens
