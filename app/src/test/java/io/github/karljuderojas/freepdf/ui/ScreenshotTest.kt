@@ -812,6 +812,19 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_split.png")
     }
 
+    // The text field keeps Compose from going idle, so drive the clock by hand (see viewerPagesExtract).
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesWatermark() {
+        show { viewer(ViewerMode.Pages, sixPages, selectedPage = 1) }
+        composeRule.onNodeWithText("Watermark").performScrollTo()
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Watermark").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_watermark.png")
+    }
+
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerPagesSplitEvery() {

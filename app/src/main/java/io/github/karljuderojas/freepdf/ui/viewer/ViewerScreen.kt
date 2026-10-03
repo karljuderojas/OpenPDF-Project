@@ -103,6 +103,7 @@ import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
+import io.github.karljuderojas.freepdf.pdf.edit.WatermarkStyle
 import io.github.karljuderojas.freepdf.pdf.form.FormField
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
 import io.github.karljuderojas.freepdf.pdf.annotate.Stamps
@@ -150,6 +151,8 @@ sealed interface ViewerAction {
     data object DiscardChanges : ViewerAction
 
     data class Rotate(val pages: Set<Int>) : ViewerAction
+    /** Stamps [pages] with [text], or with the picture at [image] when that is given. */
+    data class Watermark(val pages: Set<Int>, val text: String, val image: Uri?, val style: WatermarkStyle) : ViewerAction
     data class Delete(val pages: Set<Int>) : ViewerAction
     data class InsertBlank(val afterPage: Int) : ViewerAction
     data class Move(val from: Int, val to: Int) : ViewerAction
@@ -361,6 +364,7 @@ fun ViewerScreen(
                 }
                 ViewerAction.DiscardChanges -> viewModel.discardChanges()
                 is ViewerAction.Rotate -> viewModel.rotatePages(action.pages)
+                is ViewerAction.Watermark -> viewModel.watermark(action.pages, action.text, action.image, action.style)
                 is ViewerAction.Delete -> viewModel.deletePages(action.pages)
                 is ViewerAction.InsertBlank -> viewModel.insertBlankPage(action.afterPage)
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
@@ -492,6 +496,11 @@ fun ViewerContent(
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     var extracting by rememberSaveable { mutableStateOf(false) }
     var splitting by rememberSaveable { mutableStateOf(false) }
+    var watermarking by rememberSaveable { mutableStateOf(false) }
+    var watermarkImage by rememberSaveable { mutableStateOf<Uri?>(null) }
+    val watermarkPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) {
+        if (it != null) watermarkImage = it
+    }
     // What to do once the reader settles unsaved changes; non-null while the dialog shows.
     var leavePrompt by remember { mutableStateOf<LeavePrompt?>(null) }
     var showSwitcher by rememberSaveable { mutableStateOf(false) }
@@ -659,6 +668,7 @@ fun ViewerContent(
                 val after = selectedPages.max()
                 editPages(ViewerAction.InsertBlank(after), then = setOf(after + 1))
             }
+            R.string.tool_watermark -> watermarking = true
             R.string.tool_delete -> confirmDelete = true
             R.string.tool_extract -> extracting = true
             R.string.tool_merge -> onAction(ViewerAction.Merge)
@@ -1116,6 +1126,21 @@ fun ViewerContent(
             onExtract = {
                 extracting = false
                 onAction(ViewerAction.Extract(it))
+            },
+        )
+    }
+
+    if (watermarking) {
+        WatermarkDialog(
+            pageCount = pageCount,
+            selectedPages = selectedPages.sorted(),
+            pageAspect = ready?.pageSizes?.getOrNull(selectedPage)?.aspectRatio ?: 0.77f,
+            image = watermarkImage,
+            onChooseImage = { watermarkPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            onDismiss = { watermarking = false },
+            onWatermark = { pages, text, image, style ->
+                watermarking = false
+                onAction(ViewerAction.Watermark(pages, text, image, style))
             },
         )
     }

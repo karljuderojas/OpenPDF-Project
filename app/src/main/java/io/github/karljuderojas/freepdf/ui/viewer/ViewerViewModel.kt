@@ -41,6 +41,8 @@ import io.github.karljuderojas.freepdf.pdf.edit.PdfText
 import io.github.karljuderojas.freepdf.pdf.form.FormField
 import io.github.karljuderojas.freepdf.pdf.form.FormFiller
 import io.github.karljuderojas.freepdf.pdf.edit.Splitting
+import io.github.karljuderojas.freepdf.pdf.edit.WatermarkStyle
+import io.github.karljuderojas.freepdf.pdf.edit.Watermarks
 import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
 import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
 import io.github.karljuderojas.freepdf.pdf.render.PageBox
@@ -450,6 +452,19 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun rotatePages(pages: Set<Int>) = edit(movesPages = true) { PageEditor.rotate(it, pages, 90) }
+
+    /** Stamps [pages] with [text], or with the picture at [image] when that is given. */
+    fun watermark(pages: Set<Int>, text: String, image: Uri?, style: WatermarkStyle) {
+        viewModelScope.launch {
+            val bitmap = image?.let { uri -> runCatching { withContext(Dispatchers.IO) { PickedImage.load(context, uri) } }.getOrNull() }
+            if (image != null && bitmap == null) {
+                _effects.send(ViewerEffect.Message(R.string.image_failed))
+                return@launch
+            }
+            if (bitmap != null) edit { Watermarks.addImage(it, pages, bitmap, style) }
+            else edit { Watermarks.addText(it, pages, text, style) }
+        }
+    }
 
     fun deletePages(pages: Set<Int>) {
         val pageCount = (_state.value as? ViewerState.Ready)?.pageSizes?.size ?: return
