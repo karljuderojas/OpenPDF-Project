@@ -52,7 +52,7 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ⬜ Drag to reorder in the page grid, multi-select
 - ✅ Extract and split: save chosen pages (typed like 1-3, 5) as a new PDF, or split into two after the selected page or every few pages into a folder you pick; the open PDF stays as it is
 - ⬜ Redact (true removal, not a black box), links
-- ⬜ Edit existing text (hard; needs font handling)
+- ✅ Edit text: tap a line of existing text and change its words. The old words are removed from the page, not covered; the new ones keep the line's font, size and colour, or use the bundled font when the PDF's font lacks a letter (the app says so). Text drawn upright only; scans have no text to edit
 
 ## More
 - ✅ Share: a sheet (top bar or More) offers the PDF with your changes, a locked copy with marks and form fields flattened into the page, some pages only, or pages as images, then Android's share sheet; a Recent row's menu sends the file as it is

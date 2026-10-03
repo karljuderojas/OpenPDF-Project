@@ -103,6 +103,7 @@ import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
+import io.github.karljuderojas.freepdf.pdf.edit.TextEditing
 import io.github.karljuderojas.freepdf.pdf.edit.WatermarkStyle
 import io.github.karljuderojas.freepdf.pdf.edit.CropMargins
 import io.github.karljuderojas.freepdf.pdf.form.FormField
@@ -227,6 +228,9 @@ sealed interface ViewerAction {
 
     /** Edit actions. The screen opens the photo picker for [PickImage], then places the picture. */
     data class AddEditText(val page: Int, val at: Offset, val text: String) : ViewerAction
+
+    /** Edit text: swaps the words of the line at [at] on [page], which read [oldText], for [newText]. */
+    data class ReplaceText(val page: Int, val at: Offset, val oldText: String, val newText: String) : ViewerAction
     data class PickImage(val page: Int) : ViewerAction
 }
 
@@ -328,6 +332,7 @@ fun ViewerScreen(
         onBack = onBack,
         loadPage = viewModel::page,
         loadWords = viewModel::words,
+        findLine = viewModel::editableLine,
         loadRegion = viewModel::pageRegion,
         initialMode = initialMode,
         initialTool = initialTool,
@@ -415,6 +420,7 @@ fun ViewerScreen(
                 is ViewerAction.Erase -> viewModel.erase(action.page, action.at)
                 is ViewerAction.SaveSignature -> viewModel.saveSignature(action.kind, action.image, action.method)
                 is ViewerAction.PlaceSignature -> viewModel.placeSignature(action.page, action.at, action.kind)
+                is ViewerAction.ReplaceText -> viewModel.replaceText(action.page, action.at, action.oldText, action.newText)
                 is ViewerAction.AddDate -> viewModel.addDate(action.page, action.at)
                 is ViewerAction.AddText -> viewModel.addText(action.page, action.at, action.text)
                 is ViewerAction.AddCheckmark -> viewModel.addCheckmark(action.page, action.at)
@@ -458,6 +464,7 @@ fun ViewerContent(
     onBack: () -> Unit,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
     loadWords: suspend (page: Int) -> List<PageWord> = { emptyList() },
+    findLine: suspend (page: Int, at: Offset) -> TextEditing.EditableLine? = { _, _ -> null },
     loadRegion: LoadRegion = { _, _, _ -> null },
     initialMode: ViewerMode = ViewerMode.Read,
     initialSelectedPage: Int = 0,
@@ -520,6 +527,9 @@ fun ViewerContent(
     var pendingTextBox by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var stampKind by rememberSaveable { mutableStateOf(Stamps.Kind.Approved) }
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
+    // The line Edit text found under the last tap: its page, where it was tapped, and its words.
+    var editingLine by remember { mutableStateOf<Triple<Int, Offset, String>?>(null) }
+    val noEditableText = stringResource(R.string.edit_text_none)
     var editingField by remember { mutableStateOf<FormField?>(null) }
     var padFor by rememberSaveable { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by rememberSaveable { mutableStateOf(false) }
@@ -903,6 +913,7 @@ fun ViewerContent(
                 }
                 mode == ViewerMode.Edit -> Column {
                     if (selectedTool == R.string.tool_add_text) EditHint(R.string.edit_hint_text)
+                    if (selectedTool == R.string.tool_edit_text) EditHint(R.string.edit_hint_edit_text)
                     ToolStrip(mode, selectedTool, onToolSelected = { label ->
                         when {
                             // Add image acts once: pick a picture and it lands on the page in view.
@@ -1001,6 +1012,7 @@ fun ViewerContent(
                         val showsStamps = mode == ViewerMode.Sign || mode == ViewerMode.Edit
                         val pageStamps = if (showsStamps) stamps.filter { it.page == page } else emptyList()
                         val addsText = mode == ViewerMode.Edit && selectedTool == R.string.tool_add_text
+                        val editsText = mode == ViewerMode.Edit && selectedTool == R.string.tool_edit_text
                         val words by produceState(emptyList<PageWord>(), page, ready.revision) { value = loadWords(page) }
                         // Text can be selected while reading, or in Annotate before a tool is picked.
                         if (mode == ViewerMode.Read || (mode == ViewerMode.Annotate && tool == null)) {
@@ -1024,6 +1036,15 @@ fun ViewerContent(
                                     selection = null
                                 },
                             )
+                            }
+                        }
+                        if (editsText) {
+                            EditTextLayer(page, words) { at ->
+                                scope.launch {
+                                    val line = findLine(page, at)
+                                    if (line == null) snackbarHostState.showSnackbar(noEditableText)
+                                    else editingLine = Triple(page, at, line.text)
+                                }
                             }
                         }
                         if (signTool == SignTool.FillForm) {
@@ -1280,6 +1301,21 @@ fun ViewerContent(
             onAdd = { text ->
                 pendingText = null
                 onAction(if (mode == ViewerMode.Edit) ViewerAction.AddEditText(page, at, text) else ViewerAction.AddText(page, at, text))
+            },
+        )
+    }
+
+    editingLine?.let { (page, at, text) ->
+        TextEntryDialog(
+            title = R.string.edit_text_title,
+            hint = R.string.edit_text_hint,
+            initial = text,
+            confirm = R.string.save,
+            allowBlank = true,
+            onDismiss = { editingLine = null },
+            onAdd = { changed ->
+                editingLine = null
+                if (changed != text) onAction(ViewerAction.ReplaceText(page, at, text, changed))
             },
         )
     }
