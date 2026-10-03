@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -64,8 +65,9 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.karljuderojas.freepdf.R
-import io.github.karljuderojas.freepdf.pdf.create.ImagesToPdf
 import io.github.karljuderojas.freepdf.pdf.create.PageFit
 import io.github.karljuderojas.freepdf.pdf.scan.PageDetector
 import io.github.karljuderojas.freepdf.pdf.scan.Quad
@@ -93,7 +95,7 @@ fun thumbKey(page: ScanPage, filter: ScanFilter): String = "${page.id}-${page.qu
  * the phone: edge finding, straightening and the filters are in the app, not on a server.
  */
 @Composable
-fun ScannerScreen(onBack: () -> Unit, onCreated: (Uri) -> Unit) {
+fun ScannerScreen(onBack: () -> Unit, onCreated: (Uri) -> Unit, viewModel: PdfBuildViewModel = viewModel()) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     // Pages are kept as text so they survive Android recreating the screen or the app while the camera is open.
@@ -103,22 +105,44 @@ fun ScannerScreen(onBack: () -> Unit, onCreated: (Uri) -> Unit) {
     var adjusting by rememberSaveable { mutableIntStateOf(-1) }
     var adjustingNew by rememberSaveable { mutableStateOf(false) }
     var pendingPhoto by rememberSaveable { mutableStateOf<String?>(null) }
+    var confirmDiscard by rememberSaveable { mutableStateOf(false) }
     var finding by remember { mutableStateOf(false) }
-    var progress by remember { mutableStateOf<Int?>(null) }
-    var failed by remember { mutableStateOf(false) }
     val thumbs = remember { mutableStateMapOf<String, ImageBitmap>() }
     var adjustImage by remember { mutableStateOf<ImageBitmap?>(null) }
+    // The save lives in the view model so it carries on, and is heard, across a rotation.
+    val build by viewModel.state.collectAsStateWithLifecycle()
+    val progress = (build as? BuildState.Making)?.done
+    val failed = build is BuildState.Failed
 
     fun setPages(list: List<ScanPage>) {
         encoded = list.map { it.encode() }
+        // Previews of corners or pages that are gone are not needed again.
+        val wanted = ScanFilter.entries.flatMapTo(HashSet()) { look -> list.map { thumbKey(it, look) } }
+        thumbs.keys.filter { it !in wanted }.forEach { thumbs.remove(it) }
     }
 
-    // Leftovers from an earlier visit that never got saved.
+    // Leftovers from an earlier visit that never got saved. The photo the camera app may be
+    // writing right now (if this screen was recreated while it was open) is not a leftover.
     LaunchedEffect(Unit) {
-        if (encoded.isEmpty()) withContext(Dispatchers.IO) { ScanFiles.dir(context).listFiles()?.forEach { it.delete() } }
+        if (encoded.isEmpty()) {
+            val keep = pendingPhoto?.let(::File)
+            withContext(Dispatchers.IO) { ScanFiles.sweep(context, keep) }
+        }
     }
 
-    LaunchedEffect(pages, filter) {
+    LaunchedEffect(build) {
+        val done = build as? BuildState.Done ?: return@LaunchedEffect
+        val sources = pages
+        viewModel.finished()
+        onCreated(done.uri)
+        // Only now that the PDF is on its way to the viewer are the photos no longer needed.
+        sources.forEach { File(it.file).delete() }
+    }
+
+    // Previews are made once the corners are settled, not for every pixel a corner is dragged.
+    val editing = adjusting >= 0
+    LaunchedEffect(pages, filter, editing) {
+        if (editing) return@LaunchedEffect
         pages.filter { thumbKey(it, filter) !in thumbs }.forEach { page ->
             val thumb = withContext(Dispatchers.IO) {
                 runCatching { ScanImages.render(page, filter, THUMB_SIDE).asImageBitmap() }.getOrNull()
@@ -203,21 +227,7 @@ fun ScannerScreen(onBack: () -> Unit, onCreated: (Uri) -> Unit) {
         if (target == null) return@rememberLauncherForActivityResult
         val chosen = pages
         val look = filter
-        failed = false
-        progress = 0
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val document = ImagesToPdf.build(chosen.size, PageFit.Picture, onProgress = { progress = it }) { i ->
-                        ScanImages.render(chosen[i], look, SCAN_SIDE)
-                    }
-                    NewPdf.write(context, document, target)
-                    chosen.forEach { File(it.file).delete() }
-                }
-            }
-            progress = null
-            if (result.isSuccess) onCreated(target) else failed = true
-        }
+        viewModel.build(chosen.size, PageFit.Picture, target) { i -> ScanImages.render(chosen[i], look, SCAN_SIDE) }
     }
     val defaultName = stringResource(R.string.scan_default_name)
 
@@ -227,8 +237,29 @@ fun ScannerScreen(onBack: () -> Unit, onCreated: (Uri) -> Unit) {
         adjustingNew = false
     }
 
+    fun leave() {
+        when {
+            adjusting >= 0 -> closeAdjust(discard = true)
+            pages.isNotEmpty() -> confirmDiscard = true
+            else -> onBack()
+        }
+    }
+
     BackHandler(enabled = progress != null) {}
-    BackHandler(enabled = progress == null && adjusting >= 0) { closeAdjust(discard = true) }
+    BackHandler(enabled = progress == null && (adjusting >= 0 || pages.isNotEmpty())) { leave() }
+
+    if (confirmDiscard) {
+        DiscardPagesDialog(
+            count = pages.size,
+            onDiscard = {
+                confirmDiscard = false
+                pages.forEach { File(it.file).delete() }
+                setPages(emptyList())
+                onBack()
+            },
+            onDismiss = { confirmDiscard = false },
+        )
+    }
 
     ScannerContent(
         pages = pages,
@@ -251,9 +282,25 @@ fun ScannerScreen(onBack: () -> Unit, onCreated: (Uri) -> Unit) {
         },
         onRemove = ::remove,
         onMove = { from, to -> setPages(pages.moved(from, to)) },
-        onFilter = { filter = it },
+        onFilter = { viewModel.clearFailure(); filter = it },
         onSave = { save.launch(NewPdf.defaultName(defaultName)) },
-        onBack = { if (adjusting >= 0) closeAdjust(discard = true) else onBack() },
+        onBack = ::leave,
+    )
+}
+
+/** Asks before Back throws away [count] scanned pages that were never saved. */
+@Composable
+fun DiscardPagesDialog(count: Int, onDiscard: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(pluralStringResource(R.plurals.scan_discard_title, count, count)) },
+        text = { Text(stringResource(R.string.scan_discard_body)) },
+        confirmButton = {
+            TextButton(onClick = onDiscard, modifier = Modifier.testTag("scan-discard")) {
+                Text(stringResource(R.string.discard), color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -288,6 +335,7 @@ fun ScannerContent(
 ) {
     val working = progress != null || finding
     val page = adjusting?.let { pages.getOrNull(it) }
+    val usable = page?.quad?.isUsable ?: true
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -307,7 +355,7 @@ fun ScannerContent(
                         if (adjustingNew) {
                             OutlinedButton(onClick = onRetake, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.scan_retake)) }
                         }
-                        Button(onClick = onAdjustDone, modifier = Modifier.weight(1f).testTag("scan-adjust-done")) {
+                        Button(onClick = onAdjustDone, enabled = usable, modifier = Modifier.weight(1f).testTag("scan-adjust-done")) {
                             Text(stringResource(R.string.done))
                         }
                     }
@@ -346,10 +394,10 @@ fun ScannerContent(
         when {
             page != null -> Column(Modifier.fillMaxSize().padding(padding)) {
                 Text(
-                    stringResource(R.string.scan_adjust_hint),
+                    stringResource(if (usable) R.string.scan_adjust_hint else R.string.scan_adjust_unusable),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    color = if (usable) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag("scan-adjust-hint"),
                 )
                 Row(Modifier.padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = { onQuad(Quad.inset(0f)) }) { Text(stringResource(R.string.scan_whole_photo)) }

@@ -1,8 +1,10 @@
 package io.github.karljuderojas.freepdf.ui.viewer
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -32,13 +34,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.IntSize
@@ -51,73 +57,135 @@ import io.github.karljuderojas.freepdf.pdf.links.PageLinks
 
 /**
  * Makes the links of one page tappable while reading. The areas draw nothing, as in other PDF
- * readers, and only they take taps, so a tap anywhere else still reaches the page underneath.
+ * readers. [content] (the mark and text selection layers) sits inside, so it sees each touch
+ * first: a press held long enough to select text, or a tap a mark takes, never opens a link,
+ * and a tap that lands on no link still reaches the page underneath.
  */
 @Composable
-fun LinkLayer(page: Int, links: List<PageLink>, onOpen: (PageLink) -> Unit) {
+fun LinkLayer(page: Int, links: List<PageLink>, onOpen: (PageLink) -> Unit, content: @Composable () -> Unit) {
     val description = stringResource(R.string.link_description)
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val currentLinks by rememberUpdatedState(links)
+    val currentOnOpen by rememberUpdatedState(onOpen)
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .pointerInput(page) { detectLinkTaps({ currentLinks }) { currentOnOpen(it) } },
+    ) {
+        content()
         links.forEachIndexed { i, link ->
+            // Nothing to draw and no touch handling of its own: this only names the link for
+            // accessibility and tests, so a tap on it goes to the layer like any other.
             val box = link.box
             Box(
                 Modifier
                     .offset(maxWidth * box.left, maxHeight * box.top)
                     .size(maxWidth * (box.right - box.left), maxHeight * (box.bottom - box.top))
                     .testTag("link-$page-$i")
-                    .semantics { contentDescription = description }
-                    .clickable(role = Role.Button) { onOpen(link) },
+                    .semantics {
+                        contentDescription = description
+                        role = Role.Button
+                        onClick { onOpen(link); true }
+                    },
             )
         }
     }
 }
 
 /**
+ * A quick tap on one of [links] (read when the tap lands, so the list may change) calls [onHit]
+ * with it and takes the release; anything longer, moved or already taken by a layer inside passes.
+ */
+private suspend fun PointerInputScope.detectLinkTaps(links: () -> List<PageLink>, onHit: (PageLink) -> Unit) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        val up = waitForUpOrCancellation() ?: return@awaitEachGesture
+        // A press held long enough to select text is not a tap.
+        if (up.uptimeMillis - down.uptimeMillis > viewConfiguration.longPressTimeoutMillis) return@awaitEachGesture
+        val at = Offset(up.position.x / size.width, up.position.y / size.height)
+        val hit = links().lastOrNull { it.box.contains(at) } ?: return@awaitEachGesture
+        up.consume()
+        onHit(hit)
+    }
+}
+
+private fun DisplayRect.contains(point: Offset) = point.x in left..right && point.y in top..bottom
+
+/**
  * Sits over one page while Edit's Add link is chosen: drag a box over the words or area to link.
  * [onBox] gets it as fractions of the page as shown (origin top-left); tiny drags are ignored, so
- * a stray touch adds nothing. One-finger drags draw here instead of scrolling.
+ * a stray touch adds nothing. One-finger drags draw here instead of scrolling. The page's
+ * [links] are outlined, and a tap on one gives it to [onPick] to change or remove.
  */
 @Composable
-fun LinkBoxLayer(page: Int, onBox: (DisplayRect) -> Unit) {
+fun LinkBoxLayer(page: Int, links: List<PageLink>, onBox: (DisplayRect) -> Unit, onPick: (PageLink) -> Unit) {
     val currentOnBox by rememberUpdatedState(onBox)
-    var size by remember { mutableStateOf(IntSize.Zero) }
+    val currentOnPick by rememberUpdatedState(onPick)
+    val currentLinks by rememberUpdatedState(links)
+    var layerSize by remember { mutableStateOf(IntSize.Zero) }
     var box by remember { mutableStateOf<Rect?>(null) }
     val colour = MaterialTheme.colorScheme.primary
+    val description = stringResource(R.string.link_description)
 
-    Canvas(
-        Modifier
-            .fillMaxSize()
-            .testTag("link-box-layer-$page")
-            .onSizeChanged { size = it }
-            .pointerInput(Unit) {
-                var start = Offset.Zero
-                detectDragGestures(
-                    onDragStart = { start = it; box = Rect(it, it) },
-                    onDrag = { change, _ ->
-                        change.consume()
-                        box = Rect(start, change.position)
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        Canvas(
+            Modifier
+                .fillMaxSize()
+                .testTag("link-box-layer-$page")
+                .onSizeChanged { layerSize = it }
+                // Outside the drag handling, so a drag that starts on a link still draws a box.
+                .pointerInput(page) { detectLinkTaps({ currentLinks }) { currentOnPick(it) } }
+                .pointerInput(Unit) {
+                    var start = Offset.Zero
+                    detectDragGestures(
+                        onDragStart = { start = it; box = Rect(it, it) },
+                        onDrag = { change, _ ->
+                            change.consume()
+                            box = Rect(start, change.position)
+                        },
+                        onDragEnd = {
+                            box?.let { raw ->
+                                val w = layerSize.width.toFloat()
+                                val h = layerSize.height.toFloat()
+                                val rect = DisplayRect(
+                                    (minOf(raw.left, raw.right) / w).coerceIn(0f, 1f),
+                                    (minOf(raw.top, raw.bottom) / h).coerceIn(0f, 1f),
+                                    (maxOf(raw.left, raw.right) / w).coerceIn(0f, 1f),
+                                    (maxOf(raw.top, raw.bottom) / h).coerceIn(0f, 1f),
+                                )
+                                if (rect.right - rect.left >= MIN_SIDE && rect.bottom - rect.top >= MIN_SIDE) currentOnBox(rect)
+                            }
+                            box = null
+                        },
+                        onDragCancel = { box = null },
+                    )
+                },
+        ) {
+            links.forEach { link ->
+                val topLeft = Offset(link.box.left * this.size.width, link.box.top * this.size.height)
+                val extent = Size((link.box.right - link.box.left) * this.size.width, (link.box.bottom - link.box.top) * this.size.height)
+                drawRect(colour.copy(alpha = 0.12f), topLeft, extent)
+                drawRect(colour, topLeft, extent, style = Stroke(1.dp.toPx()))
+            }
+            box?.let { raw ->
+                val r = Rect(minOf(raw.left, raw.right), minOf(raw.top, raw.bottom), maxOf(raw.left, raw.right), maxOf(raw.top, raw.bottom))
+                drawRect(colour.copy(alpha = 0.15f), r.topLeft, r.size)
+                drawRect(colour, r.topLeft, r.size, style = Stroke(2.dp.toPx()))
+            }
+        }
+        links.forEachIndexed { i, link ->
+            // Names the link for accessibility and tests; touches go through to the canvas.
+            val area = link.box
+            Box(
+                Modifier
+                    .offset(maxWidth * area.left, maxHeight * area.top)
+                    .size(maxWidth * (area.right - area.left), maxHeight * (area.bottom - area.top))
+                    .testTag("edit-link-$page-$i")
+                    .semantics {
+                        contentDescription = description
+                        role = Role.Button
+                        onClick { onPick(link); true }
                     },
-                    onDragEnd = {
-                        box?.let { raw ->
-                            val w = size.width.toFloat()
-                            val h = size.height.toFloat()
-                            val rect = DisplayRect(
-                                (minOf(raw.left, raw.right) / w).coerceIn(0f, 1f),
-                                (minOf(raw.top, raw.bottom) / h).coerceIn(0f, 1f),
-                                (maxOf(raw.left, raw.right) / w).coerceIn(0f, 1f),
-                                (maxOf(raw.top, raw.bottom) / h).coerceIn(0f, 1f),
-                            )
-                            if (rect.right - rect.left >= MIN_SIDE && rect.bottom - rect.top >= MIN_SIDE) currentOnBox(rect)
-                        }
-                        box = null
-                    },
-                    onDragCancel = { box = null },
-                )
-            },
-    ) {
-        box?.let { raw ->
-            val r = Rect(minOf(raw.left, raw.right), minOf(raw.top, raw.bottom), maxOf(raw.left, raw.right), maxOf(raw.top, raw.bottom))
-            drawRect(colour.copy(alpha = 0.15f), r.topLeft, r.size)
-            drawRect(colour, r.topLeft, r.size, style = Stroke(2.dp.toPx()))
+            )
         }
     }
 }
@@ -140,19 +208,27 @@ fun OpenLinkDialog(address: String, onDismiss: () -> Unit, onOpen: () -> Unit) {
 /**
  * Asks where a new link should lead: a web address, or a page of this PDF. [onAdd] gets the
  * target, with the address tidied (see [PageLinks.normaliseAddress]) and the page zero-based.
+ * With [existing], the link a tap picked, the dialog opens on where that link leads so it can
+ * be changed, and offers to remove it through [onRemove].
  */
 @Composable
-fun AddLinkDialog(pageCount: Int, onDismiss: () -> Unit, onAdd: (LinkTarget) -> Unit) {
-    var toPage by rememberSaveable { mutableStateOf(false) }
-    var address by rememberSaveable { mutableStateOf("") }
-    var pageText by rememberSaveable { mutableStateOf("") }
+fun AddLinkDialog(
+    pageCount: Int,
+    onDismiss: () -> Unit,
+    onAdd: (LinkTarget) -> Unit,
+    existing: LinkTarget? = null,
+    onRemove: () -> Unit = {},
+) {
+    var toPage by rememberSaveable { mutableStateOf(existing is LinkTarget.Page) }
+    var address by rememberSaveable { mutableStateOf((existing as? LinkTarget.Web)?.uri.orEmpty()) }
+    var pageText by rememberSaveable { mutableStateOf((existing as? LinkTarget.Page)?.let { "${it.index + 1}" }.orEmpty()) }
     val web = PageLinks.normaliseAddress(address)
     val pageNumber = pageText.toIntOrNull()?.takeIf { it in 1..pageCount }
     val target: LinkTarget? = if (toPage) pageNumber?.let { LinkTarget.Page(it - 1) } else web?.let { LinkTarget.Web(it) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.link_add_title)) },
+        title = { Text(stringResource(if (existing == null) R.string.link_add_title else R.string.link_change_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 LinkChoice(!toPage, stringResource(R.string.link_web_option), "link-web-option") { toPage = false }
@@ -182,8 +258,19 @@ fun AddLinkDialog(pageCount: Int, onDismiss: () -> Unit, onAdd: (LinkTarget) -> 
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { target?.let(onAdd) }, enabled = target != null) { Text(stringResource(R.string.link_add)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+        confirmButton = {
+            TextButton(onClick = { target?.let(onAdd) }, enabled = target != null) {
+                Text(stringResource(if (existing == null) R.string.link_add else R.string.link_change))
+            }
+        },
+        dismissButton = {
+            Row {
+                if (existing != null) {
+                    TextButton(onClick = onRemove, modifier = Modifier.testTag("link-remove")) { Text(stringResource(R.string.link_remove)) }
+                }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            }
+        },
     )
 }
 

@@ -16,8 +16,13 @@ object SignatureCutout {
     const val MAX_SIDE = 1200
 
     // Darker than this share of the paper's brightness starts to count as ink, fully ink by HIGH.
-    private const val LOW = 0.10f
-    private const val HIGH = 0.38f
+    // Ruled lines, paper grain and the edge of a shadow are at most about a fifth darker than the
+    // paper around them; pen ink is at least half darker.
+    private const val LOW = 0.22f
+    private const val HIGH = 0.42f
+
+    /** Pixels fainter than this are not ink at all: dropped, not kept as a grey haze around the signature. */
+    private const val INK_ALPHA = 96
 
     /** Ink pixels needed to call it a signature: between this share of the picture... */
     private const val MIN_INK = 0.002f
@@ -61,6 +66,9 @@ object SignatureCutout {
         }
         val radius = max(12, min(w, h) / 5)
         val alpha = IntArray(w * h)
+        // Faint pixels are kept only where they edge a stroke, so pen strokes keep their
+        // anti-aliased fringe while ruled lines, shadows and paper grain fall away.
+        val fringe = IntArray(w * h)
         var ink = 0
         var left = w; var top = h; var right = -1; var bottom = -1
         val floor = median * 0.95f
@@ -76,14 +84,31 @@ object SignatureCutout {
                 val darkness = (paper - luma[y * w + x]) / paper
                 val t = ((darkness - LOW) / (HIGH - LOW)).coerceIn(0f, 1f)
                 val a = (t * t * (3f - 2f * t) * 255f).toInt()
-                alpha[y * w + x] = a
-                if (a > 96) {
+                if (a > INK_ALPHA) {
+                    alpha[y * w + x] = a
                     ink++
                     if (x < left) left = x
                     if (x > right) right = x
                     if (y < top) top = y
                     if (y > bottom) bottom = y
+                } else if (a > 0) {
+                    fringe[y * w + x] = a
                 }
+            }
+        }
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val a = fringe[y * w + x]
+                if (a == 0) continue
+                var touchesInk = false
+                for (dy in -1..1) {
+                    for (dx in -1..1) {
+                        val nx = x + dx
+                        val ny = y + dy
+                        if (nx in 0 until w && ny in 0 until h && alpha[ny * w + nx] > INK_ALPHA) touchesInk = true
+                    }
+                }
+                if (touchesInk) alpha[y * w + x] = a
             }
         }
         val share = ink.toFloat() / (w * h)

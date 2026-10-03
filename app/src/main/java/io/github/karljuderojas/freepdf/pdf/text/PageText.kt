@@ -3,7 +3,9 @@ package io.github.karljuderojas.freepdf.pdf.text
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
+import io.github.karljuderojas.freepdf.pdf.DisplayRect
 import io.github.karljuderojas.freepdf.pdf.PdfRect
+import io.github.karljuderojas.freepdf.pdf.onPage
 import io.github.karljuderojas.freepdf.pdf.pdfToDisplay
 
 /**
@@ -26,7 +28,9 @@ data class PageWord(
  *
  * Text that reads upright as the page is shown is boxed, which on a page with a /Rotate (a scan,
  * a landscape export) is text drawn turned by that angle. Text along the page's own x axis is
- * boxed too, turned along with the page; text at any other angle is skipped.
+ * boxed too, turned along with the page; text at any other angle is skipped. Text in a part of
+ * the page a crop has taken away is skipped as well, and a word crossing the edge is cut to it,
+ * so nothing off the page can be selected.
  *
  * On a page set in columns the words come column by column (see [Columns]), not line by line
  * across the whole page.
@@ -102,6 +106,10 @@ object PageText {
         stripper.startPage = pageIndex + 1
         stripper.endPage = pageIndex + 1
         stripper.getText(document)
-        return Columns.order(words)
+        return Columns.order(words.mapNotNull { it.onPage() })
+    }
+
+    private fun PageWord.onPage(): PageWord? = DisplayRect(left, top, right, bottom).onPage()?.let {
+        copy(left = it.left, top = it.top, right = it.right, bottom = it.bottom)
     }
 }

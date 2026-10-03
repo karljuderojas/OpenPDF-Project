@@ -9,7 +9,9 @@ import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationText
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationTextMarkup
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDBorderStyleDictionary
 import com.tom_roush.pdfbox.util.DateConverter
+import io.github.karljuderojas.freepdf.pdf.DisplayRect
 import io.github.karljuderojas.freepdf.pdf.PdfRect
+import io.github.karljuderojas.freepdf.pdf.onPage
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureAnnotation
 import io.github.karljuderojas.freepdf.pdf.pdfToDisplay
 import io.github.karljuderojas.freepdf.pdf.text.PageText
@@ -45,7 +47,7 @@ object Marks {
 
     /**
      * Every mark in [document], page by page in drawing order. Links, form fields and pop-ups are
-     * left out. [wordsOn] gives the words on a page, for the text a highlight covers; it is only
+     * left out, as is a mark in a part of the page a crop has taken away. [wordsOn] gives the words on a page, for the text a highlight covers; it is only
      * asked for pages that have marked text, and a caller that keeps the words from one listing
      * to the next (the pages' text does not change when a mark does) can hand them back here.
      */
@@ -61,6 +63,8 @@ object Marks {
             val box = annotation.rectangle ?: return@mapIndexedNotNull null
             val (x1, y1) = page.toDisplay(box.lowerLeftX, box.lowerLeftY)
             val (x2, y2) = page.toDisplay(box.upperRightX, box.upperRightY)
+            val shown = DisplayRect(minOf(x1, x2), minOf(y1, y2), maxOf(x1, x2), maxOf(y1, y2)).onPage()
+                ?: return@mapIndexedNotNull null
             val markup = annotation as? PDAnnotationMarkup
             // A text box keeps its colour and font size in /DA rather than /C and /BS.
             val textStyle = if (kind == Mark.Kind.TextBox) markup?.let { TextBoxes.styleOf(it) } else null
@@ -68,7 +72,7 @@ object Marks {
                 page = pageIndex,
                 index = index,
                 kind = kind,
-                left = minOf(x1, x2), top = minOf(y1, y2), right = maxOf(x1, x2), bottom = maxOf(y1, y2),
+                left = shown.left, top = shown.top, right = shown.right, bottom = shown.bottom,
                 color = textStyle?.color
                     ?: annotation.color?.components?.takeIf { it.size == 3 }?.let { Annotator.Rgb(it[0], it[1], it[2]) },
                 width = textStyle?.fontSize ?: markup?.borderStyle?.width ?: 1f,
