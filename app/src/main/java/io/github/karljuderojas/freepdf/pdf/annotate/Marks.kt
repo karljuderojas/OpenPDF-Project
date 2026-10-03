@@ -53,13 +53,16 @@ object Marks {
             val (x1, y1) = page.toDisplay(box.lowerLeftX, box.lowerLeftY)
             val (x2, y2) = page.toDisplay(box.upperRightX, box.upperRightY)
             val markup = annotation as? PDAnnotationMarkup
+            // A text box keeps its colour and font size in /DA rather than /C and /BS.
+            val textStyle = if (kind == Mark.Kind.TextBox) markup?.let { TextBoxes.styleOf(it) } else null
             Mark(
                 page = pageIndex,
                 index = index,
                 kind = kind,
                 left = minOf(x1, x2), top = minOf(y1, y2), right = maxOf(x1, x2), bottom = maxOf(y1, y2),
-                color = annotation.color?.components?.takeIf { it.size == 3 }?.let { Annotator.Rgb(it[0], it[1], it[2]) },
-                width = markup?.borderStyle?.width ?: 1f,
+                color = textStyle?.color
+                    ?: annotation.color?.components?.takeIf { it.size == 3 }?.let { Annotator.Rgb(it[0], it[1], it[2]) },
+                width = textStyle?.fontSize ?: markup?.borderStyle?.width ?: 1f,
                 comment = annotation.contents.orEmpty(),
                 markedText = (annotation as? PDAnnotationTextMarkup)?.let { coveredText(page, it, words) }.orEmpty(),
                 author = markup?.titlePopup?.takeIf { it.isNotBlank() },
@@ -72,7 +75,7 @@ object Marks {
     /**
      * Changes the mark at [index] on [pageIndex]: its colour, its line width (for marks drawn with
      * a line), and its comment. Null leaves that part as it was. The mark is redrawn so other
-     * viewers show the change.
+     * viewers show the change. For a text box, [width] is the font size and [comment] its text.
      */
     fun edit(
         document: PDDocument,
@@ -84,6 +87,16 @@ object Marks {
     ) {
         val annotation = document.getPage(pageIndex).annotations[index]
         require(kindOf(annotation) != null) { "Not a mark" }
+        if (kindOf(annotation) == Mark.Kind.TextBox && annotation is PDAnnotationMarkup) {
+            val style = TextBoxes.styleOf(annotation)
+            TextBoxes.edit(
+                document, annotation,
+                text = comment?.takeIf { it.isNotBlank() } ?: annotation.contents.orEmpty(),
+                color = color ?: style?.color ?: Annotator.Rgb(0f, 0f, 0f),
+                fontSize = width ?: style?.fontSize ?: 12f,
+            )
+            return
+        }
         if (color != null) annotation.color = color.toPdColor()
         if (width != null && annotation is PDAnnotationMarkup) {
             annotation.borderStyle = (annotation.borderStyle ?: PDBorderStyleDictionary()).apply { this.width = width }

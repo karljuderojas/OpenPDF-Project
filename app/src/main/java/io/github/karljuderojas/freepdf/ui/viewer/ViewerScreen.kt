@@ -133,6 +133,7 @@ sealed interface ViewerAction {
     data class Stroke(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val points: List<Offset>) : ViewerAction
     data class Box(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val start: Offset, val end: Offset) : ViewerAction
     data class Note(val page: Int, val style: ToolStyle, val at: Offset, val text: String) : ViewerAction
+    data class AddTextBox(val page: Int, val style: ToolStyle, val at: Offset, val text: String) : ViewerAction
     data class SetToolStyle(val tool: AnnotateTool, val style: ToolStyle) : ViewerAction
 
     /** Marks text with a markup [tool], one box per line; see [TextSelectionLayer]. */
@@ -276,6 +277,7 @@ fun ViewerScreen(
                     }
                 }
                 is ViewerAction.Note -> viewModel.note(action.page, action.at, action.text, action.style)
+                is ViewerAction.AddTextBox -> viewModel.textBox(action.page, action.at, action.text, action.style)
                 is ViewerAction.SetToolStyle -> viewModel.setToolStyle(action.tool, action.style)
                 is ViewerAction.MarkLines -> action.tool.markup?.let {
                     viewModel.markLines(action.page, action.lines, it, action.style, action.comment)
@@ -342,6 +344,7 @@ fun ViewerContent(
     var splitting by remember { mutableStateOf(false) }
     var confirmLeave by remember { mutableStateOf(false) }
     var pendingNote by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
+    var pendingTextBox by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
@@ -716,8 +719,11 @@ fun ViewerContent(
                                 words = words,
                                 onLines = { onAction(ViewerAction.MarkLines(page, tool, style, it)) },
                                 onTap = { at ->
-                                    if (tool == AnnotateTool.Note) pendingNote = page to at
-                                    else onAction(ViewerAction.Erase(page, at))
+                                    when (tool) {
+                                        AnnotateTool.Note -> pendingNote = page to at
+                                        AnnotateTool.TextBox -> pendingTextBox = page to at
+                                        else -> onAction(ViewerAction.Erase(page, at))
+                                    }
                                 },
                             )
                         }
@@ -889,13 +895,27 @@ fun ViewerContent(
         )
     }
 
-    commentFor?.let { mark ->
+    pendingTextBox?.let { (page, at) ->
         TextEntryDialog(
-            title = R.string.comment_title,
-            hint = R.string.comment_hint,
+            title = R.string.text_box_title,
+            hint = R.string.text_hint,
+            onDismiss = { pendingTextBox = null },
+            onAdd = { text ->
+                pendingTextBox = null
+                onAction(ViewerAction.AddTextBox(page, styleOf(AnnotateTool.TextBox), at, text))
+            },
+        )
+    }
+
+    commentFor?.let { mark ->
+        val isTextBox = mark.kind == Mark.Kind.TextBox
+        TextEntryDialog(
+            title = if (isTextBox) R.string.mark_edit_text else R.string.comment_title,
+            hint = if (isTextBox) R.string.text_hint else R.string.comment_hint,
             initial = mark.comment,
             confirm = R.string.save,
-            allowBlank = true,
+            // Clearing a comment removes it; a text box needs some text (Delete removes the box).
+            allowBlank = !isTextBox,
             onDismiss = { commentFor = null },
             onAdd = { text ->
                 commentFor = null

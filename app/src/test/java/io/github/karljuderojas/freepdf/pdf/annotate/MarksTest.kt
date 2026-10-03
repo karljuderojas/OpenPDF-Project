@@ -74,6 +74,21 @@ class MarksTest {
     }
 
     @Test
+    fun textBoxesListTheirTextAndEditWithTheirOwnStyle() {
+        val box = marked().use { document ->
+            TextBoxes.add(document, 0, PdfPoint(72f, 300f), "Call Dana", Annotator.Rgb.Red, fontSize = 16f)
+            // The sample's note on page 2 comes after it, so pick the text box by kind.
+            val index = Marks.list(document).single { it.kind == Mark.Kind.TextBox }.index
+            Marks.edit(document, 0, index, color = Annotator.Rgb.Blue, width = 24f, comment = "Call Dana first")
+            Marks.list(document).single { it.kind == Mark.Kind.TextBox }
+        }
+        assertEquals(Mark.Kind.TextBox, box.kind)
+        assertEquals("Call Dana first", box.comment)
+        assertEquals(24f, box.width, 0.01f)
+        assertEquals(Annotator.Rgb.Blue.b, box.color!!.b, 0.001f)
+    }
+
+    @Test
     fun deleteRemovesOnlyThatMark() {
         val marks = marked().use { document ->
             Marks.delete(document, 0, 0)
