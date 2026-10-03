@@ -90,8 +90,11 @@ class ScreenshotTest {
     @Test
     fun viewerAnnotateNote() {
         show { viewer(ViewerMode.Annotate, tool = R.string.tool_note) }
+        // The dialog focuses its text field, whose blinking cursor never lets Compose go idle,
+        // so drive the clock by hand from here.
+        composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithTag("annotation-layer-0").performTouchInput { click(Offset(860f, 240f)) }
-        composeRule.waitForIdle()
+        composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_annotate_note.png")
     }
 
