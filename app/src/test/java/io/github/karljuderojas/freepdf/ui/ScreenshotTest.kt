@@ -118,6 +118,9 @@ class ScreenshotTest {
                 onClearHistory = {},
                 version = "0.1.0",
                 onSourceCode = {},
+                showTips = true,
+                onShowTips = {},
+                onResetTips = {},
                 modifier = it,
             )
         }
@@ -284,7 +287,13 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerAnnotateTip() = capture("viewer_annotate_tip") { viewer(ViewerMode.Annotate, tip = R.string.tip_annotate) }
+
+    @Test
     fun viewerSign() = capture("viewer_sign") { viewer(ViewerMode.Sign) }
+
+    @Test
+    fun viewerSignTip() = capture("viewer_sign_tip") { viewer(ViewerMode.Sign, tip = R.string.tip_sign) }
 
     @Test
     fun viewerSignPlacing() = capture("viewer_sign_placing") {
@@ -436,6 +445,7 @@ class ScreenshotTest {
         toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
         search: SearchResults = SearchResults(),
         searchQuery: String? = null,
+        tip: Int? = null,
         stamps: List<PlacedStamp> = emptyList(),
         selectedStamp: Long? = null,
         onAction: (ViewerAction) -> Unit = {},
@@ -453,6 +463,7 @@ class ScreenshotTest {
             toolStyles = toolStyles,
             search = search,
             initialSearchQuery = searchQuery,
+            tip = tip,
             stamps = stamps,
             initialSelectedStamp = selectedStamp,
             onAction = onAction,

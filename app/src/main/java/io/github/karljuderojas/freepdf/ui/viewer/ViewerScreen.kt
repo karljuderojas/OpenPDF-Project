@@ -66,6 +66,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -86,11 +87,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
+import io.github.karljuderojas.freepdf.settings.Tip
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
@@ -155,6 +158,10 @@ fun ViewerScreen(
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // The tip for the mode just entered, if it was not shown before; see Tips for the rules.
+    val tips = remember(context) { (context.applicationContext as FreePdfApp).tips }
+    var tip by rememberSaveable { mutableStateOf<Tip?>(null) }
+
     val saveAsPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) {
         if (it != null) viewModel.saveAs(it) else viewModel.cancelSaveAs()
     }
@@ -190,6 +197,12 @@ fun ViewerScreen(
         search = search,
         stamps = stamps,
         snackbarHostState = snackbarHostState,
+        tip = tip?.text,
+        onTipDismissed = { tip = null },
+        onModeEntered = { mode ->
+            // A tip on screen stays when its mode is entered again, as after rotating the phone.
+            if (mode.tip != tip) tip = mode.tip?.takeIf { tips.shouldShow(it) }?.also { tips.markSeen(it) }
+        },
         onAction = { action ->
             when (action) {
                 ViewerAction.Undo -> viewModel.undo()
@@ -254,6 +267,9 @@ fun ViewerContent(
     stamps: List<PlacedStamp> = emptyList(),
     initialSelectedStamp: Long? = null,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
+    @StringRes tip: Int? = null,
+    onTipDismissed: () -> Unit = {},
+    onModeEntered: (ViewerMode) -> Unit = {},
     onAction: (ViewerAction) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
@@ -297,6 +313,13 @@ fun ViewerContent(
     val hasSignature = ready?.hasSignature == true || stamps.any { it.content is StampContent.Signature }
     LaunchedEffect(pageCount) {
         if (pageCount > 0 && selectedPage >= pageCount) selectedPage = pageCount - 1
+    }
+
+    // Tells the caller which mode is on screen, so it can pick a tip for it.
+    val isReady = ready != null
+    val currentOnModeEntered by rememberUpdatedState(onModeEntered)
+    LaunchedEffect(mode, isReady) {
+        if (isReady) currentOnModeEntered(mode)
     }
 
     fun leave() {
@@ -572,6 +595,9 @@ fun ViewerContent(
                         }
                     }
                 }
+            }
+            if (tip != null && ready != null) {
+                TipCard(tip, onTipDismissed, Modifier.align(Alignment.BottomCenter).padding(16.dp))
             }
         }
     }
@@ -851,3 +877,13 @@ private const val SEARCH_DELAY_MS = 300L
 
 /** How long the view must be still before zoomed pages are sharpened. */
 private const val SETTLE_MILLIS = 150L
+
+/** The tip shown the first time [this] mode is entered, if any. */
+private val ViewerMode.tip: Tip?
+    get() = when (this) {
+        ViewerMode.Read -> Tip.ReadZoom
+        ViewerMode.Annotate -> Tip.Annotate
+        ViewerMode.Sign -> Tip.Sign
+        ViewerMode.Pages -> Tip.Pages
+        else -> null
+    }
