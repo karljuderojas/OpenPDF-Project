@@ -431,13 +431,10 @@ class ScreenshotTest {
     @Test
     fun viewerPasswordAdd() {
         show { viewer(ViewerMode.More) }
-        // The dialog's fields never let Compose go idle, so drive the clock by hand, giving the
-        // dialog a moment to open before typing.
+        // The dialog's fields never let Compose go idle, so drive the clock by hand and capture
+        // without further input, like the Extract and Split dialogs.
         composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithText("Password").performClick()
-        composeRule.mainClock.advanceTimeBy(500)
-        composeRule.onNodeWithTag("new-password-field").performTextInput("lease2026")
-        composeRule.onNodeWithTag("confirm-password-field").performTextInput("lease2025")
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_password_add.png")
     }
