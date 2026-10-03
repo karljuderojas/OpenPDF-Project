@@ -4,6 +4,10 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -12,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
@@ -34,6 +39,10 @@ import io.github.karljuderojas.freepdf.ui.home.HomeContent
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
 import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
+import io.github.karljuderojas.freepdf.ui.viewer.PlacedStamp
+import io.github.karljuderojas.freepdf.ui.viewer.StampContent
+import io.github.karljuderojas.freepdf.ui.viewer.StampGeometry
+import io.github.karljuderojas.freepdf.ui.viewer.ViewerAction
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerContent
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerMode
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerState
@@ -205,6 +214,42 @@ class ScreenshotTest {
         )
     }
 
+    @Test
+    fun viewerSignAdjust() {
+        // A signature just placed on the Provider line, selected, and a date beside it.
+        show { viewer(ViewerMode.Sign, stamps = placedStamps(), selectedStamp = 1L) }
+        composeRule.onNodeWithTag("page-list").performScrollToIndex(1)
+        captureRoot("viewer_sign_adjust")
+    }
+
+    @Test
+    fun viewerSignMoveResize() {
+        show {
+            var stamps by remember { mutableStateOf(placedStamps()) }
+            viewer(ViewerMode.Sign, stamps = stamps, selectedStamp = 1L, onAction = { action ->
+                stamps = when (action) {
+                    is ViewerAction.MoveStamp -> stamps.map { if (it.id == action.id) it.copy(box = it.box.moved(action.delta.x, action.delta.y)) else it }
+                    is ViewerAction.ResizeStamp -> stamps.map { if (it.id == action.id) it.copy(box = it.box.scaled(action.factor, letter)) else it }
+                    else -> stamps
+                }
+            })
+        }
+        composeRule.onNodeWithTag("page-list").performScrollToIndex(1)
+        // Drag the signature down to the Client line, then pull its corner to make it bigger.
+        composeRule.onNodeWithTag("stamp-1").performTouchInput {
+            down(center)
+            for (i in 1..10) moveBy(Offset(0f, 13.5f))
+            up()
+        }
+        composeRule.onNodeWithTag("stamp-resize-1").performTouchInput {
+            down(center)
+            for (i in 1..10) moveBy(Offset(10f, 3f))
+            up()
+        }
+        composeRule.waitForIdle()
+        captureRoot("viewer_sign_move_resize")
+    }
+
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerSignPad() {
@@ -307,6 +352,9 @@ class ScreenshotTest {
         tool: Int? = null,
         savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
         signerName: String = "",
+        stamps: List<PlacedStamp> = emptyList(),
+        selectedStamp: Long? = null,
+        onAction: (ViewerAction) -> Unit = {},
     ) {
         ViewerContent(
             state = state,
@@ -318,6 +366,27 @@ class ScreenshotTest {
             initialTool = tool,
             savedSignatures = savedSignatures,
             signerName = signerName,
+            stamps = stamps,
+            initialSelectedStamp = selectedStamp,
+            onAction = onAction,
+        )
+    }
+
+    private val letter = PageSize(612f, 792f)
+
+    /** On page 2 of the sample: a signature on the Provider line and a date on its Date line. */
+    private fun placedStamps(): List<PlacedStamp> {
+        val signature = SignatureInk.render(sampleSignature(), 0xFF1A3FA8.toInt(), 6f)
+        val date = "Oct 3, 2026"
+        return listOf(
+            PlacedStamp(
+                1L, 1, StampContent.Signature(SignatureStore.Kind.Signature, signature),
+                StampGeometry.signatureBox(Offset(0.3f, 0.322f), signature.width, signature.height, SignatureStore.Kind.Signature, letter),
+            ),
+            PlacedStamp(
+                2L, 1, StampContent.Text(date, "date"),
+                StampGeometry.textBox(Offset(0.565f, 0.316f), listOf(date), letter) { it.length * 0.5f },
+            ),
         )
     }
 
