@@ -50,7 +50,11 @@ android {
     packaging {
         resources {
             // BouncyCastle (pulled in by PdfBox for signing) ships duplicate metadata.
-            excludes += setOf("META-INF/versions/*/OSGI-INF/MANIFEST.MF", "META-INF/{AL2.0,LGPL2.1}")
+            excludes += setOf(
+                "META-INF/versions/*/OSGI-INF/MANIFEST.MF",
+                "META-INF/versions/*/module-info.class",
+                "META-INF/{AL2.0,LGPL2.1,LICENSE.md,NOTICE.md}",
+            )
         }
     }
 }
