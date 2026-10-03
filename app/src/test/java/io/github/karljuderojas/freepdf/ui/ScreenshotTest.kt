@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -47,6 +48,7 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureFields
 import io.github.karljuderojas.freepdf.pdf.text.PageText
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
+import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
 import io.github.karljuderojas.freepdf.pdf.sign.TimestampReport
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
 import io.github.karljuderojas.freepdf.settings.PageColors
@@ -496,6 +498,27 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_pad.png")
     }
 
+    // The pad after the phone is rotated: the strokes drawn so far are still there.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerSignPadRestored() {
+        val restoration = StateRestorationTester(composeRule)
+        restoration.setContent { FreePdfTheme(dynamicColor = false) { viewer(ViewerMode.Sign) } }
+        composeRule.onNodeWithText("Signature").performClick()
+        composeRule.onNodeWithTag("signature-pad").performTouchInput {
+            sampleSignature().forEach { stroke ->
+                down(stroke.first())
+                stroke.drop(1).forEach { moveTo(it) }
+                up()
+            }
+        }
+        composeRule.waitForIdle()
+        restoration.emulateSavedInstanceStateRestore()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("signature-pad").assertExists()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_pad_restored.png")
+    }
+
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerSignPadTyped() {
@@ -530,6 +553,18 @@ class ScreenshotTest {
         composeRule.onNodeWithText("Finish").performClick()
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_finish.png")
+    }
+
+    // Finish is waiting on the timestamp server; the spinner never lets Compose go idle, so drive the clock.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerSignFinishing() {
+        var step by mutableStateOf<SignedCopy.Step?>(null)
+        show { viewer(ViewerMode.Sign, sample.copy(hasSignature = true), finishStep = step) }
+        composeRule.mainClock.autoAdvance = false
+        step = SignedCopy.Step.Timestamping
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_finishing.png")
     }
 
     // Next field has gone to the first place to sign, on page 2.
@@ -932,6 +967,7 @@ class ScreenshotTest {
         signerName: String = "",
         certificate: CertificateInfo? = null,
         timestampsOn: Boolean = false,
+        finishStep: SignedCopy.Step? = null,
         showCertificate: Boolean = false,
         showSignatures: Boolean = false,
         toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
@@ -965,6 +1001,7 @@ class ScreenshotTest {
             signerName = signerName,
             certificate = certificate,
             timestampsOn = timestampsOn,
+            finishStep = finishStep,
             initialShowCertificate = showCertificate,
             initialShowSignatures = showSignatures,
             toolStyles = toolStyles,
