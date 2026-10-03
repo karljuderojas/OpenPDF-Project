@@ -3,7 +3,6 @@ package io.github.karljuderojas.freepdf.pdf.edit
 import android.graphics.Bitmap
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
-import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
 import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
 import com.tom_roush.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState
@@ -39,11 +38,7 @@ object Watermarks {
     /** Draws [text] (one line per line break) centred on each of [pageIndexes]. */
     fun addText(document: PDDocument, pageIndexes: Collection<Int>, text: String, style: WatermarkStyle) {
         require(style.isValid && text.isNotBlank()) { "Nothing to draw" }
-        val font = if (PDType1Font.HELVETICA_BOLD.canShow(text.replace("\n", "").replace('\t', ' '))) {
-            PDType1Font.HELVETICA_BOLD
-        } else {
-            PdfText.fontFor(document, text)
-        }
+        val font = PdfText.boldFontFor(document, text)
         val lines = PdfText.lines(PdfText.printable(text, font))
         val widest = lines.maxOf { PdfText.widthOf(it, font, 1f) }.coerceAtLeast(0.001f)
         forEachPage(document, pageIndexes) { page, center, displayWidth ->

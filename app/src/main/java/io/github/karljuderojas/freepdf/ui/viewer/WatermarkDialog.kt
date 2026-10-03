@@ -148,8 +148,8 @@ fun WatermarkDialog(
                     }
                 }
                 if (pageCount > 1) {
-                    ChoiceRow(!allPages, stringResource(R.string.crop_apply_selected, PageRanges.format(selectedPages)), "watermark-selected", Modifier) { allPages = false }
-                    ChoiceRow(allPages, stringResource(R.string.crop_apply_all, pageCount), "watermark-all", Modifier) { allPages = true }
+                    ChoiceRow(!allPages, stringResource(R.string.watermark_apply_selected, PageRanges.format(selectedPages)), "watermark-selected", Modifier) { allPages = false }
+                    ChoiceRow(allPages, stringResource(R.string.watermark_apply_all, pageCount), "watermark-all", Modifier) { allPages = true }
                 }
                 Text(stringResource(R.string.watermark_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }

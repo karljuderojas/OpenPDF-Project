@@ -264,6 +264,8 @@
     <string name="watermark_color">Colour</string>
     <string name="watermark_note">It is drawn on top of the page. Use Undo to take it off.</string>
     <string name="watermark_apply">Add</string>
+    <string name="watermark_apply_selected">Selected pages (%1$s)</string>
+    <string name="watermark_apply_all">All %1$d pages</string>
     <string name="watermark_color_gray">Gray</string>
     <string name="watermark_color_red">Red</string>
     <string name="watermark_color_blue">Blue</string>
