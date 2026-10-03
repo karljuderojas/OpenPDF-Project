@@ -24,6 +24,15 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.Surface
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -54,7 +63,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -96,6 +104,7 @@ sealed interface ViewerAction {
     data class Move(val from: Int, val to: Int) : ViewerAction
     data object Merge : ViewerAction
     data object Share : ViewerAction
+    data class Unlock(val password: String) : ViewerAction
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
     data class Stroke(val page: Int, val tool: AnnotateTool, val points: List<Offset>) : ViewerAction
@@ -163,6 +172,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
                 ViewerAction.Merge -> mergePicker.launch(arrayOf("application/pdf"))
                 ViewerAction.Share -> viewModel.share()
+                is ViewerAction.Unlock -> viewModel.unlock(action.password)
                 is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.tool.rgb)
                 is ViewerAction.Box -> when (action.tool) {
                     AnnotateTool.Highlight -> Annotator.TextMarkup.Highlight
@@ -216,17 +226,11 @@ fun ViewerContent(
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val resources = LocalResources.current
 
     val ready = state as? ViewerState.Ready
     val pageCount = ready?.pageSizes?.size ?: 0
     LaunchedEffect(pageCount) {
         if (pageCount > 0 && selectedPage >= pageCount) selectedPage = pageCount - 1
-    }
-
-    fun comingSoon() {
-        scope.launch { snackbarHostState.showSnackbar(resources.getString(R.string.coming_soon)) }
     }
 
     fun leave() {
@@ -250,7 +254,6 @@ fun ViewerContent(
             }
             R.string.tool_delete -> confirmDelete = true
             R.string.tool_merge -> onAction(ViewerAction.Merge)
-            else -> comingSoon()
         }
     }
 
@@ -325,7 +328,6 @@ fun ViewerContent(
                 // Choosing the active Annotate tool again puts it down, so one finger scrolls again.
                 mode == ViewerMode.Annotate -> ToolStrip(mode, selectedTool, onToolSelected = {
                     when {
-                        AnnotateTool.forLabel(it) == null -> comingSoon()
                         selectedTool == it -> selectedTool = null
                         else -> selectedTool = it
                     }
@@ -341,7 +343,7 @@ fun ViewerContent(
                     ToolStrip(mode, selectedTool, onToolSelected = { label ->
                         val tool = SignTool.forLabel(label)
                         when {
-                            tool == null -> comingSoon()
+                            tool == null -> Unit
                             selectedTool == label -> selectedTool = null
                             else -> {
                                 selectedTool = label
@@ -352,7 +354,7 @@ fun ViewerContent(
                     })
                 }
                 else -> ToolStrip(mode, selectedTool = null, onToolSelected = {
-                    if (it == R.string.tool_share) onAction(ViewerAction.Share) else comingSoon()
+                    if (it == R.string.tool_share) onAction(ViewerAction.Share)
                 })
             }
         },
@@ -363,6 +365,11 @@ fun ViewerContent(
         ) {
             when {
                 state is ViewerState.Failed -> Text(stringResource(R.string.error_open))
+                state is ViewerState.Locked -> PasswordPrompt(
+                    wrongPassword = state.wrongPassword,
+                    onUnlock = { onAction(ViewerAction.Unlock(it)) },
+                    onCancel = onBack,
+                )
                 ready == null -> CircularProgressIndicator()
                 mode == ViewerMode.Pages -> PageGrid(
                     pageSizes = ready.pageSizes,
@@ -581,6 +588,51 @@ internal fun PageImage(
             Image(it.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize())
         }
         overlay()
+    }
+}
+
+/** Asks for the password of a locked PDF, in place of its pages. */
+@Composable
+private fun PasswordPrompt(wrongPassword: Boolean, onUnlock: (String) -> Unit, onCancel: () -> Unit) {
+    var password by rememberSaveable { mutableStateOf("") }
+    var visible by rememberSaveable { mutableStateOf(false) }
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        tonalElevation = 3.dp,
+        modifier = Modifier.padding(24.dp).widthIn(max = 440.dp),
+    ) {
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.password_title), style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.password_body), style = MaterialTheme.typography.bodyMedium)
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text(stringResource(R.string.password_label)) },
+                singleLine = true,
+                isError = wrongPassword,
+                supportingText = if (wrongPassword) {
+                    { Text(stringResource(R.string.password_wrong)) }
+                } else {
+                    null
+                },
+                visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { if (password.isNotEmpty()) onUnlock(password) }),
+                trailingIcon = {
+                    TextButton(onClick = { visible = !visible }) {
+                        Text(stringResource(if (visible) R.string.password_hide else R.string.password_show))
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().testTag("password-field"),
+            )
+            Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
+                Button(onClick = { onUnlock(password) }, enabled = password.isNotEmpty()) {
+                    Text(stringResource(R.string.unlock))
+                }
+            }
+        }
     }
 }
 

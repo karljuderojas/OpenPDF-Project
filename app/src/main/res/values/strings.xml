@@ -4,6 +4,13 @@
     <string name="home_tagline">Free and open source. View, annotate, edit and sign PDFs.</string>
     <string name="page_of">Page %1$d of %2$d</string>
     <string name="error_open">Could not open this PDF.</string>
+    <string name="password_title">This PDF is locked</string>
+    <string name="password_body">Enter its password to open it. When you save changes, it stays locked with the same password.</string>
+    <string name="password_label">Password</string>
+    <string name="password_wrong">That password did not open this PDF.</string>
+    <string name="password_show">Show</string>
+    <string name="password_hide">Hide</string>
+    <string name="unlock">Open</string>
     <string name="back">Back</string>
     <string name="done">Done</string>
     <string name="mode_read">Read</string>
@@ -53,7 +60,6 @@
     <string name="saved">Saved</string>
     <string name="save_failed">Could not save this PDF.</string>
     <string name="edit_failed">That change could not be made to this PDF.</string>
-    <string name="coming_soon">Coming soon</string>
     <string name="cannot_delete_last_page">A PDF needs at least one page.</string>
     <string name="delete_page_title">Delete page %1$d?</string>
     <string name="delete_page_body">You can undo this until you leave the PDF.</string>
