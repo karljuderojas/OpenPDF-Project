@@ -1,6 +1,6 @@
 # Roadmap
 
-Goal: the features people use in PDFGear and Xodo, free, offline and open source. Priorities are viewing, annotating, signing and editing. Anything that needs a server (cloud AI, Office conversion, cloud storage, collecting signatures from others) is out.
+Goal: a complete everyday PDF toolkit, free, offline and open source. Priorities are viewing, annotating, signing and editing. Anything that needs a server (cloud AI, Office conversion, cloud storage, collecting signatures from others) is out.
 
 ✅ done in the scaffold · 🧱 code exists, no UI yet · ⬜ not started
 

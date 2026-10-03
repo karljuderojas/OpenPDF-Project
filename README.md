@@ -1,6 +1,6 @@
 # FreePDF
 
-A free, open-source PDF app for Android. It aims to cover what people use PDFGear and Xodo for (viewing, annotating, signing and editing PDFs) with no ads, accounts or paywalls, and everything running on the phone.
+A free, open-source PDF app for Android. It lets you view, annotate, sign and edit PDFs with no ads, accounts or paywalls, and everything runs on the phone.
 
 > Early scaffold. See [docs/ROADMAP.md](docs/ROADMAP.md) for what works today.
 
@@ -33,7 +33,7 @@ PDFium draws every page on screen. Every change goes through PdfBox, which saves
 
 ## Signing
 
-Signing follows the flow of [DocuSeal](https://github.com/docusealco/docuseal), used as a design reference only: no DocuSeal code is used, since it is AGPL. See [docs/signing-design.md](docs/signing-design.md).
+Signing places a drawn, typed or photographed signature on the page and can add a standard digital signature that other PDF readers verify. See [docs/signing-design.md](docs/signing-design.md).
 
 ## Building
 

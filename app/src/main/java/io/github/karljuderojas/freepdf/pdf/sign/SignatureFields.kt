@@ -75,9 +75,12 @@ object SignatureFields {
     private class Cue(val page: Int, val box: DisplayRect, val label: DisplayRect)
 
     /**
-     * Lines that say "sign here" or mention a signature. The signature goes on a run of
-     * underscores in the line if there is one, otherwise just above the label, where the
-     * line to sign on usually is.
+     * Lines that say "sign here" or mention a signature. The signature goes on the line to sign
+     * on beside the label: a run of underscores in the label's own text, or one or a drawn line
+     * further along the same row (forms often set "Signature:" apart from its line). With
+     * neither, it goes just above the label, where a line drawn over a label such as "Client
+     * signature" is, unless printed text is there; then it goes after the label on its row. A
+     * box never reaches up over the text above it, down to [MIN_FIELD_HEIGHT].
      *
      * PDFTextStripper reports glyphs in the page's unrotated space, measured from the crop box's
      * top-left (x across, y down to the baseline; getXDirAdj and getYDirAdj for upright text).
@@ -102,19 +105,37 @@ object SignatureFields {
             fun display(left: Float, top: Float, right: Float, bottom: Float) = pdfToDisplay(
                 PdfRect(crop.left + left, crop.top - bottom, crop.left + right, crop.top - top), page.rotation, crop,
             )
-            for (line in lines(glyphs)) {
-                val label = line.cue() ?: continue
+            val pageLines = lines(glyphs)
+            val rules = RuleFinder(page).rules.map { Rule(it.left - crop.left, it.right - crop.left, crop.top - it.y) }
+            for (line in pageLines) {
+                val mention = line.mention() ?: continue
                 val first = line.glyphs.first()
-                val labelTop = line.baseline - maxOf(first.heightDir, first.fontSizeInPt * 0.7f)
                 val labelRight = line.glyphs.last().let { it.xDirAdj + it.widthDirAdj }
-                val underscores = line.underscoresAfter(label)
-                val box = if (underscores != null) {
-                    val bottom = line.baseline + 2f
-                    display(underscores.first, bottom - FIELD_HEIGHT, underscores.second, bottom)
+                val after = lineAfter(line, labelRight, pageLines, rules)
+                // A bare "Signature" or a long sentence is a label after all when its row has a line to sign on.
+                val label = line.cue() ?: mention.takeIf { after != null } ?: continue
+                val labelTop = line.baseline - maxOf(first.heightDir, first.fontSizeInPt * 0.7f)
+                val onRow = line.underscoresAfter(label)?.let { (left, right) -> Rule(left, right, line.baseline) } ?: after
+                val box = if (onRow != null) {
+                    val bottom = maxOf(onRow.y, line.baseline) + 2f
+                    val right = minOf(onRow.right, onRow.left + FIELD_WIDTH * 1.5f)
+                    val height = roomAbove(glyphs, onRow.left, right, bottom, line.baseline - BASELINE_TOLERANCE).coerceAtLeast(MIN_FIELD_HEIGHT)
+                    display(onRow.left, bottom - height, right, bottom)
                 } else {
-                    val bottom = labelTop - GAP
                     val left = first.xDirAdj
-                    display(left, maxOf(0f, bottom - FIELD_HEIGHT), minOf(left + FIELD_WIDTH, crop.width), bottom)
+                    val right = minOf(left + FIELD_WIDTH, crop.width)
+                    val bottom = labelTop - GAP
+                    val room = minOf(roomAbove(glyphs, left, right, bottom, labelTop), bottom)
+                    if (room >= MIN_FIELD_HEIGHT) {
+                        display(left, bottom - room, right, bottom)
+                    } else {
+                        // Printed text is right above the label, so the blank space after it is the place.
+                        val leftAfter = labelRight + spaceWidth(line.glyphs.last()) * 2
+                        val bottomAfter = line.baseline + 2f
+                        val rightAfter = minOf(leftAfter + FIELD_WIDTH, crop.width)
+                        val height = roomAbove(glyphs, leftAfter, rightAfter, bottomAfter, line.baseline - BASELINE_TOLERANCE).coerceAtLeast(MIN_FIELD_HEIGHT)
+                        display(leftAfter, bottomAfter - height, rightAfter, bottomAfter)
+                    }
                 }
                 cues += Cue(pageIndex, box, display(first.xDirAdj, labelTop, labelRight, line.baseline))
             }
@@ -148,15 +169,20 @@ object SignatureFields {
             this.glyphAt = glyphAt
         }
 
+        /** Where "sign here" or "signature" is in [text], or null if neither is. */
+        fun mention(): IntRange? {
+            val lower = text.lowercase()
+            return (SIGN_HERE.find(lower) ?: SIGNATURE.find(lower))?.range
+        }
+
         /** Where the cue is in [text], or null if this line does not ask for a signature. */
         fun cue(): IntRange? {
-            val lower = text.lowercase()
-            val match = SIGN_HERE.find(lower) ?: SIGNATURE.find(lower) ?: return null
-            if (UNDERSCORES.containsMatchIn(text)) return match.range
+            val match = mention() ?: return null
+            if (UNDERSCORES.containsMatchIn(text)) return match
             // A heading such as "Signature" on its own line names a section rather than a place to
             // sign, and a long line is a sentence that mentions signatures, not a label.
-            val trimmed = lower.trim()
-            return if (trimmed.trimEnd('.') == "signature" || trimmed.length > MAX_LABEL_LENGTH) null else match.range
+            val trimmed = text.lowercase().trim()
+            return if (trimmed.trimEnd('.') == "signature" || trimmed.length > MAX_LABEL_LENGTH) null else match
         }
 
         /** The left and right of the first run of underscores after [cue], or before it if none follows. */
@@ -167,6 +193,39 @@ object SignatureFields {
             val end = glyphAt[run.range.last] ?: return null
             return start.xDirAdj to end.xDirAdj + end.widthDirAdj
         }
+    }
+
+    /** A horizontal line in the stripper's space: x across, [y] down from the crop box's top. */
+    private class Rule(val left: Float, val right: Float, val y: Float)
+
+    /**
+     * The line to sign on further along [label]'s row, after [labelRight]: the nearest run of
+     * underscores in another piece of text on the same baseline, or the nearest drawn line
+     * sitting on that baseline. Null when the row has neither.
+     */
+    private fun lineAfter(label: Line, labelRight: Float, lines: List<Line>, rules: List<Rule>): Rule? {
+        val size = label.glyphs.first().fontSizeInPt
+        val typed = lines.asSequence()
+            .filter { it !== label && abs(it.baseline - label.baseline) <= BASELINE_TOLERANCE }
+            .mapNotNull { other -> other.underscoresAfter(-1..-1)?.let { (left, right) -> Rule(left, right, other.baseline) } }
+        val drawn = rules.asSequence()
+            .filter { it.y in label.baseline - size * 0.4f..label.baseline + size * 0.6f + 2f }
+        return (typed + drawn)
+            .filter { it.left >= labelRight - 2f && it.left - labelRight <= MAX_REACH }
+            .minByOrNull { it.left }
+    }
+
+    /**
+     * How tall a box whose bottom is at [bottom] can be, between [left] and [right], before it
+     * covers text: the space up to the nearest glyph above [under] (a baseline, in the
+     * stripper's space) that overlaps it, at most [FIELD_HEIGHT].
+     */
+    private fun roomAbove(glyphs: List<TextPosition>, left: Float, right: Float, bottom: Float, under: Float): Float {
+        val nearest = glyphs.asSequence()
+            .filter { !it.unicode.isNullOrBlank() && it.yDirAdj < under }
+            .filter { it.xDirAdj < right && it.xDirAdj + it.widthDirAdj > left }
+            .maxOfOrNull { it.yDirAdj } ?: return FIELD_HEIGHT
+        return (bottom - nearest - 1f).coerceAtMost(FIELD_HEIGHT)
     }
 
     /** Groups glyphs into lines by baseline, split where a wide gap leaves separate columns or labels. */
@@ -200,6 +259,8 @@ object SignatureFields {
     // In points: about the size of a handwritten signature, and the space left above a label.
     private const val FIELD_WIDTH = 200f
     private const val FIELD_HEIGHT = 36f
+    private const val MIN_FIELD_HEIGHT = 16f
+    private const val MAX_REACH = 300f
     private const val GAP = 3f
     private const val BASELINE_TOLERANCE = 2f
     private const val COLUMN_GAP = 24f

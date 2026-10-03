@@ -82,6 +82,59 @@ class SignatureFieldsTest {
         }
     }
 
+    @Test
+    fun aLabelSetApartFromItsTypedLineIsSignedOnTheLineNotOverTheTextAbove() {
+        // witness.pdf: "IN WITNESS WHEREOF, ... sealed and signed:" on a baseline 507 pt up, then
+        // "Signature:" at 72 pt across and 483 pt up, with its underscores from 170 to 420 pt across.
+        val fields = PDDocument.load(javaClass.classLoader!!.getResourceAsStream("sample/witness.pdf")).use { SignatureFields.find(it) }
+        assertEquals(fields.toString(), 1, fields.size)
+        val box = fields.single().box
+        assertEquals(170f / 612f, box.left, 0.005f)
+        assertEquals(420f / 612f, box.right, 0.005f)
+        assertEquals((792f - 483f + 2f) / 792f, box.bottom, 0.004f)
+        assertTrue("not over the IN WITNESS line: $box", box.top >= (792f - 507f) / 792f)
+        assertTrue("tall enough to sign in: $box", (box.bottom - box.top) * 792f >= 16f)
+    }
+
+    @Test
+    fun aDrawnLineAfterTheLabelIsWhereTheSignatureGoes() {
+        PDDocument().use { document ->
+            val page = PDPage(PDRectangle.LETTER)
+            document.addPage(page)
+            text(document, page, 72f, 424f, "The parties have signed this agreement on the date below:")
+            text(document, page, 72f, 400f, "Signature:")
+            PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true).use { stream ->
+                stream.setLineWidth(0.75f)
+                stream.moveTo(170f, 398f)
+                stream.lineTo(420f, 398f)
+                stream.stroke()
+            }
+            val fields = SignatureFields.find(document)
+            assertEquals(fields.toString(), 1, fields.size)
+            val box = fields.single().box
+            assertEquals(170f / 612f, box.left, 0.005f)
+            assertEquals(420f / 612f, box.right, 0.005f)
+            assertEquals((792f - 398f + 2f) / 792f, box.bottom, 0.004f)
+            assertTrue("not over the sentence above: $box", box.top >= (792f - 424f) / 792f)
+        }
+    }
+
+    @Test
+    fun withNoLineAndTextJustAboveTheBoxGoesAfterTheLabel() {
+        PDDocument().use { document ->
+            val page = PDPage(PDRectangle.LETTER)
+            document.addPage(page)
+            text(document, page, 72f, 412f, "Please read everything above before you put your name to it.")
+            text(document, page, 72f, 400f, "Signature:")
+            val fields = SignatureFields.find(document)
+            assertEquals(fields.toString(), 1, fields.size)
+            val box = fields.single().box
+            // "Signature:" in 10 pt Helvetica ends about 117 pt across; the box starts after it, on its row.
+            assertTrue("after the label: $box", box.left > 117f / 612f)
+            assertEquals((792f - 400f + 2f) / 792f, box.bottom, 0.004f)
+        }
+    }
+
     /** A page with "Sign here" at 600 pt up and a signature field over the space just above it. */
     private fun withSignatureField(signed: Boolean, check: (PDDocument) -> Unit) {
         PDDocument().use { document ->
