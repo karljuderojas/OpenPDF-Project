@@ -1340,7 +1340,12 @@ fun ViewerContent(
             onConfirm = {
                 confirmRedact = false
                 // Text and pictures placed with Add text or Add image are part of the page being redacted.
-                if (stamps.isNotEmpty()) onAction(ViewerAction.CommitStamps)
+                // Writing them in does not move anything under the marks, so the marks stay for a
+                // second try if the save is cancelled.
+                if (stamps.isNotEmpty()) {
+                    marksMadeOn = null
+                    onAction(ViewerAction.CommitStamps)
+                }
                 onAction(ViewerAction.Redact(redactions))
             },
         )

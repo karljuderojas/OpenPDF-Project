@@ -4,6 +4,7 @@ import com.tom_roush.pdfbox.cos.COSArray
 import com.tom_roush.pdfbox.cos.COSBase
 import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSName
+import com.tom_roush.pdfbox.cos.COSStream
 import com.tom_roush.pdfbox.cos.COSString
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
@@ -11,6 +12,7 @@ import com.tom_roush.pdfbox.contentstream.operator.Operator
 import com.tom_roush.pdfbox.pdfparser.PDFStreamParser
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDResources
+import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationPopup
 import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineNode
 import io.github.karljuderojas.freepdf.pdf.PdfRect
@@ -42,6 +44,8 @@ object Redactor {
         val shapes: Int,
         val forms: Int,
         val annotations: Int,
+        /** Pictures that could not be blanked in part (too big to decode, or a stencil mask) and were removed whole. */
+        val wholePictures: Int = 0,
     ) {
         /** True when the marked areas held nothing to remove (blank space), though they are still painted black. */
         val foundNothing: Boolean get() = textCharacters + pictures + shapes + forms + annotations == 0
@@ -62,6 +66,7 @@ object Redactor {
         var pictures = 0
         var shapes = 0
         var forms = 0
+        var wholePictures = 0
 
         for ((index, rects) in marked) {
             val page = document.getPage(index)
@@ -71,6 +76,7 @@ object Redactor {
             pictures += redactor.stats.pictures
             shapes += redactor.stats.shapes
             forms += redactor.stats.forms
+            wholePictures += redactor.stats.wholePictures
             fragments += redactor.fragments
             replaced += redactor.replacedObjects
             unreadable = unreadable || redactor.unreadableText
@@ -97,7 +103,7 @@ object Redactor {
         if (removedAnnotations.isNotEmpty()) removeAnnotationLeftovers(document, removedAnnotations)
         if (replaced.isNotEmpty()) dropUnusedOriginals(document, replaced)
         scrubMetadata(document, fragments.filter { it.replace(SPACES, "").length >= MIN_FRAGMENT }, unreadable)
-        return Result(marked.size, characters, pictures, shapes, forms, annotations)
+        return Result(marked.size, characters, pictures, shapes, forms, annotations, wholePictures)
     }
 
     /** "Lease.pdf" becomes "Lease (redacted).pdf". */
@@ -185,7 +191,8 @@ object Redactor {
             val xobjects = resources.getDictionaryObject(COSName.XOBJECT) as? COSDictionary ?: continue
             val stale = xobjects.keySet().filter { xobjects.getDictionaryObject(it) in replaced }
             if (stale.isEmpty()) continue
-            val drawn = drawnNames(page)
+            // Content that cannot be read is left with everything it may draw.
+            val drawn = drawnNames(page) ?: continue
             val drop = stale.filter { it !in drawn }
             if (drop.isEmpty()) continue
             val ownXObjects = COSDictionary(xobjects).apply { drop.forEach { removeItem(it) } }
@@ -203,15 +210,31 @@ object Redactor {
         }
     }
 
-    /** The XObject names [page]'s own content draws with Do. */
-    private fun drawnNames(page: PDPage): Set<COSName> {
-        if (!page.hasContents()) return emptySet()
-        val tokens = PDFStreamParser(page).apply { parse() }.tokens
-        return tokens.indices.mapNotNullTo(HashSet()) { i ->
-            val token = tokens[i]
-            if (token is Operator && token.name == "Do") tokens.getOrNull(i - 1) as? COSName else null
+    /**
+     * The XObject names [page] draws with Do from its own resources: in its content, and in any form
+     * it draws that has no resources of its own and so looks names up in the page's. Null when the
+     * content cannot be parsed.
+     */
+    private fun drawnNames(page: PDPage): Set<COSName>? = runCatching {
+        val names = HashSet<COSName>()
+        val xobjects = page.resources?.cosObject?.getDictionaryObject(COSName.XOBJECT) as? COSDictionary
+        val scanned = identitySet()
+
+        fun scan(tokens: List<Any?>) {
+            for (i in tokens.indices) {
+                val token = tokens[i]
+                if (token !is Operator || token.name != "Do") continue
+                val name = tokens.getOrNull(i - 1) as? COSName ?: continue
+                names += name
+                val form = xobjects?.getDictionaryObject(name) as? COSStream ?: continue
+                if (form.getCOSName(COSName.SUBTYPE) != COSName.FORM || form.containsKey(COSName.RESOURCES)) continue
+                if (scanned.add(form)) scan(PDFStreamParser(PDFormXObject(form)).apply { parse() }.tokens)
+            }
         }
-    }
+
+        if (page.hasContents()) scan(PDFStreamParser(page).apply { parse() }.tokens)
+        names
+    }.getOrNull()
 
     /**
      * Takes the removed words out of the document's metadata. Matching ignores case and spaces, since
@@ -226,11 +249,15 @@ object Redactor {
         if (unreadable) {
             document.documentInformation?.let { info ->
                 info.title = null
+                info.author = null
                 info.subject = null
                 info.keywords = null
+                info.creator = null
             }
             document.documentCatalog.metadata = null
         }
+        // With the words unknown, any bookmark or alternate text might repeat them.
+        val mentionsRemoved: (String?) -> Boolean = if (unreadable) { text -> !text.isNullOrBlank() } else ::mentions
 
         document.documentInformation?.let { info ->
             if (mentions(info.title)) info.title = null
@@ -247,10 +274,10 @@ object Redactor {
             if (mentions(text)) catalog.metadata = null
         }
 
-        catalog.documentOutline?.let { scrubOutline(it, ::mentions) }
+        catalog.documentOutline?.let { scrubOutline(it, mentionsRemoved) }
 
         val seen = Collections.newSetFromMap(IdentityHashMap<COSBase, Boolean>())
-        catalog.cosObject.getDictionaryObject(COSName.getPDFName("StructTreeRoot"))?.let { scrubStructure(it, seen, ::mentions) }
+        catalog.cosObject.getDictionaryObject(COSName.getPDFName("StructTreeRoot"))?.let { scrubStructure(it, seen, mentionsRemoved) }
     }
 
     private fun scrubOutline(node: PDOutlineNode, mentions: (String?) -> Boolean) {

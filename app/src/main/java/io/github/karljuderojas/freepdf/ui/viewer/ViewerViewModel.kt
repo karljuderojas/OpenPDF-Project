@@ -1139,7 +1139,13 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 _state.update { if (it is ViewerState.Ready) it.copy(redactionsSaved = redactionsSaved) else it }
             }
             val message = result.fold(
-                onSuccess = { if (it.foundNothing) R.string.redact_saved_blank else R.string.redact_saved },
+                onSuccess = {
+                    when {
+                        it.wholePictures > 0 -> R.string.redact_saved_whole_pictures
+                        it.foundNothing -> R.string.redact_saved_blank
+                        else -> R.string.redact_saved
+                    }
+                },
                 onFailure = { R.string.redact_failed },
             )
             _effects.send(ViewerEffect.Message(message))

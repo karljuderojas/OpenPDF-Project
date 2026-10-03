@@ -4,6 +4,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tom_roush.pdfbox.contentstream.operator.Operator
 import com.tom_roush.pdfbox.cos.COSFloat
 import com.tom_roush.pdfbox.cos.COSName
+import com.tom_roush.pdfbox.cos.COSString
 import com.tom_roush.pdfbox.pdfparser.PDFStreamParser
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
@@ -520,13 +521,19 @@ class RedactorTest {
             val page = source.addPage("BT /T3 12 Tf 72 700 Td (AAAA) Tj ET")
             page.resources.cosObject.getCOSDictionary(COSName.FONT).setItem(COSName.getPDFName("T3"), font)
             source.documentInformation.title = "Payroll for Zebediah"
-            source.documentInformation.author = "Records office"
+            source.documentInformation.author = "Zebediah Quill"
+            source.documentInformation.producer = "FreePDF"
+            val outline = com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline()
+            outline.addLast(com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem().apply { title = "Zebediah's pay" })
+            source.documentCatalog.documentOutline = outline
 
             Redactor.redact(source, mapOf(0 to listOf(PdfRect(60f, 690f, 200f, 720f))))
             roundTrip(source).use { saved ->
                 assertNull(saved.documentInformation.title)
-                assertEquals("Records office", saved.documentInformation.author)
+                assertNull(saved.documentInformation.author)
+                assertEquals("FreePDF", saved.documentInformation.producer)
             }
+            assertFalse(everythingIn(source).contains("Zebediah"))
         }
     }
 
@@ -585,6 +592,133 @@ class RedactorTest {
                 assertTrue(saved.documentCatalog.acroForm?.fields.orEmpty().isEmpty())
             }
             assertFalse(everythingIn(source).contains("4321"))
+        }
+    }
+
+    /** A form with one field named [name], whose widget sits at [rect] on [page] and holds [values] set directly. */
+    private fun PDDocument.addField(
+        page: PDPage,
+        field: com.tom_roush.pdfbox.pdmodel.interactive.form.PDTerminalField,
+        rect: PDRectangle,
+        values: Map<COSName, com.tom_roush.pdfbox.cos.COSBase>,
+    ) {
+        val form = documentCatalog.acroForm ?: com.tom_roush.pdfbox.pdmodel.interactive.form.PDAcroForm(this).also { documentCatalog.acroForm = it }
+        values.forEach { (key, value) -> field.cosObject.setItem(key, value) }
+        val widget = field.widgets.single().apply {
+            rectangle = rect
+            setPage(page)
+        }
+        page.annotations = page.annotations + widget
+        form.fields = form.fields + field
+    }
+
+    @Test
+    fun removesACheckboxStateAndAChosenOption() {
+        PDDocument().use { source ->
+            val page = source.addPage("BT /F1 12 Tf 72 700 Td (Diagnosis:) Tj ET")
+            val form = com.tom_roush.pdfbox.pdmodel.interactive.form.PDAcroForm(source)
+            source.documentCatalog.acroForm = form
+            val box = com.tom_roush.pdfbox.pdmodel.interactive.form.PDCheckBox(form).apply { partialName = "hiv" }
+            source.addField(page, box, PDRectangle(150f, 695f, 12f, 12f), mapOf(
+                COSName.V to COSName.getPDFName("PositiveResult"),
+            ))
+            box.widgets.single().cosObject.setItem(COSName.AS, COSName.getPDFName("PositiveResult"))
+            val choice = com.tom_roush.pdfbox.pdmodel.interactive.form.PDListBox(form).apply { partialName = "condition" }
+            source.addField(page, choice, PDRectangle(170f, 690f, 100f, 20f), mapOf(
+                COSName.OPT to com.tom_roush.pdfbox.cos.COSArray().apply {
+                    add(COSString("Asthma")); add(COSString("Hepatitis"))
+                },
+                COSName.I to com.tom_roush.pdfbox.cos.COSArray().apply { add(com.tom_roush.pdfbox.cos.COSInteger.get(1)) },
+                COSName.V to COSString("Hepatitis"),
+            ))
+
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(140f, 685f, 290f, 715f))))
+            assertEquals(2, result.annotations)
+            val everything = everythingIn(source)
+            assertFalse(everything.contains("PositiveResult"))
+            assertFalse(everything.contains("Hepatitis"))
+            assertFalse(everything.contains("Asthma"))
+        }
+    }
+
+    @Test
+    fun removesRepliesToARemovedNoteOnOtherPages() {
+        PDDocument().use { source ->
+            val first = source.addPage("BT /F1 12 Tf 72 700 Td (Client: Zebediah) Tj ET")
+            val second = source.addPage("BT /F1 12 Tf 72 700 Td (Page two) Tj ET")
+            val note = PDAnnotationText().apply {
+                rectangle = PDRectangle(130f, 695f, 20f, 20f)
+                contents = "Owes rent"
+            }
+            first.annotations = listOf(note)
+            val reply = PDAnnotationText().apply {
+                rectangle = PDRectangle(400f, 300f, 20f, 20f)
+                contents = "Reply: he paid half of the overdue rent"
+                cosObject.setItem(COSName.getPDFName("IRT"), note)
+            }
+            val other = PDAnnotationText().apply {
+                rectangle = PDRectangle(400f, 200f, 20f, 20f)
+                contents = "Unrelated"
+            }
+            second.annotations = listOf(reply, other)
+
+            Redactor.redact(source, mapOf(0 to listOf(PdfRect(120f, 690f, 200f, 720f))))
+            roundTrip(source).use { saved ->
+                assertEquals(listOf("Unrelated"), saved.getPage(1).annotations.map { it.contents })
+            }
+            val everything = everythingIn(source)
+            assertFalse(everything.contains("Owes rent"))
+            assertFalse(everything.contains("overdue"))
+        }
+    }
+
+    @Test
+    fun leavesNoOriginalPictureBehindWhenPagesShareOneResourceDictionary() {
+        PDDocument().use { source ->
+            val shared = com.tom_roush.pdfbox.pdmodel.PDResources()
+            shared.put(COSName.getPDFName("Im1"), twoColourPicture(source))
+            // Both pages point at the same dictionary; only the first is marked, and the second does not draw the picture.
+            source.addPage("q 200 0 0 200 100 400 cm /Im1 Do Q") { resources = shared }
+            source.addPage("BT /F1 12 Tf 72 700 Td (No picture here) Tj ET") { resources = shared }
+
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(100f, 500f, 200f, 600f))))
+            assertEquals(1, result.pictures)
+            assertEquals(listOf(listOf(0, 0, 0)), picturesIn(source))
+            roundTrip(source).use { assertTrue(textOf(it, 2).contains("No picture here")) }
+        }
+    }
+
+    @Test
+    fun keepsAPictureAnUnmarkedPageDrawsThroughAFormWithoutResources() {
+        PDDocument().use { source ->
+            val picture = twoColourPicture(source)
+            val shared = com.tom_roush.pdfbox.pdmodel.PDResources()
+            shared.put(COSName.getPDFName("Im1"), picture)
+            // A form with no resources of its own looks /Im1 up in the page's resources.
+            val form = PDFormXObject(source).apply { bBox = PDRectangle(0f, 0f, 1f, 1f) }
+            form.cosObject.removeItem(COSName.RESOURCES)
+            form.stream.createOutputStream().use { it.write("/Im1 Do".toByteArray()) }
+            shared.put(COSName.getPDFName("Fm1"), form)
+            source.addPage("q 200 0 0 200 100 400 cm /Im1 Do Q") { resources = shared }
+            source.addPage("q 200 0 0 200 100 400 cm /Fm1 Do Q") { resources = shared }
+
+            Redactor.redact(source, mapOf(0 to listOf(PdfRect(100f, 500f, 200f, 600f))))
+            roundTrip(source).use { saved ->
+                val names = saved.getPage(1).resources.xObjectNames.map { it.name }
+                assertTrue(names.toString(), "Im1" in names)
+            }
+        }
+    }
+
+    @Test
+    fun unreadableContentOnAnUnmarkedPageDoesNotStopTheSave() {
+        PDDocument().use { source ->
+            val shared = com.tom_roush.pdfbox.pdmodel.PDResources()
+            shared.put(COSName.getPDFName("Im1"), twoColourPicture(source))
+            source.addPage("q 200 0 0 200 100 400 cm /Im1 Do Q") { resources = shared }
+            source.addPage("q 200 0 0 200 100 400 cm /Im1 Do Q (unterminated") { resources = shared }
+            Redactor.redact(source, mapOf(0 to listOf(PdfRect(100f, 500f, 200f, 600f))))
+            roundTrip(source).use { assertEquals(2, it.numberOfPages) }
         }
     }
 

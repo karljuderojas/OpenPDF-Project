@@ -112,6 +112,9 @@ internal class PageRedactor(
         var pictures = 0
         var shapes = 0
         var forms = 0
+
+        /** Pictures removed whole rather than blanked in part: stencil masks, and pictures too big or odd to decode. */
+        var wholePictures = 0
     }
 
     val stats = Stats()
@@ -391,6 +394,7 @@ internal class PageRedactor(
                 val blanked = blank(xobject)
                 if (blanked == null) {
                     stats.pictures++
+                    stats.wholePictures++
                     return
                 }
                 stats.pictures++
@@ -484,7 +488,9 @@ internal class PageRedactor(
         val height = source.height
         val pixels = IntArray(width * height)
         source.getPixels(pixels, 0, width, 0, 0, width, height)
-        if (ChannelOrder.decodeSwaps) swapRedAndBlue(pixels)
+        val jpeg = image.suffix == "jpg"
+        // JPEG pictures decode through BitmapFactory, not PdfBox's own sample reader the probe uses.
+        if (!jpeg && ChannelOrder.decodeSwaps) swapRedAndBlue(pixels)
 
         // The picture's own space is the unit square, with the top row of pixels at y = 1.
         val ctm = graphicsState.currentTransformationMatrix
@@ -512,7 +518,6 @@ internal class PageRedactor(
             val bottom = ceil((1f - vs.min()) * height).toInt().coerceIn(0, height)
             for (row in top until bottom) pixels.fill(BLACK, row * width + left, row * width + right)
         }
-        val jpeg = image.suffix == "jpg"
         if (!jpeg && ChannelOrder.encodeSwaps) swapRedAndBlue(pixels)
         val blanked = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         blanked.setPixels(pixels, 0, width, 0, 0, width, height)
