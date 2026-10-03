@@ -170,7 +170,6 @@
     <string name="verify_reason">Reason: %1$s</string>
     <string name="verify_document_timestamp">Document timestamp</string>
     <string name="verify_unnamed">Unknown signer</string>
-    <string name="close">Close</string>
     <!-- Choosing the certificate that seals signed copies. -->
     <string name="certificate_title">Signing certificate</string>
     <string name="certificate_device">This phone\'s certificate</string>
