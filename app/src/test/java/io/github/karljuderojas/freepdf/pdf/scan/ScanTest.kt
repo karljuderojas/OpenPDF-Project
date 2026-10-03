@@ -107,6 +107,21 @@ class ScanTest {
     }
 
     @Test
+    fun aQuadNoMatrixCanMapGivesTheWholePhotoNotACornerOfIt() {
+        val photo = SyntheticPhoto.make(samplePage())
+        // All four corners on one spot: nothing to stretch.
+        val collapsed = Quad(Corner(0.5f, 0.5f), Corner(0.5f, 0.5f), Corner(0.5f, 0.5f), Corner(0.5f, 0.5f))
+        val flat = PerspectiveWarp.warp(photo, collapsed, 600)
+        val whole = PerspectiveWarp.warp(photo, Quad.inset(0f), 600)
+        assertEquals(whole.width to whole.height, flat.width to flat.height)
+        assertEquals(600, maxOf(flat.width, flat.height))
+        // Same picture: the desk is brown in the corner and the page is light in the middle.
+        val corner = flat.getPixel(2, 2)
+        assertTrue(Color.red(corner) < 120 && Color.blue(corner) < 90)
+        assertEquals(whole.getPixel(flat.width / 2, flat.height / 2), flat.getPixel(flat.width / 2, flat.height / 2))
+    }
+
+    @Test
     fun otsuSplitsTwoBrightnessGroups() {
         val values = IntArray(100) { if (it < 50) 40 else 200 }
         val t = PageDetector.otsu(values)

@@ -34,4 +34,32 @@ object SignaturePhotos {
         canvas.drawPath(path, pen)
         return photo
     }
+
+    /** The same signature on ruled notebook paper: light blue lines across, a red margin line down the left. */
+    fun ruled(width: Int = 900, height: Int = 400): Bitmap {
+        val photo = make(width, height)
+        val canvas = Canvas(photo)
+        val rule = Paint().apply { color = Color.rgb(160, 180, 215); strokeWidth = 2f }
+        for (y in 20 until height step 40) canvas.drawLine(0f, y.toFloat(), width.toFloat(), y.toFloat(), rule)
+        val margin = Paint().apply { color = Color.rgb(225, 150, 150); strokeWidth = 2f }
+        canvas.drawLine(120f, 0f, 120f, height.toFloat(), margin)
+        // Drawn again so the ink sits on top of the lines, as on real paper.
+        val pen = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(30, 35, 80)
+            style = Paint.Style.STROKE
+            strokeWidth = 7f
+            strokeCap = Paint.Cap.ROUND
+        }
+        canvas.drawPath(signature(), pen)
+        return photo
+    }
+
+    private fun signature() = Path().apply {
+        moveTo(200f, 260f)
+        cubicTo(260f, 80f, 330f, 80f, 330f, 200f)
+        cubicTo(330f, 300f, 420f, 100f, 520f, 190f)
+        cubicTo(580f, 250f, 650f, 120f, 700f, 170f)
+        moveTo(190f, 300f)
+        lineTo(710f, 285f)
+    }
 }
