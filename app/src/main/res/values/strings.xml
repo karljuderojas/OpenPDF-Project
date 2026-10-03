@@ -3,6 +3,8 @@
     <string name="open_pdf">Open a PDF</string>
     <string name="home_tagline">Free and open source. View, annotate, edit and sign PDFs.</string>
     <string name="page_of">Page %1$d of %2$d</string>
+    <string name="page_of_short">%1$d / %2$d</string>
+    <string name="more_options">More options</string>
     <string name="search">Search</string>
     <string name="search_hint">Search this PDF</string>
     <string name="search_count">%1$d of %2$d</string>
@@ -88,6 +90,8 @@
     <string name="mark_drawing">Drawing</string>
     <string name="mark_rectangle">Rectangle</string>
     <string name="mark_ellipse">Ellipse</string>
+    <string name="mark_line">Line</string>
+    <string name="mark_arrow">Arrow</string>
     <string name="mark_other">Mark</string>
     <string name="mark_edit_text">Edit text</string>
     <string name="text_box_title">Add a text box</string>
@@ -224,7 +228,7 @@
     <string name="verify_added_after">The file was changed after this signature was applied.</string>
     <string name="verify_trusted">Certificate issued by %1$s, which this phone trusts.</string>
     <string name="verify_self_signed">The signer made this certificate themselves, so no one has checked their name.</string>
-    <string name="verify_unknown_issuer">Certificate issued by %1$s, which this phone doesn\'t recognise. Acrobat may still trust it.</string>
+    <string name="verify_unknown_issuer">Certificate issued by %1$s, which this phone doesn\'t recognise. Other PDF readers may still trust it.</string>
     <string name="verify_expired">The certificate was not valid at the time of signing.</string>
     <string name="verify_signed_at">Signed %1$s, by the signer\'s own clock.</string>
     <string name="verify_timestamp">Timestamp from %1$s: %2$s.</string>
@@ -396,7 +400,7 @@
     <string name="tool_about_strikeout">Cross out text.</string>
     <string name="tool_about_pen">Draw freehand.</string>
     <string name="tool_about_note">Leave a comment on the page.</string>
-    <string name="tool_about_shapes">Draw a box around something.</string>
+    <string name="tool_about_shapes">Draw a box, circle, line or arrow.</string>
     <string name="tool_about_eraser">Remove a mark you added.</string>
     <string name="tool_about_crop">Trim the edges of a page, or of every page.</string>
     <string name="tool_about_rotate">Turn a page a quarter turn.</string>
@@ -425,7 +429,7 @@
     <string name="tool_synonyms_strikeout">strike, strikethrough, cross out</string>
     <string name="tool_synonyms_pen">draw, ink, freehand, scribble, sketch, pencil</string>
     <string name="tool_synonyms_note">comment, sticky, annotation, memo</string>
-    <string name="tool_synonyms_shapes">rectangle, box, square, frame</string>
+    <string name="tool_synonyms_shapes">rectangle, box, square, frame, circle, ellipse, oval, line, arrow, pointer</string>
     <string name="tool_synonyms_eraser">erase, remove, delete mark</string>
     <string name="tool_synonyms_crop">trim, cut, margins, edges, resize, white space</string>
     <string name="tool_synonyms_rotate">turn, landscape, portrait, sideways, upside down</string>

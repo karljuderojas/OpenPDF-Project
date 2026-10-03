@@ -29,7 +29,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import io.github.karljuderojas.freepdf.R
+import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
  * The Annotate tools that are wired up, and how each one is used on the page. Each tool keeps its
@@ -77,6 +81,9 @@ enum class AnnotateTool(
  * Highlight, Underline and Strikeout snap to whole [words] when the drag starts on text, and
  * report one box per line through [onLines]; away from text (a scan, a picture) they mark the
  * dragged area through [onBox] instead.
+ *
+ * Shapes draws [shape]. [onBox] then reports where the drag started and ended, in that order, so
+ * a line or arrow runs the way it was drawn.
  */
 @Composable
 fun AnnotationLayer(
@@ -90,6 +97,7 @@ fun AnnotationLayer(
     modifier: Modifier = Modifier,
     words: List<PageWord> = emptyList(),
     onLines: (List<Rect>) -> Unit = {},
+    shape: Annotator.Shape = Annotator.Shape.Rectangle,
 ) {
     // The gesture loops outlive recompositions, so always call the latest callbacks.
     val currentOnStroke by rememberUpdatedState(onStroke)
@@ -177,6 +185,10 @@ fun AnnotationLayer(
             }
         }
         box?.let { raw ->
+            if (tool == AnnotateTool.Shapes) {
+                drawShapePreview(shape, style.color, raw.topLeft, raw.bottomRight, lineWidth)
+                return@let
+            }
             // Dragging up or left gives a flipped rectangle; draw it the right way round.
             val r = Rect(
                 minOf(raw.left, raw.right), minOf(raw.top, raw.bottom),
@@ -227,5 +239,34 @@ private fun DrawScope.drawMarkupPreview(tool: AnnotateTool, style: ToolStyle, r:
         AnnotateTool.StrikeOut ->
             drawLine(style.color, r.centerLeft, r.centerRight, strokeWidth = lineWidth)
         else -> drawRect(style.color, r.topLeft, r.size, style = Stroke(lineWidth))
+    }
+}
+
+/**
+ * [shape] dragged from [start] to [end], drawn as the PDF will show it: a line or arrow along the
+ * drag with an open arrowhead at [end], a box or oval filling the dragged area.
+ */
+internal fun DrawScope.drawShapePreview(shape: Annotator.Shape, color: Color, start: Offset, end: Offset, lineWidth: Float) {
+    val r = Rect(minOf(start.x, end.x), minOf(start.y, end.y), maxOf(start.x, end.x), maxOf(start.y, end.y))
+    val stroke = Stroke(lineWidth)
+    when (shape) {
+        Annotator.Shape.Rectangle -> drawRect(color, r.topLeft, r.size, style = stroke)
+        Annotator.Shape.Ellipse -> drawOval(color, r.topLeft, r.size, style = stroke)
+        Annotator.Shape.Line -> drawLine(color, start, end, strokeWidth = lineWidth)
+        Annotator.Shape.Arrow -> {
+            drawLine(color, start, end, strokeWidth = lineWidth)
+            arrowWings(start, end, Annotator.ARROW_LENGTH * lineWidth).forEach {
+                drawLine(color, end, it, strokeWidth = lineWidth, cap = StrokeCap.Round)
+            }
+        }
+    }
+}
+
+/** The far ends of an open arrowhead at [end]: [length] back along the line, 30 degrees either side, as PdfBox draws it. */
+internal fun arrowWings(start: Offset, end: Offset, length: Float): List<Offset> {
+    val back = atan2(start.y - end.y, start.x - end.x)
+    return listOf(-1, 1).map { side ->
+        val angle = back + side * Math.PI.toFloat() / 6
+        Offset(end.x + length * cos(angle), end.y + length * sin(angle))
     }
 }

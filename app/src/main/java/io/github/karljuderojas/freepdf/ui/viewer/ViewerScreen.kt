@@ -102,6 +102,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -206,7 +208,15 @@ sealed interface ViewerAction {
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
     data class Stroke(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val points: List<Offset>) : ViewerAction
-    data class Box(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val start: Offset, val end: Offset) : ViewerAction
+    /** A drag with a box tool from [start] to [end]; [shape] is what the Shapes tool draws. */
+    data class Box(
+        val page: Int,
+        val tool: AnnotateTool,
+        val style: ToolStyle,
+        val start: Offset,
+        val end: Offset,
+        val shape: Annotator.Shape = Annotator.Shape.Rectangle,
+    ) : ViewerAction
     data class Note(val page: Int, val style: ToolStyle, val at: Offset, val text: String) : ViewerAction
     data class AddStamp(val page: Int, val at: Offset, val kind: Stamps.Kind) : ViewerAction
     data class AddTextBox(val page: Int, val style: ToolStyle, val at: Offset, val text: String) : ViewerAction
@@ -461,7 +471,7 @@ fun ViewerScreen(
                     if (kind != null) {
                         viewModel.markText(action.page, action.start, action.end, kind, action.style)
                     } else {
-                        viewModel.shape(action.page, action.start, action.end, action.style)
+                        viewModel.shape(action.page, action.start, action.end, action.style, action.shape)
                     }
                 }
                 is ViewerAction.Note -> viewModel.note(action.page, action.at, action.text, action.style)
@@ -536,6 +546,7 @@ fun ViewerContent(
     initialSelectedPage: Int = 0,
     initialSelectedPages: Set<Int> = setOf(initialSelectedPage),
     initialTool: Int? = null,
+    initialShape: Annotator.Shape = Annotator.Shape.Rectangle,
     initialSignField: Int? = null,
     initialRedactions: List<RedactBox> = emptyList(),
     initialConfirmRedact: Boolean = false,
@@ -622,6 +633,7 @@ fun ViewerContent(
     var pendingNote by rememberSaveable(stateSaver = PageOffsetSaver) { mutableStateOf<Pair<Int, Offset>?>(null) }
     var pendingTextBox by rememberSaveable(stateSaver = PageOffsetSaver) { mutableStateOf<Pair<Int, Offset>?>(null) }
     var stampKind by rememberSaveable { mutableStateOf(Stamps.Kind.Approved) }
+    var shapeKind by rememberSaveable { mutableStateOf(initialShape) }
     var pendingText by rememberSaveable(stateSaver = PageOffsetSaver) { mutableStateOf<Pair<Int, Offset>?>(null) }
     // The line Edit text found under the last tap: its page, where it was tapped, and its words.
     var editingLine by rememberSaveable(stateSaver = EditingLineSaver) { mutableStateOf<Triple<Int, Offset, String>?>(null) }
@@ -905,29 +917,36 @@ fun ViewerContent(
         }
     }
 
+    // Under 600 dp wide the top bar keeps search, Save and the open documents, and the rest go in a menu.
+    val compactBar = !window.navigationRail
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
                     when {
-                        reflowing -> Text(stringResource(R.string.reading_mode))
+                        reflowing -> TopBarTitle(stringResource(R.string.reading_mode))
                         mode == ViewerMode.Read && searching -> SearchField(
                             query = query,
                             onQueryChange = { query = it },
                             focusRequester = searchFocus,
                         )
                         mode == ViewerMode.Pages && selectedPages.size > 1 ->
-                            Text(pluralStringResource(R.plurals.pages_selected, selectedPages.size, selectedPages.size))
-                        mode != ViewerMode.Read -> Text(stringResource(mode.label))
-                        // Tapping "Page 3 of 12" asks which page to go to.
-                        ready != null -> Text(
-                            stringResource(R.string.page_of, currentPage + 1, pageCount),
-                            modifier = Modifier
-                                .clickable(onClickLabel = stringResource(R.string.go_to_page)) { goingToPage = true }
-                                .testTag("page-indicator"),
-                        )
-                        else -> Text(stringResource(R.string.app_name))
+                            TopBarTitle(pluralStringResource(R.plurals.pages_selected, selectedPages.size, selectedPages.size))
+                        mode != ViewerMode.Read -> TopBarTitle(stringResource(mode.label))
+                        // Tapping "Page 3 of 12" asks which page to go to. A phone shows it as
+                        // "3 / 12" so it keeps to one line beside the actions.
+                        ready != null -> {
+                            val full = stringResource(R.string.page_of, currentPage + 1, pageCount)
+                            TopBarTitle(
+                                if (compactBar) stringResource(R.string.page_of_short, currentPage + 1, pageCount) else full,
+                                modifier = Modifier
+                                    .clickable(onClickLabel = stringResource(R.string.go_to_page)) { goingToPage = true }
+                                    .semantics { contentDescription = full }
+                                    .testTag("page-indicator"),
+                            )
+                        }
+                        else -> TopBarTitle(stringResource(R.string.app_name))
                     }
                 },
                 navigationIcon = {
@@ -951,18 +970,29 @@ fun ViewerContent(
                             readingTextSize, onReadingTextSize,
                             AppSettings.MIN_TEXT_SIZE, AppSettings.MAX_TEXT_SIZE, AppSettings.TEXT_SIZE_STEP,
                         )
-                        if (!readAloud.active) {
-                            TextButton(onClick = { onAction(ViewerAction.StartReadAloud(reflowState.firstVisibleItemIndex)) }) {
-                                Text(stringResource(R.string.tool_read_aloud))
+                        val readAloudFromHere = { onAction(ViewerAction.StartReadAloud(reflowState.firstVisibleItemIndex)) }
+                        if (compactBar) {
+                            TopBarMenu(
+                                items = if (readAloud.active) emptyList() else listOf(TopBarMenuItem(R.string.tool_read_aloud, readAloudFromHere)),
+                                pageColors = pageColors,
+                                onPageColors = onPageColors,
+                            )
+                        } else {
+                            if (!readAloud.active) {
+                                TextButton(onClick = readAloudFromHere) { Text(stringResource(R.string.tool_read_aloud)) }
                             }
+                            PageColorsButton(pageColors, onPageColors)
                         }
-                        PageColorsButton(pageColors, onPageColors)
                     } else if (mode == ViewerMode.Read && searching) {
                         SearchStepper(search, currentMatch) { step ->
                             val count = search.matches.size
                             if (count > 0) currentMatch = (currentMatch + step + count) % count
                         }
                     } else if (mode == ViewerMode.Read) {
+                        val openReadingMode = {
+                            scope.launch { reflowState.scrollToItem(currentPage) }
+                            reflowing = true
+                        }
                         if (ready != null) {
                             IconButton(onClick = {
                                 focusSearch = true
@@ -975,26 +1005,40 @@ fun ViewerContent(
                                     Icon(Icons.AutoMirrored.Filled.List, contentDescription = stringResource(R.string.side_panel))
                                 }
                             }
-                            ReadingModeButton {
-                                scope.launch { reflowState.scrollToItem(currentPage) }
-                                reflowing = true
-                            }
-                            IconButton(onClick = { sharing = true }) {
-                                Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.tool_share))
-                            }
-                            if (ready.outline.isNotEmpty()) {
-                                IconButton(onClick = { showingOutline = true }) {
-                                    Icon(Icons.Filled.Menu, contentDescription = stringResource(R.string.contents))
+                            if (!compactBar) {
+                                ReadingModeButton { openReadingMode() }
+                                IconButton(onClick = { sharing = true }) {
+                                    Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.tool_share))
+                                }
+                                if (ready.outline.isNotEmpty()) {
+                                    IconButton(onClick = { showingOutline = true }) {
+                                        Icon(Icons.Filled.Menu, contentDescription = stringResource(R.string.contents))
+                                    }
                                 }
                             }
                         }
                         if (ready?.hasUnsavedChanges == true) {
-                            TextButton(onClick = { onAction(ViewerAction.Save) }) { Text(stringResource(R.string.save)) }
+                            TextButton(onClick = { onAction(ViewerAction.Save) }) { Text(stringResource(R.string.save), maxLines = 1) }
                         }
                         if (openDocuments.isNotEmpty()) {
                             OpenDocumentsButton(openDocuments.size, onClick = { showSwitcher = true })
                         }
-                        if (ready != null) PageColorsButton(pageColors, onPageColors)
+                        if (ready != null) {
+                            if (compactBar) {
+                                // On a phone the rarer actions share one menu, so "3 / 12" never wraps.
+                                TopBarMenu(
+                                    items = buildList {
+                                        add(TopBarMenuItem(R.string.reading_mode) { openReadingMode() })
+                                        add(TopBarMenuItem(R.string.tool_share) { sharing = true })
+                                        if (ready.outline.isNotEmpty()) add(TopBarMenuItem(R.string.contents) { showingOutline = true })
+                                    },
+                                    pageColors = pageColors,
+                                    onPageColors = onPageColors,
+                                )
+                            } else {
+                                PageColorsButton(pageColors, onPageColors)
+                            }
+                        }
                     } else {
                         IconButton(onClick = { pickedMark = null; onAction(ViewerAction.Undo) }, enabled = canUndo) {
                             Icon(EditIcons.Undo, contentDescription = stringResource(R.string.undo))
@@ -1047,6 +1091,7 @@ fun ViewerContent(
                 // Choosing the active Annotate tool again puts it down, so one finger scrolls again.
                 mode == ViewerMode.Annotate -> Column {
                     if (AnnotateTool.forLabel(selectedTool) == AnnotateTool.Stamp) StampBar(stampKind, onSelect = { stampKind = it })
+                    if (AnnotateTool.forLabel(selectedTool) == AnnotateTool.Shapes) ShapeBar(shapeKind, onSelect = { shapeKind = it })
                     AnnotateTool.forLabel(selectedTool)?.takeIf { it.hasStyle }?.let { tool ->
                         StyleBar(tool, styleOf(tool), onStyleChange = {
                             styles = styles + (tool to it)
@@ -1318,7 +1363,8 @@ fun ViewerContent(
                                 style = style,
                                 pageWidthPt = ready.pageSizes[page].widthPt,
                                 onStroke = { onAction(ViewerAction.Stroke(page, tool, style, it)) },
-                                onBox = { start, end -> onAction(ViewerAction.Box(page, tool, style, start, end)) },
+                                onBox = { start, end -> onAction(ViewerAction.Box(page, tool, style, start, end, shapeKind)) },
+                                shape = shapeKind,
                                 words = words,
                                 onLines = { onAction(ViewerAction.MarkLines(page, tool, style, it)) },
                                 onTap = { at ->
