@@ -66,8 +66,11 @@ import io.github.karljuderojas.freepdf.pdf.sign.info
 import io.github.karljuderojas.freepdf.print.Printing
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.sign.FinishOptions
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -249,6 +252,15 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     // Stamps already on their way into the PDF, so a second commit does not draw them twice.
     private var committing = emptySet<Long>()
+
+    // Commits still running, each answering whether every stamp of it was drawn. Finish waits
+    // for all of them, so a signed copy is never made without a signature the user placed.
+    private val commits = ArrayList<Deferred<Boolean>>()
+
+    private val _finishing = MutableStateFlow<SignedCopy.Step?>(null)
+
+    /** What Finish is busy with while the signed copy is being made, or null when it is not. */
+    val finishing: StateFlow<SignedCopy.Step?> = _finishing.asStateFlow()
 
     /** Sign and Edit mode stamps that can still be moved or resized; see [commitStamps]. */
     val stamps: StateFlow<List<PlacedStamp>> = _stamps.asStateFlow()
@@ -565,10 +577,18 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
      * leaving Sign or Edit mode and before finishing, after which they are part of the page.
      */
     fun commitStamps() {
+        commitStampsAsync()
+    }
+
+    /**
+     * Starts [commitStamps] and answers whether every stamp it took on was drawn, true when
+     * there was nothing to draw. With [notify], a failure is also shown as a message.
+     */
+    private fun commitStampsAsync(notify: Boolean = true): Deferred<Boolean> {
         val placed = _stamps.value.filter { it.id !in committing }
-        if (placed.isEmpty()) return
+        if (placed.isEmpty()) return CompletableDeferred(true)
         committing = committing + placed.map { it.id }
-        viewModelScope.launch {
+        val commit = viewModelScope.async {
             lock.withLock {
                 var failed = false
                 withContext(Dispatchers.IO) {
@@ -587,9 +607,13 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 val done = placed.map { it.id }.toSet()
                 _stamps.update { stamps -> stamps.filter { it.id !in done } }
                 committing = committing - done
-                if (failed) _effects.send(ViewerEffect.Message(R.string.edit_failed))
+                if (failed && notify) _effects.send(ViewerEffect.Message(R.string.edit_failed))
+                !failed
             }
         }
+        commits += commit
+        commit.invokeOnCompletion { viewModelScope.launch { commits -= commit } }
+        return commit
     }
 
     private fun addStamp(page: Int, content: StampContent, box: StampBox) {
@@ -692,11 +716,21 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun finishSigning(name: String, consentText: String, options: FinishOptions) {
         val uri = openedUri ?: return
-        // Queued ahead of the signed copy on the lock, so everything placed is in it.
-        commitStamps()
+        if (_finishing.value != null) return
+        // Queued ahead of the signed copy on the lock, so everything placed is in it. Commits
+        // already under way (Done on the way out, say) are waited for too, as they may still fail.
+        commitStampsAsync(notify = false)
+        val pending = commits.toList()
         _signerName.value = name
         signingPrefs.edit().putString(KEY_SIGNER_NAME, name).apply()
+        _finishing.value = SignedCopy.Step.Signing
         viewModelScope.launch {
+            // A commit that failed outright counts as a failed stamp too.
+            if (!pending.all { runCatching { it.await() }.getOrDefault(false) }) {
+                _finishing.value = null
+                _effects.send(ViewerEffect.Message(R.string.sign_failed_stamp))
+                return@launch
+            }
             val copy = runCatching {
                 lock.withLock {
                     withContext(Dispatchers.IO) {
@@ -735,6 +769,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                             SignedCopy.write(
                                 current.workingFile, trail, name, identity, output, File(out.path + ".tmp"),
                                 password = current.password, lock = options.lock, timestamps = timestamps,
+                                onStep = { _finishing.value = it },
                             )
                         }
                         pendingSignedCopy?.delete()
@@ -744,6 +779,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             }
+            _finishing.value = null
             copy.onSuccess { (suggestedName, timestampMissing) ->
                 if (timestampMissing) _effects.send(ViewerEffect.Message(R.string.timestamp_skipped))
                 _effects.send(ViewerEffect.SaveSigned(suggestedName))
