@@ -11,6 +11,9 @@ enum class ThemeChoice { System, Light, Dark }
 /** How pages are tinted while reading. Only the screen changes; the PDF itself is never touched. */
 enum class PageColors { Normal, Night, Sepia }
 
+/** How fast Read aloud speaks; [factor] is the engine's rate, where 1 is its normal pace. */
+enum class SpeechRate(val factor: Float) { Slow(0.75f), Normal(1f), Fast(1.4f) }
+
 /** Choices from the Settings tab. They live in app preferences on this phone only. */
 class AppSettings(private val prefs: SharedPreferences) {
 
@@ -41,6 +44,18 @@ class AppSettings(private val prefs: SharedPreferences) {
         prefs.edit().putInt(KEY_TEXT_SIZE, _readingTextSize.value).apply()
     }
 
+    private val _speechRate = MutableStateFlow(
+        prefs.getString(KEY_SPEECH_RATE, null)?.let { name -> SpeechRate.entries.firstOrNull { it.name == name } } ?: SpeechRate.Normal,
+    )
+
+    /** The pace of Read aloud; the next sentence spoken uses it. */
+    val speechRate: StateFlow<SpeechRate> = _speechRate.asStateFlow()
+
+    fun setSpeechRate(rate: SpeechRate) {
+        _speechRate.value = rate
+        prefs.edit().putString(KEY_SPEECH_RATE, rate.name).apply()
+    }
+
     fun setTheme(theme: ThemeChoice) {
         _theme.value = theme
         prefs.edit().putString(KEY_THEME, theme.name).apply()
@@ -65,5 +80,6 @@ class AppSettings(private val prefs: SharedPreferences) {
         private const val KEY_THEME = "theme"
         private const val KEY_HISTORY = "remember_history"
         private const val KEY_PAGE_COLORS = "page_colors"
+        private const val KEY_SPEECH_RATE = "speech_rate"
     }
 }

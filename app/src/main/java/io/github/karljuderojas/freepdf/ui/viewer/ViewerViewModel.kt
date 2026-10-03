@@ -203,7 +203,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     // Reading aloud carries on through a rotation; the speech engine starts at the first sentence.
     private val readAloudDelegate = lazy {
         ReadAloud(
-            AndroidSpeaker(application),
+            AndroidSpeaker(application) { getApplication<FreePdfApp>().settings.speechRate.value.factor },
             viewModelScope,
             pageCount = { (_state.value as? ViewerState.Ready)?.pageSizes?.size ?: 0 },
         ) { page -> Reflow.sentences(Reflow.paragraphs(words(page))) }
