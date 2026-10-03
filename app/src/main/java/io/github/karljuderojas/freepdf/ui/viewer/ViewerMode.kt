@@ -34,11 +34,11 @@ enum class ViewerMode(@StringRes val label: Int, val icon: ImageVector?, val too
     Pages(
         R.string.mode_pages, Icons.AutoMirrored.Filled.List,
         listOf(R.string.tool_rotate, R.string.tool_move_earlier, R.string.tool_move_later, R.string.tool_insert,
-            R.string.tool_delete, R.string.tool_merge),
+            R.string.tool_delete, R.string.tool_extract, R.string.tool_merge, R.string.tool_split),
     ),
     More(
         R.string.mode_more, Icons.Filled.MoreVert,
-        listOf(R.string.tool_share, R.string.tool_print, R.string.tool_comments),
+        listOf(R.string.tool_share, R.string.tool_print, R.string.tool_info, R.string.tool_password, R.string.tool_comments),
     );
 
     companion object {

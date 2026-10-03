@@ -46,15 +46,15 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ✅ Edits go to a private working copy with undo; Save writes back, or asks where to save when the file is read-only; leaving with unsaved changes asks first
 - 🧱 Add text (`PageEditor.addText`)
 - ⬜ Drag to reorder in the page grid, multi-select
-- ⬜ Extract and split
+- ✅ Extract and split: save chosen pages (typed like 1-3, 5) as a new PDF, or split into two after the selected page or every few pages into a folder you pick; the open PDF stays as it is
 - ⬜ Add image, redact (true removal, not a black box), links
 - ⬜ Edit existing text (hard; needs font handling)
 
 ## More
 - ✅ Share: send the current PDF, unsaved changes included, to any app through Android's share sheet; also from a Recent row's menu
 - ✅ Print: Android's print dialog, with any printer the phone knows and Save as PDF; prints unsaved changes too, and respects PDFs that turn printing off
-- ⬜ Password protect / remove password
-- ⬜ Document info
+- ✅ Password: add a password (AES-256) to a PDF, or change or remove the one it has; undo puts the old one back, and Save keeps the change
+- ✅ Document info: title, author, dates, the app that made it, page count and size, file size, PDF version, and whether it is password protected, has form fields or is digitally signed
 
 ## Not planned for now
 Dropped from scope on 2026-10-02 to keep the app focused: OCR, compression, and converting PDFs to Word or other Office formats.
