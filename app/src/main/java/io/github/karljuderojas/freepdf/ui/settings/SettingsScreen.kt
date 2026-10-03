@@ -29,6 +29,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.settings.PageColors
+import io.github.karljuderojas.freepdf.settings.SpeechRate
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
 import io.github.karljuderojas.freepdf.ui.viewer.label
 
@@ -49,6 +50,8 @@ fun SettingsContent(
     modifier: Modifier = Modifier,
     pageColors: PageColors = PageColors.Normal,
     onPageColors: (PageColors) -> Unit = {},
+    speechRate: SpeechRate = SpeechRate.Normal,
+    onSpeechRate: (SpeechRate) -> Unit = {},
 ) {
     var confirmClear by remember { mutableStateOf(false) }
 
@@ -79,6 +82,22 @@ fun SettingsContent(
                         selected = choice == pageColors,
                         onClick = { onPageColors(choice) },
                         shape = SegmentedButtonDefaults.itemShape(i, PageColors.entries.size),
+                    ) {
+                        Text(stringResource(choice.label))
+                    }
+                }
+            }
+
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.settings_speech_rate)) },
+                supportingContent = { Text(stringResource(R.string.settings_speech_rate_detail)) },
+            )
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                SpeechRate.entries.forEachIndexed { i, choice ->
+                    SegmentedButton(
+                        selected = choice == speechRate,
+                        onClick = { onSpeechRate(choice) },
+                        shape = SegmentedButtonDefaults.itemShape(i, SpeechRate.entries.size),
                     ) {
                         Text(stringResource(choice.label))
                     }
@@ -148,6 +167,13 @@ private val ThemeChoice.label: Int
         ThemeChoice.System -> R.string.theme_system
         ThemeChoice.Light -> R.string.theme_light
         ThemeChoice.Dark -> R.string.theme_dark
+    }
+
+private val SpeechRate.label: Int
+    get() = when (this) {
+        SpeechRate.Slow -> R.string.speech_rate_slow
+        SpeechRate.Normal -> R.string.speech_rate_normal
+        SpeechRate.Fast -> R.string.speech_rate_fast
     }
 
 @Composable

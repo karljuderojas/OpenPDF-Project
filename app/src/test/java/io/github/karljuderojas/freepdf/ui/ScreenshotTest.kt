@@ -68,6 +68,7 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
 import io.github.karljuderojas.freepdf.pdf.sign.TimestampReport
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
 import io.github.karljuderojas.freepdf.settings.PageColors
+import io.github.karljuderojas.freepdf.settings.SpeechRate
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
 import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
 import io.github.karljuderojas.freepdf.speech.ReadAloudState
@@ -361,6 +362,26 @@ class ScreenshotTest {
                 modifier = it,
                 pageColors = PageColors.Normal,
                 onPageColors = {},
+            )
+        }
+    }
+
+    @Test
+    fun settingsSpeechRate() = capture("settings_speech_rate") {
+        shell(MainTab.Settings) {
+            SettingsContent(
+                theme = ThemeChoice.System,
+                onTheme = {},
+                rememberHistory = true,
+                onRememberHistory = {},
+                onClearHistory = {},
+                version = "0.1.0",
+                onSourceCode = {},
+                modifier = it,
+                pageColors = PageColors.Sepia,
+                onPageColors = {},
+                speechRate = SpeechRate.Fast,
+                onSpeechRate = {},
             )
         }
     }
