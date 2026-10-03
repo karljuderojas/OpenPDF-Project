@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.scale
@@ -58,7 +59,7 @@ private class Tile(val image: ImageBitmap, val region: IntRect, val scale: Float
 
 /** Draws the sharp part of page [index] over its soft rendering; see [ZoomDetail]. */
 @Composable
-internal fun BoxScope.ZoomDetailLayer(index: Int, revision: Int, detail: ZoomDetail) {
+internal fun BoxScope.ZoomDetailLayer(index: Int, revision: Int, detail: ZoomDetail, colorFilter: ColorFilter? = null) {
     val page = remember { PageBox() }
     var tile by remember(revision) { mutableStateOf<Tile?>(null) }
 
@@ -87,7 +88,7 @@ internal fun BoxScope.ZoomDetailLayer(index: Int, revision: Int, detail: ZoomDet
                 val current = tile ?: return@drawBehind
                 // Back into layout pixels; the list's zoom then maps each one to a screen pixel.
                 translate(current.region.left / current.scale, current.region.top / current.scale) {
-                    scale(1 / current.scale, pivot = Offset.Zero) { drawImage(current.image) }
+                    scale(1 / current.scale, pivot = Offset.Zero) { drawImage(current.image, colorFilter = colorFilter) }
                 }
             },
     )

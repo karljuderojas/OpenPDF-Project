@@ -121,6 +121,7 @@ private fun MainScreen(openPdf: (Uri, ViewerMode, Int?) -> Unit) {
             MainTab.Settings -> {
                 val theme by app.settings.theme.collectAsStateWithLifecycle()
                 val rememberHistory by app.settings.rememberHistory.collectAsStateWithLifecycle()
+                val pageColors by app.settings.pageColors.collectAsStateWithLifecycle()
                 SettingsContent(
                     theme = theme,
                     onTheme = app.settings::setTheme,
@@ -132,6 +133,8 @@ private fun MainScreen(openPdf: (Uri, ViewerMode, Int?) -> Unit) {
                         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, SOURCE_URL.toUri())) }
                     },
                     modifier = modifier,
+                    pageColors = pageColors,
+                    onPageColors = app.settings::setPageColors,
                 )
             }
         }

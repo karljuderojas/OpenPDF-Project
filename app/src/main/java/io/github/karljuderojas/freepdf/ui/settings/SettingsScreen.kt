@@ -28,9 +28,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.karljuderojas.freepdf.R
+import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
+import io.github.karljuderojas.freepdf.ui.viewer.label
 
-/** The Settings tab: theme, history and about. Stateless so it can be screenshot-tested. */
+/** The Settings tab: theme, reading, history and about. Stateless so it can be screenshot-tested. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsContent(
@@ -42,6 +44,8 @@ fun SettingsContent(
     version: String,
     onSourceCode: () -> Unit,
     modifier: Modifier = Modifier,
+    pageColors: PageColors = PageColors.Normal,
+    onPageColors: (PageColors) -> Unit = {},
 ) {
     var confirmClear by remember { mutableStateOf(false) }
 
@@ -55,6 +59,23 @@ fun SettingsContent(
                         selected = choice == theme,
                         onClick = { onTheme(choice) },
                         shape = SegmentedButtonDefaults.itemShape(i, ThemeChoice.entries.size),
+                    ) {
+                        Text(stringResource(choice.label))
+                    }
+                }
+            }
+
+            SectionHeader(R.string.settings_reading)
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.page_colors)) },
+                supportingContent = { Text(stringResource(R.string.settings_page_colors_detail)) },
+            )
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                PageColors.entries.forEachIndexed { i, choice ->
+                    SegmentedButton(
+                        selected = choice == pageColors,
+                        onClick = { onPageColors(choice) },
+                        shape = SegmentedButtonDefaults.itemShape(i, PageColors.entries.size),
                     ) {
                         Text(stringResource(choice.label))
                     }
