@@ -10,7 +10,7 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ✅ Open from the file picker and from other apps (file managers, email, browsers)
 - ✅ Continuous vertical scroll with PDFium rendering and a bitmap cache
 - ✅ Pinch to zoom (basic: scales the whole list)
-- ⬜ Proper zoom and pan with sharp re-rendering at high zoom (tiled rendering)
+- ✅ Sharp re-rendering when zoomed: the visible part of each page is rendered at the zoom level
 - ✅ Text search with highlighted matches and previous/next, the outline (Contents), go to page (tap "Page 3 of 12")
 - ⬜ Page thumbnails while reading
 - ⬜ Text selection with a Highlight / Underline / Note popup

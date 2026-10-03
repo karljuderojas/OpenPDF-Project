@@ -10,6 +10,7 @@ import android.provider.OpenableColumns
 import android.util.LruCache
 import androidx.annotation.StringRes
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.IntRect
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -231,6 +232,17 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             if (index >= current.pageCount) return@withLock null
             cache.get(key) ?: current.renderPage(index, widthPx).also { cache.put(key, it) }
         }
+    }
+
+    /**
+     * The part of page [index] in [region], rendered as if the page were [fullWidthPx] wide.
+     * Not cached: it is only good for one zoom and scroll position, and it is at most a
+     * screenful of pixels, so a zoomed screen never holds much more than two screenfuls.
+     */
+    suspend fun pageRegion(index: Int, fullWidthPx: Int, region: IntRect): Bitmap? = lock.withLock {
+        val current = renderer ?: return@withLock null
+        if (index >= current.pageCount) return@withLock null
+        current.renderRegion(index, fullWidthPx, region)
     }
 
     fun rotatePage(index: Int) = edit { PageEditor.rotate(it, index, 90) }

@@ -3,6 +3,7 @@ package io.github.karljuderojas.freepdf.pdf.render
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.compose.ui.unit.IntRect
 import io.legere.pdfiumandroid.api.Bookmark
 import io.legere.pdfiumandroid.suspend.PdfDocumentKt
 import io.legere.pdfiumandroid.suspend.PdfiumCoreKt
@@ -73,6 +74,24 @@ class PdfRenderer private constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Renders only [region] of [pageIndex], as it would appear if the whole page were rendered
+     * [fullWidthPx] wide. Zoomed pages use this so the part on screen is sharp without
+     * rendering the whole page at the zoomed size.
+     */
+    suspend fun renderRegion(pageIndex: Int, fullWidthPx: Int, region: IntRect): Bitmap {
+        val size = pageSizes[pageIndex]
+        val fullHeight = (fullWidthPx / size.aspectRatio).roundToInt().coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(region.width.coerceAtLeast(1), region.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        val page = document.openPage(pageIndex) ?: error("Page $pageIndex could not be opened")
+        page.use {
+            // PDFium places the page's top-left corner at (startX, startY), so a negative offset
+            // shifts the wanted region into the bitmap and everything outside it is clipped.
+            it.renderPageBitmap(bitmap, -region.left, -region.top, fullWidthPx, fullHeight, renderAnnot = true)
+        }
+        return bitmap
     }
 
     override fun close() {
