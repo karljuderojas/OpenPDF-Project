@@ -1,14 +1,23 @@
 package io.github.karljuderojas.freepdf.files
 
 import android.content.Context
+import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
+import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 class DocumentsTest {
+
+    @get:Rule
+    val temp = TemporaryFolder()
 
     private val prefs = ApplicationProvider.getApplicationContext<Context>().getSharedPreferences("test", Context.MODE_PRIVATE)
     private var time = 1_000L
@@ -65,6 +74,19 @@ class DocumentsTest {
         val documents = documents()
         (1..10).forEach { documents.opened("content://$it", "$it.pdf", remember = false) }
         assertEquals((10 downTo 3).map { "$it.pdf" }, documents.open.value.map { it.name })
+    }
+
+    @Test
+    fun onlyReopenableUrisAreLasting() {
+        val filesDir = temp.newFolder("files")
+        val own = File(filesDir, "kept/copy.pdf")
+        assertTrue(Documents.lasting(Uri.parse("content://docs/1"), filesDir) { true })
+        assertFalse(Documents.lasting(Uri.parse("content://mail/1"), filesDir) { false })
+        assertTrue(Documents.lasting(Uri.fromFile(own), filesDir) { false })
+        assertFalse(Documents.lasting(Uri.fromFile(filesDir), filesDir) { true })
+        assertFalse(Documents.lasting(Uri.fromFile(File(temp.root, "cache/shared/x.pdf")), filesDir) { true })
+        assertFalse(Documents.lasting(Uri.fromFile(File(temp.root, "files2/x.pdf")), filesDir) { true })
+        assertFalse(Documents.lasting(Uri.parse("https://example.com/x.pdf"), filesDir) { true })
     }
 
     @Test

@@ -50,8 +50,12 @@ class SignatureVerifierTest {
     @Test
     fun changedByteBreaksTheSignature() {
         val signed = sign(original, TestCertificates.selfSigned("Dana Whitfield"))
-        // A byte inside the first page, well before the signature.
-        signed[signed.size / 4] = (signed[signed.size / 4] + 1).toByte()
+        // The minor version digit of the "%PDF-1.x" header: inside the signed range, harmless to
+        // the parser. A byte picked by offset could land inside a compressed stream and make the
+        // file unreadable instead of merely changed, since the audit page differs run to run.
+        val header = String(signed, 0, 8, Charsets.ISO_8859_1)
+        assertTrue(header, header.startsWith("%PDF-1."))
+        signed[7] = if (signed[7] == '4'.code.toByte()) '5'.code.toByte() else '4'.code.toByte()
         val reports = SignatureVerifier(emptySet()).verify(signed)
         assertEquals(SignatureReport.Integrity.Broken, reports.single().integrity)
         assertEquals(SignaturesVerdict.Invalid, SignaturesVerdict.of(reports))
