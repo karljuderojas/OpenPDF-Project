@@ -12,6 +12,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -51,6 +53,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -62,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.karljuderojas.freepdf.R
+import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import kotlinx.coroutines.launch
 
@@ -75,6 +79,12 @@ sealed interface ViewerAction {
     data class InsertBlank(val afterPage: Int) : ViewerAction
     data class Move(val from: Int, val to: Int) : ViewerAction
     data object Merge : ViewerAction
+
+    /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
+    data class Stroke(val page: Int, val tool: AnnotateTool, val points: List<Offset>) : ViewerAction
+    data class Box(val page: Int, val tool: AnnotateTool, val start: Offset, val end: Offset) : ViewerAction
+    data class Note(val page: Int, val at: Offset, val text: String) : ViewerAction
+    data class Erase(val page: Int, val at: Offset) : ViewerAction
 }
 
 @Composable
@@ -116,6 +126,21 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.InsertBlank -> viewModel.insertBlankPage(action.afterPage)
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
                 ViewerAction.Merge -> mergePicker.launch(arrayOf("application/pdf"))
+                is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.tool.rgb)
+                is ViewerAction.Box -> when (action.tool) {
+                    AnnotateTool.Highlight -> Annotator.TextMarkup.Highlight
+                    AnnotateTool.Underline -> Annotator.TextMarkup.Underline
+                    AnnotateTool.StrikeOut -> Annotator.TextMarkup.StrikeOut
+                    else -> null
+                }.let { kind ->
+                    if (kind != null) {
+                        viewModel.markText(action.page, action.start, action.end, kind, action.tool.rgb)
+                    } else {
+                        viewModel.shape(action.page, action.start, action.end, action.tool.rgb)
+                    }
+                }
+                is ViewerAction.Note -> viewModel.note(action.page, action.at, action.text)
+                is ViewerAction.Erase -> viewModel.erase(action.page, action.at)
             }
         },
     )
@@ -130,16 +155,18 @@ fun ViewerContent(
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
     initialMode: ViewerMode = ViewerMode.Read,
     initialSelectedPage: Int = 0,
+    initialTool: Int? = null,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onAction: (ViewerAction) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val currentPage by remember { derivedStateOf { listState.firstVisibleItemIndex } }
     var mode by rememberSaveable { mutableStateOf(initialMode) }
-    var selectedTool by rememberSaveable { mutableStateOf<Int?>(null) }
+    var selectedTool by rememberSaveable { mutableStateOf(initialTool) }
     var selectedPage by rememberSaveable { mutableIntStateOf(initialSelectedPage) }
     var confirmDelete by remember { mutableStateOf(false) }
     var confirmLeave by remember { mutableStateOf(false) }
+    var pendingNote by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     val scope = rememberCoroutineScope()
     val resources = LocalResources.current
 
@@ -240,10 +267,15 @@ fun ViewerContent(
                 })
                 // Page tools act once on the selected page, so none stays highlighted.
                 mode == ViewerMode.Pages -> ToolStrip(mode, selectedTool = null, onToolSelected = { onPagesTool(it) })
-                else -> ToolStrip(mode, selectedTool, onToolSelected = {
-                    selectedTool = it
-                    comingSoon()
+                // Choosing the active Annotate tool again puts it down, so one finger scrolls again.
+                mode == ViewerMode.Annotate -> ToolStrip(mode, selectedTool, onToolSelected = {
+                    when {
+                        AnnotateTool.forLabel(it) == null -> comingSoon()
+                        selectedTool == it -> selectedTool = null
+                        else -> selectedTool = it
+                    }
                 })
+                else -> ToolStrip(mode, selectedTool = null, onToolSelected = { comingSoon() })
             }
         },
     ) { padding ->
@@ -261,7 +293,23 @@ fun ViewerContent(
                     onPageSelected = { selectedPage = it },
                     loadPage = loadPage,
                 )
-                else -> PageList(ready.pageSizes, ready.revision, loadPage, listState)
+                else -> {
+                    val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
+                    PageList(ready.pageSizes, ready.revision, loadPage, listState) { page ->
+                        if (tool != null) {
+                            AnnotationLayer(
+                                page = page,
+                                tool = tool,
+                                onStroke = { onAction(ViewerAction.Stroke(page, tool, it)) },
+                                onBox = { start, end -> onAction(ViewerAction.Box(page, tool, start, end)) },
+                                onTap = { at ->
+                                    if (tool == AnnotateTool.Note) pendingNote = page to at
+                                    else onAction(ViewerAction.Erase(page, at))
+                                },
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -279,6 +327,16 @@ fun ViewerContent(
             },
             dismissButton = {
                 TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+
+    pendingNote?.let { (page, at) ->
+        NoteDialog(
+            onDismiss = { pendingNote = null },
+            onAdd = { text ->
+                pendingNote = null
+                onAction(ViewerAction.Note(page, at, text))
             },
         )
     }
@@ -313,6 +371,7 @@ private fun PageList(
     revision: Int,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
     listState: LazyListState,
+    overlay: @Composable BoxScope.(page: Int) -> Unit = {},
 ) {
     var zoom by remember { mutableFloatStateOf(1f) }
 
@@ -340,7 +399,7 @@ private fun PageList(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             itemsIndexed(pageSizes) { index, size ->
-                PageImage(index, size, revision, widthPx, loadPage, Modifier.fillMaxWidth())
+                PageImage(index, size, revision, widthPx, loadPage, Modifier.fillMaxWidth()) { overlay(index) }
             }
         }
     }
@@ -355,6 +414,7 @@ internal fun PageImage(
     widthPx: Int,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
     modifier: Modifier = Modifier,
+    overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     val bitmap by produceState<Bitmap?>(null, index, widthPx, revision) {
         value = loadPage(index, widthPx)
@@ -366,5 +426,32 @@ internal fun PageImage(
         bitmap?.let {
             Image(it.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize())
         }
+        overlay()
     }
 }
+
+@Composable
+private fun NoteDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
+    var text by rememberSaveable { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.note_title)) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                placeholder = { Text(stringResource(R.string.note_hint)) },
+                minLines = 3,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onAdd(text.trim()) }, enabled = text.isNotBlank()) {
+                Text(stringResource(R.string.add))
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
+private val AnnotateTool.rgb get() = Annotator.Rgb(color.red, color.green, color.blue)

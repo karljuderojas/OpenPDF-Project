@@ -3,16 +3,20 @@ package io.github.karljuderojas.freepdf.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
+import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.ui.home.HomeScreen
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
@@ -58,6 +62,39 @@ class ScreenshotTest {
     fun viewerAnnotate() = capture("viewer_annotate") { viewer(ViewerMode.Annotate) }
 
     @Test
+    fun viewerAnnotateHighlight() {
+        show { viewer(ViewerMode.Annotate, tool = R.string.tool_highlight) }
+        // Mid-drag across the "1. Services" paragraph, so the preview shows.
+        composeRule.onNodeWithTag("annotation-layer-0").performTouchInput {
+            down(Offset(118f, 258f))
+            listOf(200f, 420f, 640f, 836f).forEachIndexed { i, x -> moveTo(Offset(x, 262f + i * 20f)) }
+        }
+        captureRoot("viewer_annotate_highlight")
+    }
+
+    @Test
+    fun viewerAnnotatePen() {
+        show { viewer(ViewerMode.Annotate, tool = R.string.tool_pen) }
+        composeRule.onNodeWithTag("annotation-layer-0").performTouchInput {
+            down(Offset(160f, 960f))
+            for (i in 1..60) {
+                val t = i / 60f
+                moveTo(Offset(160f + t * 520f, 960f - 70f * kotlin.math.sin(t * 12f) * (1f - t / 2)))
+            }
+        }
+        captureRoot("viewer_annotate_pen")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerAnnotateNote() {
+        show { viewer(ViewerMode.Annotate, tool = R.string.tool_note) }
+        composeRule.onNodeWithTag("annotation-layer-0").performTouchInput { click(Offset(860f, 240f)) }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_annotate_note.png")
+    }
+
+    @Test
     fun viewerSign() = capture("viewer_sign") { viewer(ViewerMode.Sign) }
 
     @Test
@@ -68,7 +105,7 @@ class ScreenshotTest {
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerPagesDelete() {
-        composeRule.setContent { FreePdfTheme(dynamicColor = false) { viewer(ViewerMode.Pages, selectedPage = 1) } }
+        show { viewer(ViewerMode.Pages, selectedPage = 1) }
         composeRule.onNodeWithText("Delete").performScrollTo().performClick()
         composeRule.waitForIdle()
         // The dialog is its own window, so capture the whole screen rather than the root node.
@@ -79,18 +116,27 @@ class ScreenshotTest {
     fun viewerMore() = capture("viewer_more") { viewer(ViewerMode.More) }
 
     @Composable
-    private fun viewer(mode: ViewerMode, state: ViewerState = sample, selectedPage: Int = 0) {
+    private fun viewer(mode: ViewerMode, state: ViewerState = sample, selectedPage: Int = 0, tool: Int? = null) {
         ViewerContent(
             state = state,
             onBack = {},
             loadPage = { index, width -> scaled(samplePages[index], width) },
             initialMode = mode,
             initialSelectedPage = selectedPage,
+            initialTool = tool,
         )
     }
 
     private fun capture(name: String, content: @Composable () -> Unit) {
+        show(content)
+        captureRoot(name)
+    }
+
+    private fun show(content: @Composable () -> Unit) {
         composeRule.setContent { FreePdfTheme(dynamicColor = false, content = content) }
+    }
+
+    private fun captureRoot(name: String) {
         composeRule.onRoot().captureRoboImage("build/outputs/roborazzi/$name.png")
     }
 
