@@ -11,6 +11,7 @@ A free, open-source PDF app for Android. It aims to cover what people use PDFGea
 | Language and UI | Kotlin, Jetpack Compose, Material 3 | Apache-2.0 |
 | Rendering | [PDFium](https://pdfium.googlesource.com/pdfium/) via [PdfiumAndroidKt](https://github.com/johngray1965/PdfiumAndroidKt) | BSD / Apache-2.0 |
 | Editing, annotating, signing | [PdfBox-Android](https://github.com/TomRoush/PdfBox-Android) (with BouncyCastle for signatures) | Apache-2.0 / MIT |
+| Typed signature fonts | [Dancing Script](https://github.com/googlefonts/DancingScript) and [Caveat](https://github.com/googlefonts/caveat), in `app/src/main/res/font` | SIL OFL 1.1, see [docs/licenses](docs/licenses) |
 
 MuPDF was ruled out because its AGPL licence would force the whole app to be AGPL.
 
