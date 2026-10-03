@@ -1,32 +1,43 @@
 package io.github.karljuderojas.freepdf.pdf.text
 
+import kotlin.math.abs
+
 /**
  * Turns a page's words (see [PageText]) into paragraphs of plain text that can be set in any
  * width: the page's lines are joined, a word split by a hyphen at a line end is made whole, and a
- * new paragraph starts after a gap between lines or after a short line that ended a sentence.
- * A scanned page has no words and gives no paragraphs.
+ * new paragraph starts after a gap between lines, after a short line that ended a sentence, at a
+ * list item (a bullet or a number) or where the line height changes (a heading). A short line is
+ * judged against the other lines that start where it does, so the lines of one column of a
+ * two-column page are not all short. A scanned page has no words and gives no paragraphs.
  */
 object Reflow {
 
     fun paragraphs(words: List<PageWord>): List<String> {
         val lines = words.groupConsecutive { it.line }
         if (lines.isEmpty()) return emptyList()
-        val heights = lines.map { line -> line.maxOf { it.bottom } - line.minOf { it.top } }.sorted()
-        val typicalHeight = heights[heights.size / 2]
-        val pageRight = lines.maxOf { line -> line.maxOf { it.right } }
-        val pageLeft = lines.minOf { line -> line.minOf { it.left } }
-        val measure = pageRight - pageLeft
+        val lineHeights = lines.map { line -> line.maxOf { it.bottom } - line.minOf { it.top } }
+        val typicalHeight = lineHeights.sorted()[lineHeights.size / 2]
+        val lefts = lines.map { line -> line.minOf { it.left } }
+        val rights = lines.map { line -> line.maxOf { it.right } }
+        // A line is short against the widest line of its own column: the lines starting near it.
+        fun isShort(index: Int): Boolean {
+            val left = lefts[index]
+            val columnRight = rights.filterIndexed { i, _ -> abs(lefts[i] - left) < SAME_COLUMN }.maxOrNull() ?: rights[index]
+            return rights[index] < left + (columnRight - left) * SHORT_LINE
+        }
 
         val paragraphs = ArrayList<String>()
         val current = StringBuilder()
         var previous: List<PageWord>? = null
-        for (line in lines) {
+        for ((index, line) in lines.withIndex()) {
             val text = line.joinToString(" ") { it.text }
             if (previous != null && current.isNotEmpty()) {
                 val gap = line.minOf { it.top } - previous.maxOf { it.bottom }
-                val previousShort = previous.maxOf { it.right } < pageLeft + measure * SHORT_LINE
+                val previousShort = isShort(index - 1)
                 val endsSentence = previous.last().text.last() in SENTENCE_END
-                if (gap > typicalHeight * PARAGRAPH_GAP || (previousShort && endsSentence)) {
+                val sizeChanges = maxOf(lineHeights[index], lineHeights[index - 1]) > minOf(lineHeights[index], lineHeights[index - 1]) * SIZE_CHANGE
+                val listItem = LIST_MARKER.matches(line.first().text) || line.first().text.first() in BULLETS
+                if (gap > typicalHeight * PARAGRAPH_GAP || (previousShort && endsSentence) || sizeChanges || listItem) {
                     paragraphs += current.toString()
                     current.clear()
                 }
@@ -89,7 +100,13 @@ object Reflow {
 
     private const val PARAGRAPH_GAP = 0.6f
     private const val SHORT_LINE = 0.75f
+    private const val SAME_COLUMN = 0.08f
+    private const val SIZE_CHANGE = 1.25f
     private const val SENTENCE_END = ".!?:"
+    private const val BULLETS = "•◦▪▫‣⁃●○■□–—"
+
+    /** "1." "12)" "(3)" "a)" "b." "-" at the start of a line: a list item. */
+    private val LIST_MARKER = Regex("""\(?\d{1,3}[.)]|\(?[a-zA-Z][.)]|\(\d{1,3}\)|-|\*""")
     private const val MAX_SENTENCE = 400
     private val SENTENCE = Regex("""[\s\S]+?(?:[.!?]+["')\]]*(?=\s|$)|$)""")
 }

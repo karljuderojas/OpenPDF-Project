@@ -42,6 +42,50 @@ class ReflowTest {
     }
 
     @Test
+    fun bulletedAndNumberedItemsAreTheirOwnParagraphs() {
+        val words = line(0, 0.10f, "Bring the following items", to = 0.6f) +
+            line(1, 0.125f, "• a torch", to = 0.4f) +
+            line(2, 0.15f, "• warm clothes", to = 0.4f) +
+            line(3, 0.175f, "1. First step", to = 0.4f) +
+            line(4, 0.20f, "2) Second step", to = 0.4f) +
+            line(5, 0.225f, "(3) Third step", to = 0.4f)
+        assertEquals(
+            listOf("Bring the following items", "• a torch", "• warm clothes", "1. First step", "2) Second step", "(3) Third step"),
+            Reflow.paragraphs(words),
+        )
+    }
+
+    @Test
+    fun aNumberInsideTheTextIsNotAListItem() {
+        val words = line(0, 0.10f, "The cost rose to") + line(1, 0.125f, "3.5 million last year")
+        assertEquals(listOf("The cost rose to 3.5 million last year"), Reflow.paragraphs(words))
+    }
+
+    @Test
+    fun aChangeOfTextSizeStartsANewParagraph() {
+        // A heading half as tall again as the body, with tight leading and no punctuation.
+        val heading = listOf(PageWord("Heading", 0, 0.1f, 0.10f, 0.3f, 0.13f))
+        val words = heading + line(1, 0.135f, "Body text that follows the heading") + line(2, 0.16f, "and goes on to a second line")
+        assertEquals(
+            listOf("Heading", "Body text that follows the heading and goes on to a second line"),
+            Reflow.paragraphs(words),
+        )
+    }
+
+    @Test
+    fun columnLinesAreNotShortJustBecauseThePageIsWider() {
+        // Two columns, column order: the left column's lines end in sentences but fill their column.
+        val left = line(0, 0.10f, "This line ends here.", from = 0.1f, to = 0.45f) +
+            line(1, 0.125f, "And this one carries on", from = 0.1f, to = 0.45f)
+        val right = line(2, 0.10f, "into the right column and", from = 0.55f, to = 0.9f) +
+            line(3, 0.125f, "ends there.", from = 0.55f, to = 0.75f)
+        assertEquals(
+            listOf("This line ends here. And this one carries on into the right column and ends there."),
+            Reflow.paragraphs(left + right),
+        )
+    }
+
+    @Test
     fun aWordSplitByAHyphenIsMadeWhole() {
         val words = line(0, 0.10f, "an inter-") + line(1, 0.125f, "national agreement")
         assertEquals(listOf("an international agreement"), Reflow.paragraphs(words))

@@ -27,6 +27,9 @@ data class PageWord(
  * Text that reads upright as the page is shown is boxed, which on a page with a /Rotate (a scan,
  * a landscape export) is text drawn turned by that angle. Text along the page's own x axis is
  * boxed too, turned along with the page; text at any other angle is skipped.
+ *
+ * On a page set in columns the words come column by column (see [Columns]), not line by line
+ * across the whole page.
  */
 object PageText {
 
@@ -99,6 +102,6 @@ object PageText {
         stripper.startPage = pageIndex + 1
         stripper.endPage = pageIndex + 1
         stripper.getText(document)
-        return words
+        return Columns.order(words)
     }
 }
