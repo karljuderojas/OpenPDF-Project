@@ -1,6 +1,7 @@
 package io.github.karljuderojas.freepdf.pdf.sign
 
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import java.io.File
 import java.io.OutputStream
 
@@ -36,8 +37,8 @@ object SignedCopy {
     /**
      * Writes [source] plus the audit page for [trail] to [output]. When [identity] is given, the
      * result is signed by it in [signerName]'s name, with a trusted timestamp if [timestamps] is
-     * given and reachable. [scratch] is a file this may overwrite. Returns whether the signature
-     * got a timestamp.
+     * given and reachable. [scratch] is a file this may overwrite. A locked [source] opens with
+     * [password] and the copy stays locked with it. Returns whether the signature got a timestamp.
      */
     fun write(
         source: File,
@@ -46,10 +47,12 @@ object SignedCopy {
         identity: SigningIdentity?,
         output: OutputStream,
         scratch: File,
+        password: String = "",
         timestamps: TimestampClient? = null,
     ): Boolean {
-        PDDocument.load(source).use { document ->
+        PDDocument.load(source, password).use { document ->
             AuditPageWriter.append(document, trail, notes(identity))
+            PdfDocuments.keepProtection(document, password)
             document.save(scratch)
         }
         try {
@@ -58,7 +61,7 @@ object SignedCopy {
                 return false
             }
             // Signing appends an incremental update, so PdfBox must read from a file.
-            return PDDocument.load(scratch).use { document ->
+            return PDDocument.load(scratch, password).use { document ->
                 val signer = DigitalSigner(identity, timestamps)
                 signer.sign(document, output, signerName, reason = "Signed with FreePDF")
                 signer.timestamped

@@ -3,6 +3,7 @@ package io.github.karljuderojas.freepdf.pdf.render
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.compose.ui.unit.IntRect
 import io.legere.pdfiumandroid.suspend.PdfDocumentKt
 import io.legere.pdfiumandroid.suspend.PdfiumCoreKt
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,24 @@ class PdfRenderer private constructor(
         return bitmap
     }
 
+    /**
+     * Renders only [region] of [pageIndex], as it would appear if the whole page were rendered
+     * [fullWidthPx] wide. Zoomed pages use this so the part on screen is sharp without
+     * rendering the whole page at the zoomed size.
+     */
+    suspend fun renderRegion(pageIndex: Int, fullWidthPx: Int, region: IntRect): Bitmap {
+        val size = pageSizes[pageIndex]
+        val fullHeight = (fullWidthPx / size.aspectRatio).roundToInt().coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(region.width.coerceAtLeast(1), region.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        val page = document.openPage(pageIndex) ?: error("Page $pageIndex could not be opened")
+        page.use {
+            // PDFium places the page's top-left corner at (startX, startY), so a negative offset
+            // shifts the wanted region into the bitmap and everything outside it is clipped.
+            it.renderPageBitmap(bitmap, -region.left, -region.top, fullWidthPx, fullHeight, renderAnnot = true)
+        }
+        return bitmap
+    }
+
     override fun close() {
         document.close()
     }
@@ -46,11 +65,12 @@ class PdfRenderer private constructor(
     companion object {
         private val core by lazy { PdfiumCoreKt(Dispatchers.IO) }
 
-        suspend fun open(context: Context, uri: Uri): PdfRenderer {
+        /** Opens [uri], unlocking it with [password] if it is protected. */
+        suspend fun open(context: Context, uri: Uri, password: String? = null): PdfRenderer {
             val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
                 ?: error("Cannot open $uri")
             // The PDFium document owns the descriptor from here on and closes it with the document.
-            val document = core.newDocument(descriptor)
+            val document = if (password == null) core.newDocument(descriptor) else core.newDocument(descriptor, password)
             val sizes = (0 until document.getPageCount()).map { index ->
                 val page = document.openPage(index) ?: error("Page $index could not be opened")
                 page.use { PageSize(it.getPageWidthPoint().toFloat(), it.getPageHeightPoint().toFloat()) }
