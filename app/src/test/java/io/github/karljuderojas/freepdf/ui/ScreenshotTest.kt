@@ -202,8 +202,11 @@ class ScreenshotTest {
     }
 
     @Test
-    fun viewerFillForm() = capture("viewer_fill_form") {
-        viewer(ViewerMode.Sign, form, tool = R.string.tool_fill_form, pages = formPages)
+    fun viewerFillForm() {
+        show { viewer(ViewerMode.Sign, form, tool = R.string.tool_fill_form, pages = formPages) }
+        // Bring the selected Fill form chip into view at the end of the tool strip.
+        composeRule.onNodeWithText("Fill form").performScrollTo()
+        captureRoot("viewer_fill_form")
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
@@ -212,11 +215,12 @@ class ScreenshotTest {
         // Editing a name typed earlier.
         val filled = form.copy(formFields = form.formFields.map { if (it.name == "name") it.copy(value = "Dana Whitfield") else it })
         show { viewer(ViewerMode.Sign, filled, tool = R.string.tool_fill_form, pages = formPages) }
+        composeRule.onNodeWithTag("form-field-name-0").performClick()
         // The dialog focuses its text field, whose blinking cursor never lets Compose go idle,
         // so drive the clock by hand from here.
         composeRule.mainClock.autoAdvance = false
-        composeRule.onNodeWithTag("form-field-name-0").performClick()
         composeRule.mainClock.advanceTimeBy(1_000)
+        composeRule.onNodeWithTag("form-field-input").assertExists()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_fill_form_text.png")
     }
 

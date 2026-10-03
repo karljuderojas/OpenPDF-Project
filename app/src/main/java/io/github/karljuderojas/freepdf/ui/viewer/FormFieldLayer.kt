@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -118,8 +119,11 @@ fun FormFieldDialog(field: FormField, onDismiss: () -> Unit, onSet: (String) -> 
                 keyboardActions = KeyboardActions(onDone = { submit() }),
                 modifier = Modifier.fillMaxWidth().focusRequester(focus).testTag("form-field-input"),
             )
-            // Here rather than above, so the field is in the dialog's window before it is focused.
-            LaunchedEffect(Unit) { focus.requestFocus() }
+            // A frame after the dialog opens, once its window can take focus.
+            LaunchedEffect(Unit) {
+                withFrameNanos { }
+                focus.requestFocus()
+            }
         },
         confirmButton = {
             TextButton(onClick = submit) {

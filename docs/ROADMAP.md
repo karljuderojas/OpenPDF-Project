@@ -4,6 +4,8 @@ Goal: the features people use in PDFGear and Xodo, free, offline and open source
 
 ✅ done in the scaffold · 🧱 code exists, no UI yet · ⬜ not started
 
+The app shows no button for ⬜ items: each tool joins its mode's strip (`ViewerMode`) when it ships, and Edit mode stays off the bar until its first tool does.
+
 ## Viewing
 - ✅ Open from the file picker and from other apps (file managers, email, browsers)
 - ✅ Continuous vertical scroll with PDFium rendering and a bitmap cache

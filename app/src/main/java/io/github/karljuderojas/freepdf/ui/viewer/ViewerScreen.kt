@@ -226,16 +226,11 @@ fun ViewerContent(
     // The place to sign Next field last went to, and the one waiting for the signature to be drawn.
     var currentField by rememberSaveable { mutableStateOf(initialSignField) }
     var pendingField by remember { mutableStateOf<Int?>(null) }
-    val resources = LocalResources.current
 
     val ready = state as? ViewerState.Ready
     val pageCount = ready?.pageSizes?.size ?: 0
     LaunchedEffect(pageCount) {
         if (pageCount > 0 && selectedPage >= pageCount) selectedPage = pageCount - 1
-    }
-
-    fun comingSoon() {
-        scope.launch { snackbarHostState.showSnackbar(resources.getString(R.string.coming_soon)) }
     }
 
     /** Scrolls so the place to sign at [index] is about a third of the way down the screen. */
@@ -297,7 +292,6 @@ fun ViewerContent(
             }
             R.string.tool_delete -> confirmDelete = true
             R.string.tool_merge -> onAction(ViewerAction.Merge)
-            else -> comingSoon()
         }
     }
 
@@ -372,7 +366,6 @@ fun ViewerContent(
                 // Choosing the active Annotate tool again puts it down, so one finger scrolls again.
                 mode == ViewerMode.Annotate -> ToolStrip(mode, selectedTool, onToolSelected = {
                     when {
-                        AnnotateTool.forLabel(it) == null -> comingSoon()
                         selectedTool == it -> selectedTool = null
                         else -> selectedTool = it
                     }
@@ -392,7 +385,7 @@ fun ViewerContent(
                     ToolStrip(mode, selectedTool, onToolSelected = { label ->
                         val tool = SignTool.forLabel(label)
                         when {
-                            tool == null -> comingSoon()
+                            tool == null -> Unit
                             selectedTool == label -> selectedTool = null
                             else -> {
                                 selectedTool = label
@@ -403,7 +396,7 @@ fun ViewerContent(
                     })
                 }
                 else -> ToolStrip(mode, selectedTool = null, onToolSelected = {
-                    if (it == R.string.tool_share) onAction(ViewerAction.Share) else comingSoon()
+                    if (it == R.string.tool_share) onAction(ViewerAction.Share)
                 })
             }
         },
