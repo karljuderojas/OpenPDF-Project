@@ -21,7 +21,7 @@ class DocumentsTest {
 
     private val prefs = ApplicationProvider.getApplicationContext<Context>().getSharedPreferences("test", Context.MODE_PRIVATE)
     private var time = 1_000L
-    private fun documents() = Documents(prefs) { time++ }
+    private fun documents() = Documents(prefs, clock = { time++ })
 
     @Test
     fun reopeningMovesADocumentToTheTopWithoutDuplicates() {
