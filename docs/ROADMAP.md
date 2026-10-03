@@ -35,6 +35,7 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - 🧱 Audit trail, SHA-256 fingerprints and audit page
 - ⬜ Type or photograph a signature instead of drawing it
 - ⬜ Field detection and the guided next-field walk
+- ✅ Finish: lock signatures into the page (with the optional seal) or keep them editable as stamp annotations; Save or Save & share
 - ⬜ Fill AcroForm fields
 - ⬜ Verify banner for signed PDFs
 - ⬜ RFC 3161 timestamps, LTV

@@ -32,12 +32,13 @@ import io.github.karljuderojas.freepdf.pdf.sign.AuditEvent
 import io.github.karljuderojas.freepdf.pdf.sign.AuditTrail
 import io.github.karljuderojas.freepdf.pdf.sign.DocumentHash
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
-import io.github.karljuderojas.freepdf.pdf.sign.SignatureStamper
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureAnnotation
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
 import io.github.karljuderojas.freepdf.pdf.sign.SignerRecord
 import io.github.karljuderojas.freepdf.pdf.sign.SigningIdentity
 import io.github.karljuderojas.freepdf.share.Sharing
+import io.github.karljuderojas.freepdf.ui.sign.FinishOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -108,6 +109,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     /** The finished signed copy, in the cache, waiting for the user to pick where it goes. */
     private var pendingSignedCopy: File? = null
+
+    /** Whether Finish asked to share the signed copy once it is saved. */
+    private var shareSignedCopy = false
 
     private val signingPrefs = application.getSharedPreferences("signing", Context.MODE_PRIVATE)
     private val _signerName = MutableStateFlow(signingPrefs.getString(KEY_SIGNER_NAME, "").orEmpty())
@@ -329,7 +333,8 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         val toPdf = displayMapper(document, stamp.page)
         val box = stamp.box
         when (val content = stamp.content) {
-            is StampContent.Signature -> SignatureStamper.stamp(
+            // An annotation until Finish draws it into the page, unless the signer keeps it editable.
+            is StampContent.Signature -> SignatureAnnotation.add(
                 document, stamp.page, content.image, toPdf(StampGeometry.signatureAnchor(box)),
                 maxWidth = box.width * size.widthPt, maxHeight = box.height * size.heightPt,
             )
@@ -363,11 +368,12 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Builds the signed copy: everything placed so far, a signing certificate page naming
-     * [name] with the [consentText] they agreed to, and, if [seal], a digital signature from a
-     * key kept in this phone's Keystore. The user then picks where to save it.
+     * Builds the signed copy: everything placed so far, with signatures locked into the page if
+     * [FinishOptions.lock], a signing certificate page naming [name] with the [consentText] they
+     * agreed to, and, if [FinishOptions.seal], a digital signature from a key kept in this phone's
+     * Keystore. The user then picks where to save it, and shares it too if [FinishOptions.share].
      */
-    fun finishSigning(name: String, consentText: String, seal: Boolean) {
+    fun finishSigning(name: String, consentText: String, options: FinishOptions) {
         val uri = openedUri ?: return
         // Queued ahead of the signed copy on the lock, so everything placed is in it.
         commitStamps()
@@ -400,17 +406,18 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                             ),
                         )
                         // One key per name, so the certificate always names whoever is signing.
-                        val identity = if (seal) {
+                        val identity = if (options.seal) {
                             SigningIdentity.deviceIdentity(name, "freepdf-signing-" + DocumentHash.sha256(name.toByteArray()).take(16))
                         } else {
                             null
                         }
                         val out = File(context.cacheDir, "signed/${UUID.randomUUID()}.pdf").apply { parentFile?.mkdirs() }
                         out.outputStream().use { output ->
-                            SignedCopy.write(current.workingFile, trail, name, identity, output, File(out.path + ".tmp"))
+                            SignedCopy.write(current.workingFile, trail, name, identity, output, File(out.path + ".tmp"), lock = options.lock)
                         }
                         pendingSignedCopy?.delete()
                         pendingSignedCopy = out
+                        shareSignedCopy = options.share
                         SignedCopy.suggestedName(documentName)
                     }
                 }
@@ -428,13 +435,17 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         val copy = pendingSignedCopy ?: return
         pendingSignedCopy = null
         viewModelScope.launch {
-            val saved = runCatching {
+            val result = runCatching {
                 withContext(Dispatchers.IO) {
                     val output = context.contentResolver.openOutputStream(target, "wt") ?: error("Cannot write $target")
                     output.use { out -> copy.inputStream().use { it.copyTo(out) } }
+                    // Shared under the name it was saved as, from a copy the share sheet can read.
+                    val shared = if (shareSignedCopy) copy.copyTo(Sharing.sharedCopy(context, displayName(target)), overwrite = true) else null
                     copy.delete()
+                    shared
                 }
-            }.isSuccess
+            }
+            val saved = result.isSuccess
             if (saved) {
                 runCatching {
                     context.contentResolver.takePersistableUriPermission(
@@ -443,6 +454,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 open(target)
                 _effects.send(ViewerEffect.Message(R.string.signed_copy_saved))
+                result.getOrNull()?.let { _effects.send(ViewerEffect.Share(it)) }
             } else {
                 _effects.send(ViewerEffect.Message(R.string.save_failed))
             }

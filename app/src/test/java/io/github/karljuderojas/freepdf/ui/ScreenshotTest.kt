@@ -29,6 +29,7 @@ import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
+import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
 import io.github.karljuderojas.freepdf.ui.viewer.PlacedStamp
 import io.github.karljuderojas.freepdf.ui.viewer.StampContent
@@ -216,6 +217,19 @@ class ScreenshotTest {
         composeRule.onNodeWithText("Finish").performClick()
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_finish.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerSignFinishEditable() {
+        show {
+            viewer(ViewerMode.Sign, sample.copy(hasSignature = true))
+            FinishSigningDialog(initialName = "Dana Whitfield", initialLock = false, onDismiss = {}, onFinish = { _, _, _ -> })
+        }
+        // As in viewerSignFinish, the name field's cursor never lets Compose go idle.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_finish_editable.png")
     }
 
     @Test
