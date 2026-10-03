@@ -3,6 +3,10 @@ package io.github.karljuderojas.freepdf.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -11,9 +15,13 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
+import androidx.core.content.res.ResourcesCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
@@ -24,14 +32,20 @@ import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
+import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
+import io.github.karljuderojas.freepdf.ui.viewer.PlacedStamp
+import io.github.karljuderojas.freepdf.ui.viewer.StampContent
+import io.github.karljuderojas.freepdf.ui.viewer.StampGeometry
+import io.github.karljuderojas.freepdf.ui.viewer.ViewerAction
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerContent
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerMode
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerState
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.util.Calendar
@@ -52,6 +66,9 @@ class ScreenshotTest {
     val composeRule = createComposeRule()
 
     private val samplePages = listOf(loadSample("page-1.png"), loadSample("page-2.png"))
+
+    // Page 1 at 2.5x, standing in for PDFium's sharp rendering of a zoomed page.
+    private val largePages by lazy { mapOf(0 to loadSample("page-1-large.png")) }
     private val sample = ViewerState.Ready(List(samplePages.size) { PageSize(612f, 792f) })
     // The two sample pages repeated, for the selection and drag screens.
     private val sixPages = ViewerState.Ready(List(6) { PageSize(612f, 792f) })
@@ -84,16 +101,38 @@ class ScreenshotTest {
     @Test
     fun viewerReadZoomed() {
         show { viewer(ViewerMode.Read) }
+        composeRule.waitForIdle()
         // Pinch out to about 2.5x while dragging both fingers down, which pans to the page's title.
+        // The clock is held, so the first capture is the scaled page before it is sharpened.
+        composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithTag("page-list").performTouchInput {
             pinch(Offset(440f, 250f), Offset(340f, 1300f), Offset(640f, 450f), Offset(740f, 1900f))
         }
+        composeRule.mainClock.advanceTimeByFrame()
+        captureRoot("viewer_read_zoomed_mid_pinch")
+        // Once the view has been still for a moment, the visible part is rendered at 2.5x.
+        composeRule.mainClock.advanceTimeBy(1_000)
+        composeRule.waitForIdle()
         captureRoot("viewer_read_zoomed")
     }
 
     @Test
     fun viewerUnsaved() = capture("viewer_read_unsaved") {
         viewer(ViewerMode.Read, sample.copy(canUndo = true, hasUnsavedChanges = true))
+    }
+
+    @Test
+    fun viewerPassword() = capture("viewer_password") { viewer(ViewerMode.Read, ViewerState.Locked()) }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPasswordWrong() {
+        show { viewer(ViewerMode.Read, ViewerState.Locked(wrongPassword = true)) }
+        // Typing focuses the field, whose blinking cursor never lets Compose go idle.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("password-field").performTextInput("lease2026")
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_password_wrong.png")
     }
 
     @Test
@@ -147,6 +186,42 @@ class ScreenshotTest {
         )
     }
 
+    @Test
+    fun viewerSignAdjust() {
+        // A signature just placed on the Provider line, selected, and a date beside it.
+        show { viewer(ViewerMode.Sign, stamps = placedStamps(), selectedStamp = 1L) }
+        composeRule.onNodeWithTag("page-list").performScrollToIndex(1)
+        captureRoot("viewer_sign_adjust")
+    }
+
+    @Test
+    fun viewerSignMoveResize() {
+        show {
+            var stamps by remember { mutableStateOf(placedStamps()) }
+            viewer(ViewerMode.Sign, stamps = stamps, selectedStamp = 1L, onAction = { action ->
+                stamps = when (action) {
+                    is ViewerAction.MoveStamp -> stamps.map { if (it.id == action.id) it.copy(box = it.box.moved(action.delta.x, action.delta.y)) else it }
+                    is ViewerAction.ResizeStamp -> stamps.map { if (it.id == action.id) it.copy(box = it.box.scaled(action.factor, letter)) else it }
+                    else -> stamps
+                }
+            })
+        }
+        composeRule.onNodeWithTag("page-list").performScrollToIndex(1)
+        // Drag the signature down to the Client line, then pull its corner to make it bigger.
+        composeRule.onNodeWithTag("stamp-1").performTouchInput {
+            down(center)
+            for (i in 1..10) moveBy(Offset(0f, 13.5f))
+            up()
+        }
+        composeRule.onNodeWithTag("stamp-resize-1").performTouchInput {
+            down(center)
+            for (i in 1..10) moveBy(Offset(10f, 3f))
+            up()
+        }
+        composeRule.waitForIdle()
+        captureRoot("viewer_sign_move_resize")
+    }
+
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerSignPad() {
@@ -162,6 +237,30 @@ class ScreenshotTest {
         }
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_pad.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerSignPadTyped() {
+        show { viewer(ViewerMode.Sign, signerName = "Dana Whitfield") }
+        composeRule.onNodeWithText("Signature").performClick()
+        composeRule.onNodeWithTag("pad-tab-type").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_pad_typed.png")
+    }
+
+    @Test
+    fun viewerSignPlacingTyped() {
+        val typeface = ResourcesCompat.getFont(RuntimeEnvironment.getApplication(), R.font.dancing_script)!!
+        capture("viewer_sign_placing_typed") {
+            viewer(
+                ViewerMode.Sign,
+                tool = R.string.tool_signature,
+                savedSignatures = mapOf(
+                    SignatureStore.Kind.Signature to TypedSignature.render("Dana Whitfield", typeface, 0xFF1A3FA8.toInt()),
+                ),
+            )
+        }
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
@@ -241,17 +340,42 @@ class ScreenshotTest {
         tool: Int? = null,
         savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
         signerName: String = "",
+        stamps: List<PlacedStamp> = emptyList(),
+        selectedStamp: Long? = null,
+        onAction: (ViewerAction) -> Unit = {},
     ) {
         ViewerContent(
             state = state,
             onBack = {},
             loadPage = { index, width -> scaled(samplePages[index % samplePages.size], width) },
+            loadRegion = { index, fullWidth, region -> largePages[index]?.let { cropped(it, fullWidth, region) } },
             initialMode = mode,
             initialSelectedPage = selectedPage,
             initialSelectedPages = selectedPages,
             initialTool = tool,
             savedSignatures = savedSignatures,
             signerName = signerName,
+            stamps = stamps,
+            initialSelectedStamp = selectedStamp,
+            onAction = onAction,
+        )
+    }
+
+    private val letter = PageSize(612f, 792f)
+
+    /** On page 2 of the sample: a signature on the Provider line and a date on its Date line. */
+    private fun placedStamps(): List<PlacedStamp> {
+        val signature = SignatureInk.render(sampleSignature(), 0xFF1A3FA8.toInt(), 6f)
+        val date = "Oct 3, 2026"
+        return listOf(
+            PlacedStamp(
+                1L, 1, StampContent.Signature(SignatureStore.Kind.Signature, signature),
+                StampGeometry.signatureBox(Offset(0.3f, 0.322f), signature.width, signature.height, SignatureStore.Kind.Signature, letter),
+            ),
+            PlacedStamp(
+                2L, 1, StampContent.Text(date, "date"),
+                StampGeometry.textBox(Offset(0.565f, 0.316f), listOf(date), letter) { it.length * 0.5f },
+            ),
         )
     }
 
@@ -280,6 +404,21 @@ class ScreenshotTest {
 
     private fun scaled(page: Bitmap, width: Int): Bitmap =
         Bitmap.createScaledBitmap(page, width, width * page.height / page.width, true)
+
+    /** [region] of [page] as it would look with the whole page scaled to [fullWidth]. */
+    private fun cropped(page: Bitmap, fullWidth: Int, region: IntRect): Bitmap {
+        val ratio = page.width.toFloat() / fullWidth
+        val source = android.graphics.Rect(
+            (region.left * ratio).toInt(), (region.top * ratio).toInt(),
+            (region.right * ratio).toInt(), (region.bottom * ratio).toInt(),
+        )
+        val out = Bitmap.createBitmap(region.width, region.height, Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(out).apply {
+            drawColor(android.graphics.Color.WHITE)
+            drawBitmap(page, source, android.graphics.Rect(0, 0, region.width, region.height), android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+        }
+        return out
+    }
 
     private fun loadSample(name: String): Bitmap {
         val stream = javaClass.classLoader!!.getResourceAsStream("sample/$name") ?: error("Missing sample/$name")
