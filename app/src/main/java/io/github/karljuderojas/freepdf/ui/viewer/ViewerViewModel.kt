@@ -57,7 +57,6 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignField
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureFields
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureReport
-import io.github.karljuderojas.freepdf.pdf.sign.SignatureStamper
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureAnnotation
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureVerifier
