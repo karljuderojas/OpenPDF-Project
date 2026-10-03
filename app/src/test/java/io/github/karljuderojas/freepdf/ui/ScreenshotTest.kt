@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.pinch
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
@@ -76,6 +77,16 @@ class ScreenshotTest {
 
     @Test
     fun viewerRead() = capture("viewer_read") { viewer(ViewerMode.Read) }
+
+    @Test
+    fun viewerReadZoomed() {
+        show { viewer(ViewerMode.Read) }
+        // Pinch out to about 2.5x while dragging both fingers down, which pans to the page's title.
+        composeRule.onNodeWithTag("page-list").performTouchInput {
+            pinch(Offset(440f, 250f), Offset(340f, 1300f), Offset(640f, 450f), Offset(740f, 1900f))
+        }
+        captureRoot("viewer_read_zoomed")
+    }
 
     @Test
     fun viewerUnsaved() = capture("viewer_read_unsaved") {

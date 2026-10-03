@@ -41,11 +41,17 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - name: Render screenshots
         run: ./gradlew recordRoborazziDebug
+      # PageEditorTest stamps text, a checkmark and a signature onto a rotated page. PDFium cannot
+      # render under Robolectric, so poppler renders that PDF to go with the screenshots.
+      - name: Render the stamped rotated page
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils > /dev/null
+          pdftoppm -png -f 1 -l 1 -scale-to 1080 -singlefile \
+            app/build/outputs/qa/stamps-on-rotated-page.pdf app/build/outputs/roborazzi/pdf_stamps_on_rotated_page
       # SignedCopyTest writes a signed copy of the sample agreement. Show its signing certificate
       # page, and have poppler check the digital signature independently of our own code.
       - name: Render the signing certificate page
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils > /dev/null
           pdf=app/build/outputs/signed/agreement-signed.pdf
           pages=$(pdfinfo "$pdf" | awk '/^Pages:/ {print $2}')
           pdftoppm -png -f "$pages" -l "$pages" -scale-to-x 1080 -scale-to-y -1 -singlefile \
