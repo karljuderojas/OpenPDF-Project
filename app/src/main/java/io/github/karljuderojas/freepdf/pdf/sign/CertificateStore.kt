@@ -31,12 +31,13 @@ class CertificateStore(private val prefs: SharedPreferences) {
     fun import(bytes: ByteArray, password: CharArray): SigningIdentity {
         val identity = SigningIdentity.fromPkcs12(bytes, password)
         identity.chain.first().checkValidity()
-        val digests = arrayOf(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512)
-        val protection = KeyProtection.Builder(KeyProperties.PURPOSE_SIGN).setDigests(*digests).apply {
-            if (identity.privateKey.algorithm == KeyProperties.KEY_ALGORITHM_RSA) {
-                setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1)
-            }
-        }.build()
+        val protection = KeyProtection.Builder(KeyProperties.PURPOSE_SIGN)
+            .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512)
+            .apply {
+                if (identity.privateKey.algorithm == KeyProperties.KEY_ALGORITHM_RSA) {
+                    setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1)
+                }
+            }.build()
         KeyStore.getInstance(KEYSTORE).apply { load(null) }.setEntry(
             ALIAS,
             KeyStore.PrivateKeyEntry(identity.privateKey, identity.chain.toTypedArray()),
