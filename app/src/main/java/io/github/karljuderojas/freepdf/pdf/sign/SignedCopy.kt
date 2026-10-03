@@ -1,6 +1,7 @@
 package io.github.karljuderojas.freepdf.pdf.sign
 
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import java.io.File
 import java.io.OutputStream
 
@@ -30,6 +31,7 @@ object SignedCopy {
     /**
      * Writes [source] plus the audit page for [trail] to [output]. When [identity] is given, the
      * result is signed by it in [signerName]'s name. [scratch] is a file this may overwrite.
+     * A locked [source] opens with [password] and the copy stays locked with it.
      */
     fun write(
         source: File,
@@ -38,9 +40,11 @@ object SignedCopy {
         identity: SigningIdentity?,
         output: OutputStream,
         scratch: File,
+        password: String = "",
     ) {
-        PDDocument.load(source).use { document ->
+        PDDocument.load(source, password).use { document ->
             AuditPageWriter.append(document, trail, notes(sealed = identity != null))
+            PdfDocuments.keepProtection(document, password)
             document.save(scratch)
         }
         try {
@@ -48,7 +52,7 @@ object SignedCopy {
                 scratch.inputStream().use { it.copyTo(output) }
             } else {
                 // Signing appends an incremental update, so PdfBox must read from a file.
-                PDDocument.load(scratch).use { document ->
+                PDDocument.load(scratch, password).use { document ->
                     DigitalSigner(identity).sign(document, output, signerName, reason = "Signed with FreePDF")
                 }
             }
