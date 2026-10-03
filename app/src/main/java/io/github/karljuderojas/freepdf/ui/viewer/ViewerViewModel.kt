@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
@@ -649,7 +648,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 // Pages render onto a transparent bitmap, which JPEG would turn black.
                 val image = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888)
                 Canvas(image).apply {
-                    drawColor(Color.WHITE)
+                    drawColor(android.graphics.Color.WHITE)
                     drawBitmap(page, 0f, 0f, null)
                 }
                 page.recycle()
