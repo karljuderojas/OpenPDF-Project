@@ -106,6 +106,8 @@ sealed interface ViewerState {
      * [outline] is the PDF's table of contents, empty if it has none.
      * [signFields] are the places the document asks to be signed, and [signedFields] the
      * indexes of those signed so far (signatures still being placed are not counted here).
+     * [failedPageEdits] counts the page edits (moves, deletions, rotations, inserts, merges)
+     * that left the document as it was, so Pages mode can put its selection back after one.
      */
     data class Ready(
         val pageSizes: List<PageSize>,
@@ -120,6 +122,7 @@ sealed interface ViewerState {
         val signFields: List<SignField> = emptyList(),
         val signedFields: Set<Int> = emptySet(),
         val signatures: List<SignatureReport> = emptyList(),
+        val failedPageEdits: Int = 0,
     ) : ViewerState
 
     /** The PDF is password protected; [wrongPassword] after a password that did not open it. */
@@ -191,6 +194,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     // Finding the places to sign reads all the text, so it is done again only when pages change.
     private var signFields: List<SignField>? = null
+
+    /** See [ViewerState.Ready.failedPageEdits]. */
+    private var failedPageEdits = 0
 
     /** The finished signed copy, in the cache, waiting for the user to pick where it goes. */
     private var pendingSignedCopy: File? = null
@@ -383,6 +389,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         val pageCount = (_state.value as? ViewerState.Ready)?.pageSizes?.size ?: return
         if (pages.size >= pageCount) {
             _effects.trySend(ViewerEffect.Message(R.string.cannot_delete_last_page))
+            failedPageEdit()
             return
         }
         edit(movesPages = true) { PageEditor.delete(it, pages) }
@@ -515,11 +522,13 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Puts the saved signature in the place to sign at [index] in [ViewerState.Ready.signFields],
-     * fitted to it. It can be moved and resized like any other placed signature.
+     * Puts the saved signature in [requested], one of [ViewerState.Ready.signFields], fitted to it.
+     * It can be moved and resized like any other placed signature. The place is looked up again
+     * by where it is, in case the fields were found afresh since the screen saw them.
      */
-    fun signField(index: Int) {
-        val field = (_state.value as? ViewerState.Ready)?.signFields?.getOrNull(index) ?: return
+    fun signField(requested: SignField) {
+        val fields = (_state.value as? ViewerState.Ready)?.signFields ?: return
+        val field = SignatureFields.indexOf(fields, requested)?.let { fields[it] } ?: return
         val image = _savedSignatures.value[SignatureStore.Kind.Signature] ?: return
         val size = pageSize(field.page) ?: return
         addStamp(field.page, StampContent.Signature(SignatureStore.Kind.Signature, image), StampGeometry.fieldBox(field.box, image.width, image.height, size))
@@ -1150,14 +1159,26 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         editLog += event?.copy(at = Instant.now())
                         redoLog.clear()
                         if (movesPages) signFields = null
-                        _state.value = reloadOrFail(keepText = keepsText)
+                        _state.value = reloadOrFail(pageEdit = movesPages, keepText = keepsText)
                         done?.let { _effects.send(ViewerEffect.Message(it)) }
                     }
-                    is NothingChanged -> onNoChange?.let { _effects.send(ViewerEffect.Message(it)) }
-                    else -> _effects.send(ViewerEffect.Message(R.string.edit_failed))
+                    is NothingChanged -> {
+                        if (movesPages) failedPageEdit()
+                        onNoChange?.let { _effects.send(ViewerEffect.Message(it)) }
+                    }
+                    else -> {
+                        if (movesPages) failedPageEdit()
+                        _effects.send(ViewerEffect.Message(R.string.edit_failed))
+                    }
                 }
             }
         }
+    }
+
+    /** Notes a page edit that left the document as it was, so the screen's selection and drag order go back to it. */
+    private fun failedPageEdit() {
+        failedPageEdits++
+        _state.update { if (it is ViewerState.Ready) it.copy(failedPageEdits = failedPageEdits) else it }
     }
 
     /** Maps display fractions on [page] (see [AnnotationLayer]) to PDF space. */
@@ -1185,15 +1206,18 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     /**
      * [reloadLocked], but a working copy PDFium refuses (a merged file it cannot parse, say) is
-     * taken back with undo instead of crashing the app from inside a coroutine. Call with [lock] held.
+     * taken back with undo instead of crashing the app from inside a coroutine. [pageEdit] says
+     * the edit being shown moved pages, so taking it back counts as a failed page edit. [keepText]
+     * is passed on to [reloadLocked]. Call with [lock] held.
      */
-    private suspend fun reloadOrFail(keepText: Boolean = false): ViewerState =
+    private suspend fun reloadOrFail(pageEdit: Boolean = false, keepText: Boolean = false): ViewerState =
         runCatching { reloadLocked(keepText) }.getOrElse { first ->
             val current = session
             if (current?.canUndo == true) {
                 runCatching {
                     withContext(Dispatchers.IO) { current.undo() }
                     if (editLog.isNotEmpty()) editLog.removeAt(editLog.lastIndex)
+                    if (pageEdit) failedPageEdits++
                     _effects.send(ViewerEffect.Message(R.string.edit_failed))
                     reloadLocked()
                 }.getOrElse { ViewerState.Failed(first.message) }
@@ -1247,7 +1271,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         return ViewerState.Ready(
             next.pageSizes, revision, current.canUndo, current.canRedo, current.hasUnsavedChanges, hasSignature, outline,
             isProtected = current.password.isNotEmpty(), formFields = formFields, signFields = places, signedFields = signed,
-            signatures = signatures,
+            signatures = signatures, failedPageEdits = failedPageEdits,
         )
     }
 
