@@ -54,6 +54,8 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureReport
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureFields
 import io.github.karljuderojas.freepdf.pdf.text.PageText
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
+import io.github.karljuderojas.freepdf.pdf.edit.TextEditing.EditableLine
+import io.github.karljuderojas.freepdf.ui.viewer.nearest
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
 import io.github.karljuderojas.freepdf.pdf.sign.TimestampReport
@@ -825,6 +827,19 @@ class ScreenshotTest {
         composeRule.onNodeWithTag("link-0-0").performClick()
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_link_open.png")
+    fun viewerEditText() = capture("viewer_edit_text") { viewer(ViewerMode.Edit, tool = R.string.tool_edit_text) }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerEditTextDialog() {
+        show { viewer(ViewerMode.Edit, tool = R.string.tool_edit_text) }
+        // Tap the line holding "Northwind": its words open in a box to change. The dialog's text
+        // field keeps Compose from going idle, as in viewerAnnotateNote.
+        composeRule.mainClock.autoAdvance = false
+        val layer = "edit-text-layer-0"
+        composeRule.onNodeWithTag(layer).performTouchInput { click(wordCentre(layer, 0, wordIndex(0, "Northwind"))) }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_edit_text_dialog.png")
     }
 
     @Test
@@ -1273,6 +1288,17 @@ class ScreenshotTest {
             loadPage = { index, width -> scaled(withMarks(pages[index % pages.size], index, marks), width) },
             // The agreement's words and sharp, zoomed-in renders; the form has neither.
             loadWords = { if (pages === samplePages) sampleWords[it % sampleWords.size] else emptyList() },
+            // Every line of the sample's words can be edited, as in a PDF whose text is not scanned.
+            findLine = { page, at ->
+                val words = sampleWords[page % sampleWords.size]
+                words.nearest(at, aspect = 792f / 612f, reach = 0.05f)?.let { i ->
+                    val line = words.filter { it.line == words[i].line }
+                    EditableLine(
+                        line.joinToString(" ") { it.text },
+                        DisplayRect(line.minOf { it.left }, line.minOf { it.top }, line.maxOf { it.right }, line.maxOf { it.bottom }),
+                    )
+                }
+            },
             loadRegion = { index, fullWidth, region ->
                 largePages[index]?.takeIf { pages === samplePages }?.let { cropped(it, fullWidth, region) }
             },
