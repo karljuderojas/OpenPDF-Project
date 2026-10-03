@@ -545,13 +545,13 @@ fun ViewerContent(
     // On a tablet held wide the pages sit two to a row, so the list's items are rows, not pages.
     val window = rememberWindowSize()
     val columns = if (window.twoPages) 2 else 1
-    val currentPage by remember(columns) { derivedStateOf { listState.firstVisibleItemIndex * columns } }
+    val currentPage by remember(columns) { derivedStateOf { firstPageOf(listState.firstVisibleItemIndex, columns) } }
     var panelOpen by rememberSaveable { mutableStateOf(true) }
     // The list is kept at the same page when turning the tablet changes how many pages a row holds.
     var shownColumns by rememberSaveable { mutableIntStateOf(columns) }
     LaunchedEffect(columns) {
         if (shownColumns != columns) {
-            listState.scrollToItem(listState.firstVisibleItemIndex * shownColumns / columns)
+            listState.scrollToItem(rowOf(firstPageOf(listState.firstVisibleItemIndex, shownColumns), columns))
             shownColumns = columns
         }
     }
@@ -686,7 +686,7 @@ fun ViewerContent(
             // Pages fill the list's width, less its 8 dp padding on each side and the gaps between them.
             val pageHeight = ((viewport.width - with(density) { (8.dp * (columns + 1)).toPx() }) / columns) / size.aspectRatio
             val offset = (field.box.top * pageHeight - viewport.height / 3f).roundToInt().coerceAtLeast(0)
-            if (animate) listState.animateScrollToItem(field.page / columns, offset) else listState.scrollToItem(field.page / columns, offset)
+            if (animate) listState.animateScrollToItem(rowOf(field.page, columns), offset) else listState.scrollToItem(rowOf(field.page, columns), offset)
         }
     }
 
@@ -737,12 +737,12 @@ fun ViewerContent(
         if (!isReady || positionRestored) return@LaunchedEffect
         positionRestored = true
         if (position.page in 1 until pageCount || (position.page == 0 && position.offset > 0)) {
-            listState.scrollToItem(position.page / columns, position.offset)
+            listState.scrollToItem(rowOf(position.page, columns), position.offset)
         }
     }
     val currentOnViewPosition by rememberUpdatedState(onViewPosition)
     LaunchedEffect(listState, columns) {
-        snapshotFlow { ViewPosition(listState.firstVisibleItemIndex * columns, listState.firstVisibleItemScrollOffset) }
+        snapshotFlow { ViewPosition(firstPageOf(listState.firstVisibleItemIndex, columns), listState.firstVisibleItemScrollOffset) }
             .collect { currentOnViewPosition(it) }
     }
 
@@ -775,7 +775,7 @@ fun ViewerContent(
     // Leaving Pages lands on the page that was selected there.
     var returnToPage by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(returnToPage) {
-        returnToPage?.let { listState.scrollToItem(it / columns) }
+        returnToPage?.let { listState.scrollToItem(rowOf(it, columns)) }
         returnToPage = null
     }
 
@@ -815,13 +815,13 @@ fun ViewerContent(
         val viewport = listState.layoutInfo.viewportSize
         val pageHeight = viewport.width / columns / size.aspectRatio
         val top = match.boxes.minOfOrNull { it.top } ?: 0f
-        listState.animateScrollToItem(match.page / columns, (top * pageHeight - viewport.height / 3f).toInt().coerceAtLeast(0))
+        listState.animateScrollToItem(rowOf(match.page, columns), (top * pageHeight - viewport.height / 3f).toInt().coerceAtLeast(0))
     }
 
     // The page being read aloud stays on screen, in whichever view is showing.
     LaunchedEffect(readAloud.active, readAloud.page, reflowing) {
         if (!readAloud.active) return@LaunchedEffect
-        if (reflowing) reflowState.animateScrollToItem(readAloud.page) else listState.animateScrollToItem(readAloud.page / columns)
+        if (reflowing) reflowState.animateScrollToItem(readAloud.page) else listState.animateScrollToItem(rowOf(readAloud.page, columns))
     }
     val readAloudUnavailable = stringResource(R.string.read_aloud_unavailable)
     LaunchedEffect(readAloud.unavailable) {
@@ -831,7 +831,7 @@ fun ViewerContent(
     // Leaving reading mode puts the page list where the reader had got to.
     fun exitReflow() {
         reflowing = false
-        scope.launch { listState.scrollToItem(reflowState.firstVisibleItemIndex / columns) }
+        scope.launch { listState.scrollToItem(rowOf(reflowState.firstVisibleItemIndex, columns)) }
     }
 
     BackHandler(enabled = reflowing || selectedMark != null || mode != ViewerMode.Read || searching || ready?.hasUnsavedChanges == true) {
@@ -1076,7 +1076,7 @@ fun ViewerContent(
                 pageColors = pageColors,
                 outline = ready.outline,
                 marks = marks,
-                onGoToPage = { page -> scope.launch { listState.animateScrollToItem(page / columns) } },
+                onGoToPage = { page -> scope.launch { listState.animateScrollToItem(rowOf(page, columns)) } },
                 onOpenMark = { mark ->
                     // Mark editing happens while reading, or in Annotate with no tool picked. Done
                     // is taken on the way out of Sign or Edit, so stamps still being placed are kept.
@@ -1168,7 +1168,7 @@ fun ViewerContent(
                                 LinkLayer(page, onPage) { link ->
                                     when (val target = link.target) {
                                         is LinkTarget.Web -> openingLink = target.uri
-                                        is LinkTarget.Page -> scope.launch { listState.animateScrollToItem(target.index.coerceIn(0, pageCount - 1) / columns) }
+                                        is LinkTarget.Page -> scope.launch { listState.animateScrollToItem(rowOf(target.index.coerceIn(0, pageCount - 1), columns)) }
                                     }
                                 }
                             }
@@ -1735,16 +1735,20 @@ private fun PageList(
             contentPadding = PaddingValues(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items((pageSizes.size + columns - 1) / columns) { row ->
+            items(rowCount(pageSizes.size, columns)) { row ->
+                val first = firstPageOf(row, columns)
+                val next = firstPageOf(row + 1, columns)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-                    for (index in row * columns until minOf(pageSizes.size, row * columns + columns)) {
+                    // The first page of a two-page view sits alone on the right, as a book's cover does.
+                    if (next - first < columns) Spacer(Modifier.weight((columns - (next - first)).toFloat()))
+                    for (index in first until minOf(pageSizes.size, next)) {
                         PageImage(index, pageSizes[index], revision, widthPx, loadPage, Modifier.weight(1f), pageColors) {
                             ZoomDetailLayer(index, revision, detail, detailColors)
                             overlay(index)
                         }
                     }
                     // A last page left alone in its row keeps its width instead of stretching.
-                    if (row * columns + columns > pageSizes.size) Spacer(Modifier.weight((row * columns + columns - pageSizes.size).toFloat()))
+                    if (next > pageSizes.size) Spacer(Modifier.weight((next - pageSizes.size).toFloat()))
                 }
             }
         }
@@ -1880,6 +1884,18 @@ private fun Set<Int>.toggle(page: Int): Set<Int> = when {
 }
 
 private val PageSetSaver = listSaver<Set<Int>, Int>(save = { it.toList() }, restore = { it.toSet() })
+
+// The page list's items are rows of [columns] pages. With two columns the first page sits alone in
+// row 0, as the cover of a book, so facing pages (2-3, 4-5) share a row; with one column a row is a page.
+
+/** The row holding [page]. */
+internal fun rowOf(page: Int, columns: Int): Int = if (columns == 1) page else (page + 1) / columns
+
+/** The first page of [row]; one past the last page for the row after the last. */
+internal fun firstPageOf(row: Int, columns: Int): Int = if (columns == 1) row else (row * columns - 1).coerceAtLeast(0)
+
+/** How many rows [pageCount] pages take. */
+internal fun rowCount(pageCount: Int, columns: Int): Int = if (pageCount == 0) 0 else rowOf(pageCount - 1, columns) + 1
 
 /** Keeps the current place to sign across configuration changes; nothing is saved for null. */
 private val SignFieldSaver = listSaver<SignField?, Any>(
