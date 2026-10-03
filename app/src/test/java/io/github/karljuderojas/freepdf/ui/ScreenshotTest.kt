@@ -27,11 +27,12 @@ import androidx.compose.ui.unit.IntRect
 import androidx.core.content.res.ResourcesCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
-import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
+import com.tom_roush.pdfbox.pdmodel.PDDocument
 import io.github.karljuderojas.freepdf.R
+import io.github.karljuderojas.freepdf.pdf.form.FormFiller
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
@@ -81,6 +82,7 @@ private const val HOUR = 60 * 60 * 1000L
  *
  * Pages come from a real sample PDF (resources/sample/agreement.pdf), pre-rendered to PNG by
  * scripts/make_sample_pdf.py, because PDFium's native library does not load under Robolectric.
+ * The Fill form screens use the sample sign-up form (resources/sample/form.pdf) the same way.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -95,6 +97,15 @@ class ScreenshotTest {
     // Page 1 at 2.5x, standing in for PDFium's sharp rendering of a zoomed page.
     private val largePages by lazy { mapOf(0 to loadSample("page-1-large.png")) }
     private val sample = ViewerState.Ready(List(samplePages.size) { PageSize(612f, 792f) })
+
+    // The sign-up form (sample/form.pdf), with its fields read by the app's own code.
+    private val formPages = listOf(loadSample("form-page.png"))
+    private val form by lazy {
+        ViewerState.Ready(
+            listOf(PageSize(612f, 792f)),
+            formFields = javaClass.classLoader!!.getResourceAsStream("sample/form.pdf").use { PDDocument.load(it).use(FormFiller::fields) },
+        )
+    }
 
     @Test
     fun home() = capture("home") { shell(MainTab.Home) { HomeContent(sampleRecent, {}, {}, {}, {}, {}, {}, modifier = it) } }
@@ -492,6 +503,42 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerFillForm() {
+        show { viewer(ViewerMode.Sign, form, tool = R.string.tool_fill_form, pages = formPages) }
+        // Bring the selected Fill form chip into view at the end of the tool strip.
+        composeRule.onNodeWithText("Fill form").performScrollTo()
+        captureRoot("viewer_fill_form")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerFillFormText() {
+        // Editing a name typed earlier.
+        val filled = form.copy(formFields = form.formFields.map { if (it.name == "name") it.copy(value = "Dana Whitfield") else it })
+        show { viewer(ViewerMode.Sign, filled, tool = R.string.tool_fill_form, pages = formPages) }
+        // A dialog with a text field never lets Compose go idle here (see viewerAnnotateNote),
+        // so drive the clock by hand from here.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("form-field-name-0").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_fill_form_text.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerFillFormChoice() {
+        show { viewer(ViewerMode.Sign, form, tool = R.string.tool_fill_form, pages = formPages) }
+        composeRule.onNodeWithTag("form-field-team-10").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_fill_form_choice.png")
+    }
+
+    @Test
+    fun viewerFillFormNoFields() = capture("viewer_fill_form_no_fields") {
+        viewer(ViewerMode.Sign, tool = R.string.tool_fill_form)
+    }
+
+    @Test
     fun viewerEdit() = capture("viewer_edit") { viewer(ViewerMode.Edit) }
 
     @Test
@@ -725,13 +772,17 @@ class ScreenshotTest {
         stamps: List<PlacedStamp> = emptyList(),
         selectedStamp: Long? = null,
         onAction: (ViewerAction) -> Unit = {},
+        pages: List<Bitmap> = samplePages,
     ) {
         ViewerContent(
             state = state,
             onBack = {},
-            loadPage = { index, width -> scaled(withMarks(samplePages[index], index, marks), width) },
-            loadWords = { sampleWords[it] },
-            loadRegion = { index, fullWidth, region -> largePages[index]?.let { cropped(it, fullWidth, region) } },
+            loadPage = { index, width -> scaled(withMarks(pages[index], index, marks), width) },
+            // The agreement's words and sharp, zoomed-in renders; the form has neither.
+            loadWords = { if (pages === samplePages) sampleWords[it] else emptyList() },
+            loadRegion = { index, fullWidth, region ->
+                largePages[index]?.takeIf { pages === samplePages }?.let { cropped(it, fullWidth, region) }
+            },
             initialMode = mode,
             initialSelectedPage = selectedPage,
             initialTool = tool,

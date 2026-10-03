@@ -55,3 +55,13 @@ fun pdfToDisplay(x: Float, y: Float, rotation: Int, cropBox: PdfRect): Pair<Floa
         else -> u to v
     }
 }
+
+/** A box on a page as displayed, in fractions (0..1 across and down, origin top-left). */
+data class DisplayRect(val left: Float, val top: Float, val right: Float, val bottom: Float)
+
+/** Where [rect], in the page's unrotated PDF space, appears on the page as displayed. */
+fun pdfToDisplay(rect: PdfRect, rotation: Int, cropBox: PdfRect): DisplayRect {
+    val a = pdfToDisplay(rect.left, rect.bottom, rotation, cropBox)
+    val b = pdfToDisplay(rect.right, rect.top, rotation, cropBox)
+    return DisplayRect(minOf(a.first, b.first), minOf(a.second, b.second), maxOf(a.first, b.first), maxOf(a.second, b.second))
+}
