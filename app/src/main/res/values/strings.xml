@@ -391,6 +391,11 @@
     <string name="open_documents_close_all">Close all</string>
     <string name="open_documents_open_another">Open another</string>
     <!-- Reading modes -->
+    <string name="page_label">Page %1$d</string>
+    <string name="reading_mode">Reading mode</string>
+    <string name="reading_mode_no_text">No text on this page. It may be a scan.</string>
+    <string name="reading_mode_smaller">Smaller text</string>
+    <string name="reading_mode_larger">Larger text</string>
     <string name="page_colors">Page colors</string>
     <string name="page_colors_normal">Normal</string>
     <string name="page_colors_night">Night</string>
