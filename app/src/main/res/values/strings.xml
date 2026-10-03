@@ -396,6 +396,14 @@
     <string name="reading_mode_no_text">No text on this page. It may be a scan.</string>
     <string name="reading_mode_smaller">Smaller text</string>
     <string name="reading_mode_larger">Larger text</string>
+    <string name="tool_read_aloud">Read aloud</string>
+    <string name="read_aloud_page">Reading page %1$d</string>
+    <string name="read_aloud_pause">Pause</string>
+    <string name="read_aloud_play">Play</string>
+    <string name="read_aloud_previous">Previous sentence</string>
+    <string name="read_aloud_next">Next sentence</string>
+    <string name="read_aloud_stop">Stop</string>
+    <string name="read_aloud_unavailable">Read aloud is not available. Check the text-to-speech settings on your phone.</string>
     <string name="page_colors">Page colors</string>
     <string name="page_colors_normal">Normal</string>
     <string name="page_colors_night">Night</string>
