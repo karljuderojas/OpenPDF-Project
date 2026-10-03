@@ -3,6 +3,8 @@ package io.github.karljuderojas.freepdf.pdf.sign
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
+import org.bouncycastle.asn1.ASN1InputStream
+import org.bouncycastle.asn1.cms.ContentInfo
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.cert.X509CertificateHolder
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
@@ -142,7 +144,9 @@ class SignedCopyTest {
     }
 
     private fun verifies(contents: ByteArray, signedContent: ByteArray): Boolean {
-        val cms = CMSSignedData(CMSProcessableByteArray(signedContent), contents)
+        // /Contents is zero-padded to its reserved size, so read just the first DER object.
+        val info = ContentInfo.getInstance(ASN1InputStream(contents).use { it.readObject() })
+        val cms = CMSSignedData(CMSProcessableByteArray(signedContent), info)
         val signer = cms.signerInfos.signers.single()
         val certificate = cms.certificates.getMatches(null).first()
         return runCatching { signer.verify(JcaSimpleSignerInfoVerifierBuilder().build(certificate)) }.getOrDefault(false)
