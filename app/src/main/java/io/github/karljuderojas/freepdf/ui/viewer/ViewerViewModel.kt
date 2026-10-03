@@ -46,6 +46,7 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
 import io.github.karljuderojas.freepdf.pdf.sign.SignerRecord
 import io.github.karljuderojas.freepdf.pdf.sign.SigningIdentity
+import io.github.karljuderojas.freepdf.print.Printing
 import io.github.karljuderojas.freepdf.share.Sharing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -103,6 +104,9 @@ sealed interface ViewerEffect {
     data class SaveAs(val suggestedName: String) : ViewerEffect
     data object Close : ViewerEffect
     data class Share(val file: File) : ViewerEffect
+
+    /** Open the print dialog for [file], a printable copy named [name]. */
+    data class Print(val file: File, val name: String, val pageCount: Int) : ViewerEffect
 
     /** Ask where to save the signed copy; see [ViewerViewModel.saveSignedCopy]. */
     data class SaveSigned(val suggestedName: String) : ViewerEffect
@@ -628,6 +632,24 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
             _effects.send(shown.getOrElse { ViewerEffect.Message(R.string.info_failed) })
+        }
+    }
+
+    /** Prints the PDF as it is now, unsaved changes included. */
+    fun print() {
+        val uri = openedUri ?: return
+        viewModelScope.launch {
+            val effect = runCatching {
+                lock.withLock {
+                    withContext(Dispatchers.IO) {
+                        val current = session ?: error("Nothing is open")
+                        val copy = File(context.cacheDir, "print/${UUID.randomUUID()}.pdf")
+                        Printing.printableCopy(current.workingFile, copy, current.password)
+                        ViewerEffect.Print(copy, displayName(uri), renderer?.pageCount ?: 0)
+                    }
+                }
+            }.getOrElse { ViewerEffect.Message(if (it is Printing.NotAllowed) R.string.print_not_allowed else R.string.print_failed) }
+            _effects.send(effect)
         }
     }
 
