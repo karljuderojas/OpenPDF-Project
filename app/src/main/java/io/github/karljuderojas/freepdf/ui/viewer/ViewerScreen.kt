@@ -73,6 +73,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
+import io.github.karljuderojas.freepdf.pdf.form.FormField
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.share.Sharing
@@ -104,6 +105,7 @@ sealed interface ViewerAction {
     data class AddDate(val page: Int, val at: Offset) : ViewerAction
     data class AddText(val page: Int, val at: Offset, val text: String) : ViewerAction
     data class AddCheckmark(val page: Int, val at: Offset) : ViewerAction
+    data class FillField(val field: FormField, val value: String?) : ViewerAction
     data class FinishSigning(val name: String, val consentText: String, val seal: Boolean) : ViewerAction
 }
 
@@ -177,6 +179,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.AddDate -> viewModel.addDate(action.page, action.at)
                 is ViewerAction.AddText -> viewModel.addText(action.page, action.at, action.text)
                 is ViewerAction.AddCheckmark -> viewModel.addCheckmark(action.page, action.at)
+                is ViewerAction.FillField -> viewModel.fillField(action.field, action.value)
                 is ViewerAction.FinishSigning -> viewModel.finishSigning(action.name, action.consentText, action.seal)
             }
         },
@@ -207,6 +210,7 @@ fun ViewerContent(
     var confirmLeave by remember { mutableStateOf(false) }
     var pendingNote by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
+    var editingField by remember { mutableStateOf<FormField?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -329,6 +333,7 @@ fun ViewerContent(
                             tool = tool,
                             savedImage = tool.signatureKind?.let { savedSignatures[it] },
                             onRedraw = { padFor = tool.signatureKind },
+                            hint = if (tool == SignTool.FillForm && ready?.formFields?.isEmpty() == true) R.string.sign_hint_no_fields else tool.hint,
                         )
                     }
                     ToolStrip(mode, selectedTool, onToolSelected = { label ->
@@ -368,7 +373,15 @@ fun ViewerContent(
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
                     val signTool = SignTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Sign }
                     PageList(ready.pageSizes, ready.revision, loadPage, listState) { page ->
-                        if (signTool != null) {
+                        if (signTool == SignTool.FillForm) {
+                            FormFieldLayer(ready.formFields.filter { it.page == page }) { field ->
+                                when (val tap = formTap(field)) {
+                                    is FormTap.Set -> onAction(ViewerAction.FillField(field, tap.value))
+                                    FormTap.Ask -> editingField = field
+                                    FormTap.Nothing -> Unit
+                                }
+                            }
+                        } else if (signTool != null) {
                             TapLayer(page) { at ->
                                 val kind = signTool.signatureKind
                                 when {
@@ -446,6 +459,17 @@ fun ViewerContent(
             onAdd = { text ->
                 pendingText = null
                 onAction(ViewerAction.AddText(page, at, text))
+            },
+        )
+    }
+
+    editingField?.let { field ->
+        FormFieldDialog(
+            field = field,
+            onDismiss = { editingField = null },
+            onSet = { value ->
+                editingField = null
+                if (value != field.value) onAction(ViewerAction.FillField(field, value))
             },
         )
     }

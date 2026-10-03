@@ -36,6 +36,25 @@ class PdfGeometryTest {
     }
 
     @Test
+    fun pdfBoxesMapBackToWhereTheyAreShown() {
+        val box = PdfRect(72f, 640f, 540f, 662f)
+        listOf(0, 90, 180, 270).forEach { rotation ->
+            val shown = pdfToDisplay(box, rotation, letter)
+            // Both corners shown on screen map back to the box's corners.
+            val a = displayToPdf(shown.left, shown.top, rotation, letter)
+            val b = displayToPdf(shown.right, shown.bottom, rotation, letter)
+            assertEquals("rotation $rotation", 72f, minOf(a.x, b.x), 0.01f)
+            assertEquals("rotation $rotation", 540f, maxOf(a.x, b.x), 0.01f)
+            assertEquals("rotation $rotation", 640f, minOf(a.y, b.y), 0.01f)
+            assertEquals("rotation $rotation", 662f, maxOf(a.y, b.y), 0.01f)
+        }
+        // Unrotated, a box near the top of the page is shown near the top.
+        val shown = pdfToDisplay(box, 0, letter)
+        assertEquals(72f / 612f, shown.left, 0.001f)
+        assertEquals(130f / 792f, shown.top, 0.001f)
+    }
+
+    @Test
     fun cropBoxOffsetIsApplied() {
         assertPoint(10f, 800f, displayToPdf(0f, 0f, 0, PdfRect(10f, 8f, 622f, 800f)))
     }

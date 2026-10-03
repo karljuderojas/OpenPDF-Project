@@ -1,0 +1,211 @@
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /AcroForm 7 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Annots [10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 17 0 R 21 0 R 24 0 R 27 0 R 30 0 R 33 0 R 34 0 R] >>
+endobj
+4 0 obj
+<< /Length 1166 >>
+stream
+0.12 0.29 0.53 rg
+BT /F2 22 Tf 72 712 Td (Volunteer Sign-up) Tj ET
+0 g
+BT /F1 10 Tf 72 690 Td (Lakeside Bakery community day  |  Saturday 17 and Sunday 18 October 2026) Tj ET
+0.8 G 1 w 72 676 m 540 676 l S
+0.55 G 0.75 w
+BT /F2 10 Tf 72 667 Td (Full name) Tj ET
+72 640 468 22 re S
+BT /F2 10 Tf 72 617 Td (Email) Tj ET
+72 590 260 22 re S
+BT /F2 10 Tf 350 617 Td (Phone) Tj ET
+350 590 190 22 re S
+BT /F2 10 Tf 72 365 Td (Anything we should know?) Tj ET
+72 290 468 70 re S
+BT /F2 10 Tf 72 545 Td (Days you can help) Tj ET
+72 520 14 14 re S
+BT /F1 10.5 Tf 92 523 Td (Saturday) Tj ET
+200 520 14 14 re S
+BT /F1 10.5 Tf 220 523 Td (Sunday) Tj ET
+BT /F2 10 Tf 72 490 Td (T-shirt size) Tj ET
+72 465 14 14 re S
+BT /F1 10.5 Tf 92 468 Td (S) Tj ET
+140 465 14 14 re S
+BT /F1 10.5 Tf 160 468 Td (M) Tj ET
+208 465 14 14 re S
+BT /F1 10.5 Tf 228 468 Td (L) Tj ET
+276 465 14 14 re S
+BT /F1 10.5 Tf 296 468 Td (XL) Tj ET
+BT /F2 10 Tf 72 435 Td (Team) Tj ET
+72 400 230 22 re S 0.55 g 286 414 m 296 414 l 291 408 l f 0 g
+BT /F2 10 Tf 72 190 Td (Signature) Tj ET
+0 G 72 170 m 300 170 l S 340 170 m 540 170 l S
+BT /F1 9.5 Tf 340 158 Td (Date) Tj ET
+BT /F1 9 Tf 72 48 Td (Page 1 of 1) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+7 0 obj
+<< /Fields [10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 17 0 R 20 0 R 33 0 R 34 0 R] /DR << /Font << /Helv 5 0 R >> >> /DA (/Helv 11 Tf 0 g) >>
+endobj
+8 0 obj
+null
+endobj
+9 0 obj
+null
+endobj
+10 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Tx /T (name) /TU (Full name) /Rect [72 640 540 662] /DA (/Helv 11 Tf 0 g) >>
+endobj
+11 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Tx /T (email) /TU (Email) /Rect [72 590 332 612] /DA (/Helv 11 Tf 0 g) >>
+endobj
+12 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Tx /T (phone) /TU (Phone) /Rect [350 590 540 612] /DA (/Helv 11 Tf 0 g) >>
+endobj
+13 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Tx /T (comments) /TU (Anything we should know?) /Rect [72 290 540 360] /DA (/Helv 11 Tf 0 g) /Ff 4096 >>
+endobj
+14 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Btn /T (saturday) /TU (Saturday) /V /Off /AS /Off /Rect [72 520 86 534] /AP << /N << /Yes 15 0 R /Off 16 0 R >> >> /MK << >> >>
+endobj
+15 0 obj
+<< /Length 44 /Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >> >>
+stream
+0 g 1.6 w 1 J 1 j 3 7 m 6 3.5 l 11.5 11 l S
+endstream
+endobj
+16 0 obj
+<< /Length 0 /Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >> >>
+stream
+endstream
+endobj
+17 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Btn /T (sunday) /TU (Sunday) /V /Off /AS /Off /Rect [200 520 214 534] /AP << /N << /Yes 18 0 R /Off 19 0 R >> >> /MK << >> >>
+endobj
+18 0 obj
+<< /Length 44 /Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >> >>
+stream
+0 g 1.6 w 1 J 1 j 3 7 m 6 3.5 l 11.5 11 l S
+endstream
+endobj
+19 0 obj
+<< /Length 0 /Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >> >>
+stream
+endstream
+endobj
+20 0 obj
+<< /FT /Btn /Ff 49152 /T (size) /TU (T-shirt size) /V /Off /Kids [21 0 R 24 0 R 27 0 R 30 0 R] >>
+endobj
+21 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /Parent 20 0 R /AS /Off /Rect [72 465 86 479] /AP << /N << /S 22 0 R /Off 23 0 R >> >> /MK << >> >>
+endobj
+22 0 obj
+<< /Length 90 /Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >> >>
+stream
+0 g 7 3 m 9.2 3 11 4.8 11 7 c 11 9.2 9.2 11 7 11 c 4.8 11 3 9.2 3 7 c 3 4.8 4.8 3 7 3 c f
+endstream
+endobj
+23 0 obj
+<< /Length 0 /Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >> >>
+stream
+endstream
+endobj
+24 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /Parent 20 0 R /AS /Off /Rect [140 465 154 479] /AP << /N << /M 25 0 R /Off 26 0 R >> >> /MK << >> >>
+endobj
+25 0 obj
+<< /Length 90 /Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >> >>
+stream
+0 g 7 3 m 9.2 3 11 4.8 11 7 c 11 9.2 9.2 11 7 11 c 4.8 11 3 9.2 3 7 c 3 4.8 4.8 3 7 3 c f
+endstream
+endobj
+26 0 obj
+<< /Length 0 /Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >> >>
+stream
+endstream
+endobj
+27 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /Parent 20 0 R /AS /Off /Rect [208 465 222 479] /AP << /N << /L 28 0 R /Off 29 0 R >> >> /MK << >> >>
+endobj
+28 0 obj
+<< /Length 90 /Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >> >>
+stream
+0 g 7 3 m 9.2 3 11 4.8 11 7 c 11 9.2 9.2 11 7 11 c 4.8 11 3 9.2 3 7 c 3 4.8 4.8 3 7 3 c f
+endstream
+endobj
+29 0 obj
+<< /Length 0 /Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >> >>
+stream
+endstream
+endobj
+30 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /Parent 20 0 R /AS /Off /Rect [276 465 290 479] /AP << /N << /XL 31 0 R /Off 32 0 R >> >> /MK << >> >>
+endobj
+31 0 obj
+<< /Length 90 /Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >> >>
+stream
+0 g 7 3 m 9.2 3 11 4.8 11 7 c 11 9.2 9.2 11 7 11 c 4.8 11 3 9.2 3 7 c 3 4.8 4.8 3 7 3 c f
+endstream
+endobj
+32 0 obj
+<< /Length 0 /Type /XObject /Subtype /Form /BBox [0 0 14 14] /Resources << >> >>
+stream
+endstream
+endobj
+33 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Ch /Ff 131072 /T (team) /TU (Team) /Opt [(Kitchen) (Front of house) (Delivery)] /Rect [72 400 302 422] /DA (/Helv 11 Tf 0 g) >>
+endobj
+34 0 obj
+<< /Type /Annot /Subtype /Widget /F 4 /P 3 0 R /FT /Tx /T (date) /TU (Date) /Rect [340 172 540 192] /DA (/Helv 11 Tf 0 g) >>
+endobj
+xref
+0 35
+0000000000 65535 f 
+0000000009 00000 n 
+0000000074 00000 n 
+0000000131 00000 n 
+0000000361 00000 n 
+0000001578 00000 n 
+0000001675 00000 n 
+0000001750 00000 n 
+0000001900 00000 n 
+0000001920 00000 n 
+0000001940 00000 n 
+0000002085 00000 n 
+0000002227 00000 n 
+0000002370 00000 n 
+0000002543 00000 n 
+0000002739 00000 n 
+0000002898 00000 n 
+0000003012 00000 n 
+0000003206 00000 n 
+0000003365 00000 n 
+0000003479 00000 n 
+0000003593 00000 n 
+0000003756 00000 n 
+0000003961 00000 n 
+0000004075 00000 n 
+0000004240 00000 n 
+0000004445 00000 n 
+0000004559 00000 n 
+0000004724 00000 n 
+0000004929 00000 n 
+0000005043 00000 n 
+0000005209 00000 n 
+0000005414 00000 n 
+0000005528 00000 n 
+0000005724 00000 n 
+trailer
+<< /Size 35 /Root 1 0 R >>
+startxref
+5865
+%%EOF

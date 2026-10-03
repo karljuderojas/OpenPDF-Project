@@ -18,7 +18,9 @@ import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
+import com.tom_roush.pdfbox.pdmodel.PDDocument
 import io.github.karljuderojas.freepdf.R
+import io.github.karljuderojas.freepdf.pdf.form.FormFiller
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
@@ -41,6 +43,7 @@ import java.util.Calendar
  *
  * Pages come from a real sample PDF (resources/sample/agreement.pdf), pre-rendered to PNG by
  * scripts/make_sample_pdf.py, because PDFium's native library does not load under Robolectric.
+ * The Fill form screens use the sample sign-up form (resources/sample/form.pdf) the same way.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -52,6 +55,15 @@ class ScreenshotTest {
 
     private val samplePages = listOf(loadSample("page-1.png"), loadSample("page-2.png"))
     private val sample = ViewerState.Ready(List(samplePages.size) { PageSize(612f, 792f) })
+
+    // The sign-up form (sample/form.pdf), with its fields read by the app's own code.
+    private val formPages = listOf(loadSample("form-page.png"))
+    private val form by lazy {
+        ViewerState.Ready(
+            listOf(PageSize(612f, 792f)),
+            formFields = javaClass.classLoader!!.getResourceAsStream("sample/form.pdf").use { PDDocument.load(it).use(FormFiller::fields) },
+        )
+    }
 
     @Test
     fun filesEmpty() = capture("files_empty") { files(open = emptyList(), recent = emptyList()) }
@@ -174,6 +186,39 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerFillForm() = capture("viewer_fill_form") {
+        viewer(ViewerMode.Sign, form, tool = R.string.tool_fill_form, pages = formPages)
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerFillFormText() {
+        // Editing a name typed earlier.
+        val filled = form.copy(formFields = form.formFields.map { if (it.name == "name") it.copy(value = "Dana Whitfield") else it })
+        show { viewer(ViewerMode.Sign, filled, tool = R.string.tool_fill_form, pages = formPages) }
+        // The dialog focuses its text field, whose blinking cursor never lets Compose go idle,
+        // so drive the clock by hand from here.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("form-field-name-0").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_fill_form_text.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerFillFormChoice() {
+        show { viewer(ViewerMode.Sign, form, tool = R.string.tool_fill_form, pages = formPages) }
+        composeRule.onNodeWithTag("form-field-team-10").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_fill_form_choice.png")
+    }
+
+    @Test
+    fun viewerFillFormNoFields() = capture("viewer_fill_form_no_fields") {
+        viewer(ViewerMode.Sign, tool = R.string.tool_fill_form)
+    }
+
+    @Test
     fun viewerPages() = capture("viewer_pages") {
         viewer(ViewerMode.Pages, sample.copy(canUndo = true, hasUnsavedChanges = true), selectedPage = 1)
     }
@@ -207,11 +252,12 @@ class ScreenshotTest {
         tool: Int? = null,
         savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
         signerName: String = "",
+        pages: List<Bitmap> = samplePages,
     ) {
         ViewerContent(
             state = state,
             onBack = {},
-            loadPage = { index, width -> scaled(samplePages[index], width) },
+            loadPage = { index, width -> scaled(pages[index], width) },
             initialMode = mode,
             initialSelectedPage = selectedPage,
             initialTool = tool,

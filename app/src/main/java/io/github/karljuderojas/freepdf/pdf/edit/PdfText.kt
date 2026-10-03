@@ -13,7 +13,7 @@ import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
  */
 object PdfText {
 
-    private const val LIBERATION_SANS = "com/tom_roush/pdfbox/resources/ttf/LiberationSans-Regular.ttf"
+    const val LIBERATION_SANS = "com/tom_roush/pdfbox/resources/ttf/LiberationSans-Regular.ttf"
 
     fun fontFor(document: PDDocument, text: String): PDFont {
         if (PDType1Font.HELVETICA.canShow(text)) return PDType1Font.HELVETICA

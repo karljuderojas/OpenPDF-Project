@@ -48,6 +48,11 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils > /dev/null
           pdftoppm -png -f 1 -l 1 -scale-to 1080 -singlefile \
             app/build/outputs/qa/stamps-on-rotated-page.pdf app/build/outputs/roborazzi/pdf_stamps_on_rotated_page
+      # FormFillerTest fills in the sample sign-up form. Show it as another PDF reader draws it.
+      - name: Render the filled form
+        run: |
+          pdftoppm -png -f 1 -l 1 -scale-to-x 1080 -scale-to-y -1 -singlefile \
+            app/build/outputs/qa/filled-form.pdf app/build/outputs/roborazzi/pdf_filled_form
       # SignedCopyTest writes a signed copy of the sample agreement. Show its signing certificate
       # page, and have poppler check the digital signature independently of our own code.
       - name: Render the signing certificate page

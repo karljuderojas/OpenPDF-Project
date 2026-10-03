@@ -33,7 +33,7 @@ Goal: the features people use in PDFGear and Xodo, free, offline and open source
 - 🧱 Audit trail, SHA-256 fingerprints and audit page
 - ⬜ Type or photograph a signature instead of drawing it
 - ⬜ Field detection and the guided next-field walk
-- ⬜ Fill AcroForm fields
+- ✅ Fill form: tap a highlighted field of the PDF's own form to type into it, tick it or pick from its list; values are saved in the form, so other apps see them
 - ⬜ Verify banner for signed PDFs
 - ⬜ RFC 3161 timestamps, LTV
 

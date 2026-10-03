@@ -25,6 +25,8 @@ import io.github.karljuderojas.freepdf.pdf.edit.EditSession
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import io.github.karljuderojas.freepdf.pdf.edit.PdfText
+import io.github.karljuderojas.freepdf.pdf.form.FormField
+import io.github.karljuderojas.freepdf.pdf.form.FormFiller
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.render.PdfRenderer
 import io.github.karljuderojas.freepdf.pdf.sign.AuditEvent
@@ -61,6 +63,7 @@ sealed interface ViewerState {
     /**
      * [revision] changes after every edit, so pages already on screen are rendered again.
      * [hasSignature] is true once a signature or initials are placed, which offers Finish.
+     * [formFields] are the PDF's own fillable fields, for Fill form.
      */
     data class Ready(
         val pageSizes: List<PageSize>,
@@ -68,6 +71,7 @@ sealed interface ViewerState {
         val canUndo: Boolean = false,
         val hasUnsavedChanges: Boolean = false,
         val hasSignature: Boolean = false,
+        val formFields: List<FormField> = emptyList(),
     ) : ViewerState
 
     data class Failed(val message: String?) : ViewerState
@@ -264,6 +268,12 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     fun addCheckmark(page: Int, at: Offset) = edit(event = filled("checkmark", page)) { document ->
         PageEditor.addCheckmark(document, page, displayMapper(document, page)(at))
     }
+
+    /** Sets one of the PDF's own form fields; see [FormFiller.fill] for what [value] means. */
+    fun fillField(field: FormField, value: String?) =
+        edit(event = filled("form field \"${field.label}\"", field.page)) { document ->
+            FormFiller.fill(document, field.name, value)
+        }
 
     private fun filled(what: String, page: Int) =
         AuditEvent(AuditEvent.Type.FieldFilled, SIGNER, detail = "$what on page ${page + 1}")
@@ -479,7 +489,11 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         val next = PdfRenderer.open(context, Uri.fromFile(current.workingFile))
         renderer = next
         val hasSignature = editLog.any { it?.type == AuditEvent.Type.Signed }
-        return ViewerState.Ready(next.pageSizes, revision, current.canUndo, current.hasUnsavedChanges, hasSignature)
+        // A form that PdfBox cannot read just offers nothing to fill.
+        val formFields = withContext(Dispatchers.IO) {
+            runCatching { PDDocument.load(current.workingFile).use { FormFiller.fields(it) } }.getOrDefault(emptyList())
+        }
+        return ViewerState.Ready(next.pageSizes, revision, current.canUndo, current.hasUnsavedChanges, hasSignature, formFields)
     }
 
     /** Lists [uri] in the Files tab; in the history too if the app can reopen it later. */
