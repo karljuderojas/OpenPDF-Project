@@ -31,6 +31,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import androidx.core.content.res.ResourcesCompat
@@ -45,7 +46,10 @@ import io.github.karljuderojas.freepdf.pdf.form.FormFiller
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
+import io.github.karljuderojas.freepdf.pdf.DisplayRect
 import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
+import io.github.karljuderojas.freepdf.pdf.links.LinkTarget
+import io.github.karljuderojas.freepdf.pdf.links.PageLink
 import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
 import io.github.karljuderojas.freepdf.pdf.render.PageBox
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
@@ -55,7 +59,6 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureFields
 import io.github.karljuderojas.freepdf.pdf.text.PageText
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.edit.TextEditing.EditableLine
-import io.github.karljuderojas.freepdf.pdf.DisplayRect
 import io.github.karljuderojas.freepdf.ui.viewer.nearest
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
@@ -133,6 +136,16 @@ class ScreenshotTest {
     private val sample = ViewerState.Ready(List(samplePages.size) { PageSize(612f, 792f) })
     // The two sample pages repeated, for the selection and drag screens.
     private val sixPages = ViewerState.Ready(List(6) { PageSize(612f, 792f) })
+
+    // Six pages with a table of contents, for the tablet's side panel.
+    private val tabletState = sixPages.copy(
+        outline = listOf(
+            OutlineItem("Service Agreement", 0, 0),
+            OutlineItem("1. Services", 0, 1),
+            OutlineItem("2. Payment", 1, 1),
+            OutlineItem("Signatures", 1, 0),
+        ),
+    )
 
     // The sign-up form (sample/form.pdf), with its fields read by the app's own code.
     private val formPages = listOf(loadSample("form-page.png"))
@@ -319,6 +332,41 @@ class ScreenshotTest {
             recent = sampleRecent,
         )
     }
+
+    // Tablets: tabs in a rail, and a landscape viewer with a side panel and two pages to a row.
+
+    @Test
+    @Config(qualifiers = "w1280dp-h800dp-land-mdpi")
+    fun tabletFiles() = capture("tablet_files") {
+        files(
+            open = listOf(sampleRecent[0], DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * HOUR)),
+            recent = sampleRecent,
+        )
+    }
+
+    @Test
+    @Config(qualifiers = "w1280dp-h800dp-land-mdpi")
+    fun tabletViewerLandscape() = capture("tablet_viewer_landscape") { viewer(ViewerMode.Read, state = tabletState) }
+
+    @Test
+    @Config(qualifiers = "w1280dp-h800dp-land-mdpi")
+    fun tabletViewerContents() {
+        show { viewer(ViewerMode.Read, state = tabletState) }
+        composeRule.onNodeWithText("Contents").performClick()
+        captureRoot("tablet_viewer_contents")
+    }
+
+    @Test
+    @Config(qualifiers = "w1280dp-h800dp-land-mdpi")
+    fun tabletViewerComments() {
+        show { viewer(ViewerMode.Read, state = tabletState, marks = sampleMarks) }
+        composeRule.onNodeWithText("Comments", substring = true).performClick()
+        captureRoot("tablet_viewer_comments")
+    }
+
+    @Test
+    @Config(qualifiers = "w800dp-h1280dp-mdpi")
+    fun tabletViewerPortrait() = capture("tablet_viewer_portrait") { viewer(ViewerMode.Read, state = tabletState) }
 
     @Test
     fun viewerReflow() = capture("viewer_reflow") { viewer(ViewerMode.Read, reflow = true) }
@@ -911,6 +959,35 @@ class ScreenshotTest {
 
     @Test
     fun viewerEditAddText() = capture("viewer_edit_add_text") { viewer(ViewerMode.Edit, tool = R.string.tool_add_text) }
+
+    @Test
+    fun viewerEditAddLink() = capture("viewer_edit_add_link") { viewer(ViewerMode.Edit, tool = R.string.tool_add_link) }
+
+    // Dragging a box over the page asks where the link should go.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerEditAddLinkAsk() {
+        show { viewer(ViewerMode.Edit, tool = R.string.tool_add_link) }
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("link-box-layer-0").performTouchInput {
+            swipe(Offset(width * 0.1f, height * 0.2f), Offset(width * 0.6f, height * 0.25f))
+        }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_edit_add_link_ask.png")
+    }
+
+    // Tapping a web link in a PDF asks before leaving the app.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerLinkOpen() {
+        val linked = sample.copy(links = listOf(PageLink(0, DisplayRect(0.1f, 0.1f, 0.6f, 0.15f), LinkTarget.Web("https://example.com/terms"))))
+        show { viewer(ViewerMode.Read, linked) }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("link-0-0").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_link_open.png")
+    }
 
     @Test
     fun viewerEditText() = capture("viewer_edit_text") { viewer(ViewerMode.Edit, tool = R.string.tool_edit_text) }

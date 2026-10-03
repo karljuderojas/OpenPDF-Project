@@ -142,33 +142,37 @@ internal fun OutlineDialog(outline: List<OutlineItem>, onDismiss: () -> Unit, on
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.contents)) },
-        text = {
-            LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                items(outline) { item ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onGo(item.page) }
-                            .padding(start = (item.depth * 16).dp, top = 12.dp, bottom = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            item.title,
-                            style = if (item.depth == 0) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            (item.page + 1).toString(),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-        },
+        text = { OutlineList(outline, onGo, Modifier.heightIn(max = 420.dp)) },
         confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) } },
     )
+}
+
+/** The entries of the table of contents, indented by depth, each with its page number. */
+@Composable
+internal fun OutlineList(outline: List<OutlineItem>, onGo: (page: Int) -> Unit, modifier: Modifier = Modifier) {
+    LazyColumn(modifier) {
+        items(outline) { item ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onGo(item.page) }
+                    .padding(start = (item.depth * 16).dp, top = 12.dp, bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    item.title,
+                    style = if (item.depth == 0) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    (item.page + 1).toString(),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
