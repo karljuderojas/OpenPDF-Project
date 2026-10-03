@@ -4,12 +4,18 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.util.LruCache
+import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.IntRect
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -22,12 +28,23 @@ import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
 import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
+import io.github.karljuderojas.freepdf.pdf.annotate.Mark
+import io.github.karljuderojas.freepdf.pdf.annotate.Marks
+import io.github.karljuderojas.freepdf.pdf.annotate.Stamps
+import io.github.karljuderojas.freepdf.pdf.annotate.TextBoxes
 import io.github.karljuderojas.freepdf.pdf.displayToPdf
 import io.github.karljuderojas.freepdf.pdf.edit.EditSession
+import io.github.karljuderojas.freepdf.pdf.edit.Flattener
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import io.github.karljuderojas.freepdf.pdf.edit.PdfText
+import io.github.karljuderojas.freepdf.pdf.edit.Splitting
+import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
+import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
+import io.github.karljuderojas.freepdf.pdf.render.PageBox
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
+import io.github.karljuderojas.freepdf.pdf.text.PageText
+import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.render.PdfRenderer
 import io.github.karljuderojas.freepdf.pdf.sign.AuditEvent
 import io.github.karljuderojas.freepdf.pdf.sign.AuditTrail
@@ -38,8 +55,10 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
 import io.github.karljuderojas.freepdf.pdf.sign.SignerRecord
 import io.github.karljuderojas.freepdf.pdf.sign.SigningIdentity
+import io.github.karljuderojas.freepdf.print.Printing
 import io.github.karljuderojas.freepdf.share.Sharing
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,6 +76,7 @@ import java.time.Instant
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.roundToInt
 
 sealed interface ViewerState {
     data object Loading : ViewerState
@@ -64,13 +84,18 @@ sealed interface ViewerState {
     /**
      * [revision] changes after every edit, so pages already on screen are rendered again.
      * [hasSignature] is true once a signature or initials are placed, which offers Finish.
+     * [isProtected] is true while the PDF needs a password to open.
+     * [outline] is the PDF's table of contents, empty if it has none.
      */
     data class Ready(
         val pageSizes: List<PageSize>,
         val revision: Int = 0,
         val canUndo: Boolean = false,
+        val canRedo: Boolean = false,
         val hasUnsavedChanges: Boolean = false,
         val hasSignature: Boolean = false,
+        val outline: List<OutlineItem> = emptyList(),
+        val isProtected: Boolean = false,
     ) : ViewerState
 
     /** The PDF is password protected; [wrongPassword] after a password that did not open it. */
@@ -79,15 +104,38 @@ sealed interface ViewerState {
     data class Failed(val message: String?) : ViewerState
 }
 
+/** One place the search text was found: its page, and boxes covering it on that page. */
+data class TextMatch(val page: Int, val boxes: List<PageBox>)
+
+/** Matches for [query] so far, in page order; [finished] once every page has been searched. */
+data class SearchResults(val query: String = "", val matches: List<TextMatch> = emptyList(), val finished: Boolean = true)
+
 /** One-off things the screen does for the view model: messages, the Save As picker, leaving. */
 sealed interface ViewerEffect {
     data class Message(@StringRes val text: Int) : ViewerEffect
+
+    /** A message that names a number, such as "Saved 3 pages as a new PDF". */
+    data class CountMessage(@PluralsRes val text: Int, val count: Int) : ViewerEffect
     data class SaveAs(val suggestedName: String) : ViewerEffect
     data object Close : ViewerEffect
     data class Share(val file: File) : ViewerEffect
 
+    /** Share page pictures; [title] names the document they came from. */
+    data class ShareImages(val files: List<File>, val title: String) : ViewerEffect
+
+    /** Open the print dialog for [file], a printable copy named [name]. */
+    data class Print(val file: File, val name: String, val pageCount: Int) : ViewerEffect
+
     /** Ask where to save the signed copy; see [ViewerViewModel.saveSignedCopy]. */
     data class SaveSigned(val suggestedName: String) : ViewerEffect
+
+    /** Ask where to save extracted pages; see [ViewerViewModel.saveExtract]. */
+    data class SaveExtract(val suggestedName: String) : ViewerEffect
+
+    /** Ask which folder the split PDFs go in; see [ViewerViewModel.splitInto]. */
+    data object PickSplitFolder : ViewerEffect
+    /** Show [info] about the open PDF, titled with its file [name]. */
+    data class ShowInfo(val name: String, val info: DocumentInfo) : ViewerEffect
 }
 
 class ViewerViewModel(application: Application) : AndroidViewModel(application) {
@@ -109,9 +157,14 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     private var originalSha256 = ""
     private var openedAt = Instant.now()
     private val editLog = ArrayList<AuditEvent?>()
+    private val redoLog = ArrayList<AuditEvent?>()
 
     /** The finished signed copy, in the cache, waiting for the user to pick where it goes. */
     private var pendingSignedCopy: File? = null
+
+    /** Pages to extract, or the parts to split into, waiting for the user to pick where they go. */
+    private var pendingExtract: List<Int>? = null
+    private var pendingSplit: List<List<Int>>? = null
 
     private val signingPrefs = application.getSharedPreferences("signing", Context.MODE_PRIVATE)
     private val _signerName = MutableStateFlow(signingPrefs.getString(KEY_SIGNER_NAME, "").orEmpty())
@@ -130,11 +183,27 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     private val context get() = getApplication<Application>()
 
+    // Text positions per page for the current revision, read with PdfBox from the working copy.
+    private val wordCache = HashMap<Int, List<PageWord>>()
+    private var textDocument: PDDocument? = null
+
+    private val _search = MutableStateFlow(SearchResults())
+
+    /** Results of the last [search]. Cleared whenever the document changes. */
+    val search: StateFlow<SearchResults> = _search.asStateFlow()
+    private var searchJob: Job? = null
+
     private val signatureStore = SignatureStore(File(application.filesDir, "signatures"))
     private val _savedSignatures = MutableStateFlow<Map<SignatureStore.Kind, Bitmap>>(emptyMap())
 
     /** The user's saved signature and initials, if they have drawn them. */
     val savedSignatures: StateFlow<Map<SignatureStore.Kind, Bitmap>> = _savedSignatures.asStateFlow()
+
+    private val annotatePrefs = application.getSharedPreferences("annotate", Context.MODE_PRIVATE)
+    private val _toolStyles = MutableStateFlow(loadToolStyles())
+
+    /** The colour and size last chosen for each Annotate tool. */
+    val toolStyles: StateFlow<Map<AnnotateTool, ToolStyle>> = _toolStyles.asStateFlow()
 
     private val _stamps = MutableStateFlow<List<PlacedStamp>>(emptyList())
     private var nextStampId = 1L
@@ -169,11 +238,40 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         originalSha256 = newSession.workingFile.inputStream().use { DocumentHash.sha256(it) }
                         openedAt = Instant.now()
                         editLog.clear()
+                        redoLog.clear()
                     }
                     _stamps.value = emptyList()
                     firstLoadLocked()
                 }
             }.onSuccess { remember(uri) }.getOrElse { ViewerState.Failed(it.message) }
+        }
+    }
+
+    /** Searches every page for [query], publishing matches page by page. A blank query clears. */
+    fun search(query: String) {
+        searchJob?.cancel()
+        val text = query.trim()
+        if (text.isEmpty()) {
+            _search.value = SearchResults()
+            return
+        }
+        _search.value = SearchResults(text, finished = false)
+        searchJob = viewModelScope.launch {
+            val found = ArrayList<TextMatch>()
+            var index = 0
+            while (true) {
+                // One page per turn of the lock, so pages keep rendering while a long PDF is searched.
+                val onPage = lock.withLock {
+                    val current = renderer ?: return@withLock null
+                    if (index >= current.pageCount) null else runCatching { current.find(index, text) }.getOrDefault(emptyList())
+                } ?: break
+                if (onPage.isNotEmpty()) {
+                    onPage.forEach { found += TextMatch(index, it) }
+                    _search.value = SearchResults(text, found.toList(), finished = false)
+                }
+                index++
+            }
+            _search.value = SearchResults(text, found.toList(), finished = true)
         }
     }
 
@@ -236,23 +334,83 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         PdfDocuments.load(context, other).use { PageEditor.append(document, it) }
     }
 
-    fun ink(page: Int, strokes: List<List<Offset>>, color: Annotator.Rgb) = edit { document ->
+    fun ink(page: Int, strokes: List<List<Offset>>, style: ToolStyle) = edit { document ->
         val toPdf = displayMapper(document, page)
-        Annotator.ink(document, page, strokes.map { stroke -> stroke.map(toPdf) }, color)
+        Annotator.ink(document, page, strokes.map { stroke -> stroke.map(toPdf) }, style.rgb, style.width)
     }
 
-    fun markText(page: Int, start: Offset, end: Offset, kind: Annotator.TextMarkup, color: Annotator.Rgb) =
+    fun markText(page: Int, start: Offset, end: Offset, kind: Annotator.TextMarkup, style: ToolStyle) =
         edit { document ->
-            Annotator.markText(document, page, listOf(boxOf(document, page, start, end)), kind, color)
+            Annotator.markText(document, page, listOf(boxOf(document, page, start, end)), kind, style.rgb, style.width)
         }
 
-    fun shape(page: Int, start: Offset, end: Offset, color: Annotator.Rgb) = edit { document ->
-        Annotator.shape(document, page, boxOf(document, page, start, end), color = color)
+    /**
+     * Marks text along [lines] (one box per line, as page fractions; see [PageText]). [comment]
+     * becomes the mark's note.
+     */
+    fun markLines(page: Int, lines: List<Rect>, kind: Annotator.TextMarkup, style: ToolStyle, comment: String? = null) =
+        edit { document ->
+            val boxes = lines.map { boxOf(document, page, it.topLeft, it.bottomRight) }
+            Annotator.markText(document, page, boxes, kind, style.rgb, style.width, comment)
+        }
+
+    private val _marks = MutableStateFlow<List<Mark>>(emptyList())
+
+    /** Every mark in the document as it is now, for tapping to edit and the Comments list. */
+    val marks: StateFlow<List<Mark>> = _marks.asStateFlow()
+
+    /** Changes a mark's colour, line width or comment; null leaves that part alone. */
+    fun editMark(page: Int, index: Int, color: Annotator.Rgb?, width: Float?, comment: String?) = edit { document ->
+        Marks.edit(document, page, index, color, width, comment)
     }
 
-    fun note(page: Int, at: Offset, text: String) = edit { document ->
-        Annotator.note(document, page, displayMapper(document, page)(at), text)
+    fun deleteMark(page: Int, index: Int) = edit { document -> Marks.delete(document, page, index) }
+
+    /** The words on [page] and where they are, for selecting text. Empty for scanned pages. */
+    suspend fun words(page: Int): List<PageWord> = lock.withLock {
+        wordCache[page] ?: withContext(Dispatchers.IO) {
+            runCatching {
+                val document = textDocument ?: (session?.let { PDDocument.load(it.workingFile, it.password) } ?: error("Nothing is open")).also { textDocument = it }
+                PageText.words(document, page)
+            }.getOrDefault(emptyList())
+        }.also { wordCache[page] = it }
     }
+
+    fun shape(page: Int, start: Offset, end: Offset, style: ToolStyle) = edit { document ->
+        Annotator.shape(document, page, boxOf(document, page, start, end), color = style.rgb, lineWidth = style.width)
+    }
+
+    fun note(page: Int, at: Offset, text: String, style: ToolStyle) = edit { document ->
+        Annotator.note(document, page, displayMapper(document, page)(at), text, style.rgb)
+    }
+
+    /** Places a [kind] stamp centred where the user tapped. */
+    fun stamp(page: Int, at: Offset, kind: Stamps.Kind) = edit { document ->
+        Stamps.add(document, page, displayMapper(document, page)(at), kind)
+    }
+
+    /** Adds a text box whose top-left corner is at [at]; [style]'s width is the font size. */
+    fun textBox(page: Int, at: Offset, text: String, style: ToolStyle) = edit { document ->
+        TextBoxes.add(document, page, displayMapper(document, page)(at), text, style.rgb, fontSize = style.width)
+    }
+
+    /** Remembers [style] for [tool], here and the next time the app opens. */
+    fun setToolStyle(tool: AnnotateTool, style: ToolStyle) {
+        _toolStyles.value += tool to style
+        annotatePrefs.edit().putString(tool.name, "${style.color.toArgb()},${style.width}").apply()
+    }
+
+    private fun loadToolStyles(): Map<AnnotateTool, ToolStyle> = AnnotateTool.entries.mapNotNull { tool ->
+        val saved = annotatePrefs.getString(tool.name, null)?.split(',') ?: return@mapNotNull null
+        val color = saved.getOrNull(0)?.toIntOrNull()?.let { Color(it) } ?: return@mapNotNull null
+        val width = saved.getOrNull(1)?.toFloatOrNull() ?: return@mapNotNull null
+        // A colour or size this version no longer offers falls back to the tool's default.
+        val default = tool.defaultStyle
+        tool to ToolStyle(
+            color.takeIf { it in tool.palette } ?: default.color,
+            width.takeIf { it in tool.widths } ?: default.width,
+        )
+    }.toMap()
 
     /** Removes the topmost mark under [at]. Links and form fields are left alone. */
     fun erase(page: Int, at: Offset) {
@@ -515,20 +673,195 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         pendingSignedCopy = null
     }
 
-    /** Shares the PDF as it is now, unsaved changes included, under the file's own name. */
-    fun share() {
+    /**
+     * Shares the PDF as it is now, unsaved changes included, in the form [option] asks for.
+     * [pages] (zero-based) are the pages to send for [ShareOption.SomePages] and [ShareOption.Images].
+     */
+    fun share(option: ShareOption = ShareOption.WithChanges, pages: List<Int> = emptyList()) {
         val uri = openedUri ?: return
         viewModelScope.launch {
-            val copy = runCatching {
+            val effect = runCatching {
+                lock.withLock {
+                    val current = session ?: error("Nothing is open")
+                    val name = withContext(Dispatchers.IO) { displayName(uri) }
+                    when (option) {
+                        ShareOption.WithChanges -> withContext(Dispatchers.IO) {
+                            ViewerEffect.Share(Sharing.sharedCopy(context, name).also { current.workingFile.copyTo(it, overwrite = true) })
+                        }
+                        ShareOption.Locked -> sharedPdf(current, name) { Flattener.flatten(it) }
+                        ShareOption.SomePages -> {
+                            require(pages.isNotEmpty())
+                            sharedPdf(current, Splitting.extractName(name, pages)) { PageEditor.keepOnly(it, pages) }
+                        }
+                        ShareOption.Images -> ViewerEffect.ShareImages(pageImagesLocked(pages, name), name)
+                    }
+                }
+            }.getOrElse { ViewerEffect.Message(R.string.share_failed) }
+            _effects.send(effect)
+        }
+    }
+
+    /**
+     * A changed copy of the working file to share as [name]. A locked PDF stays locked with its
+     * password. Call with [lock] held.
+     */
+    private suspend fun sharedPdf(current: EditSession, name: String, change: (PDDocument) -> Unit) =
+        withContext(Dispatchers.IO) {
+            val out = Sharing.sharedCopy(context, name)
+            PDDocument.load(current.workingFile, current.password).use { document ->
+                change(document)
+                PdfDocuments.keepProtection(document, current.password)
+                document.save(out)
+            }
+            ViewerEffect.Share(out)
+        }
+
+    /**
+     * Renders [pages] as JPEGs at 150 dpi (enough to read and print a page, small enough for chat
+     * apps), named after the document. Call with [lock] held.
+     */
+    private suspend fun pageImagesLocked(pages: List<Int>, name: String): List<File> {
+        require(pages.isNotEmpty() && pages.size <= MAX_SHARED_IMAGES)
+        val current = renderer ?: error("Nothing is open")
+        val dir = withContext(Dispatchers.IO) { Sharing.sharedFolder(context) }
+        val base = Sharing.safeName(name.removeSuffix(".pdf").removeSuffix(".PDF")).ifBlank { "page" }
+        return pages.map { index ->
+            val widthPx = (current.pageSizes[index].widthPt * 150f / 72f).roundToInt().coerceIn(1, 2400)
+            val page = current.renderPage(index, widthPx)
+            withContext(Dispatchers.IO) {
+                // Pages render onto a transparent bitmap, which JPEG would turn black.
+                val image = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888)
+                Canvas(image).apply {
+                    drawColor(android.graphics.Color.WHITE)
+                    drawBitmap(page, 0f, 0f, null)
+                }
+                page.recycle()
+                File(dir, "$base page ${index + 1}.jpg").also { file ->
+                    file.outputStream().use { image.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+                    image.recycle()
+                }
+            }
+        }
+    }
+
+    /** Asks where to save [pages] as a new PDF; [saveExtract] then writes them. */
+    fun extract(pages: List<Int>) {
+        val uri = openedUri ?: return
+        pendingExtract = pages
+        viewModelScope.launch {
+            val name = withContext(Dispatchers.IO) { displayName(uri) }
+            _effects.send(ViewerEffect.SaveExtract(Splitting.extractName(name, pages)))
+        }
+    }
+
+    /** Writes the pages chosen in [extract], unsaved changes included, to [target]. */
+    fun saveExtract(target: Uri) {
+        val pages = pendingExtract ?: return
+        pendingExtract = null
+        viewModelScope.launch {
+            val saved = runCatching {
                 lock.withLock {
                     withContext(Dispatchers.IO) {
                         val current = session ?: error("Nothing is open")
-                        Sharing.sharedCopy(context, displayName(uri)).also { current.workingFile.copyTo(it, overwrite = true) }
+                        val output = context.contentResolver.openOutputStream(target, "wt") ?: error("Cannot write $target")
+                        output.use { Splitting.writePart(current.workingFile, pages, it, current.password) }
+                    }
+                }
+            }.isSuccess
+            _effects.send(
+                if (saved) ViewerEffect.CountMessage(R.plurals.extract_saved, pages.size)
+                else ViewerEffect.Message(R.string.extract_failed),
+            )
+        }
+    }
+
+    fun cancelExtract() {
+        pendingExtract = null
+    }
+
+    /** Asks which folder to split into; [splitInto] then writes one PDF per part. */
+    fun split(parts: List<List<Int>>) {
+        pendingSplit = parts
+        _effects.trySend(ViewerEffect.PickSplitFolder)
+    }
+
+    /**
+     * Writes each part chosen in [split], unsaved changes included, as a new PDF in the folder
+     * [tree] (from the system folder picker), named like "Lease (part 1).pdf".
+     */
+    fun splitInto(tree: Uri) {
+        val parts = pendingSplit ?: return
+        val uri = openedUri ?: return
+        pendingSplit = null
+        viewModelScope.launch {
+            val saved = runCatching {
+                lock.withLock {
+                    withContext(Dispatchers.IO) {
+                        val current = session ?: error("Nothing is open")
+                        val name = displayName(uri)
+                        val resolver = context.contentResolver
+                        val folder = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+                        parts.forEachIndexed { i, pages ->
+                            val file = DocumentsContract.createDocument(resolver, folder, "application/pdf", Splitting.partName(name, i + 1))
+                                ?: error("Cannot create a file in $tree")
+                            val output = resolver.openOutputStream(file, "wt") ?: error("Cannot write $file")
+                            output.use { Splitting.writePart(current.workingFile, pages, it, current.password) }
+                        }
+                    }
+                }
+            }.isSuccess
+            _effects.send(
+                if (saved) ViewerEffect.CountMessage(R.plurals.split_saved, parts.size)
+                else ViewerEffect.Message(R.string.split_failed),
+            )
+        }
+    }
+
+    fun cancelSplit() {
+        pendingSplit = null
+    }
+
+    /** Locks the PDF with [password], or takes its password off when [password] is empty. One undo step. */
+    fun setPassword(password: String) {
+        val done = when {
+            password.isEmpty() -> R.string.password_removed
+            (_state.value as? ViewerState.Ready)?.isProtected == true -> R.string.password_changed
+            else -> R.string.password_added
+        }
+        update(done = done) { it.setPassword(password) }
+    }
+
+    /** Reads the details of the PDF as it is now, unsaved changes included, for Document info. */
+    fun documentInfo() {
+        val uri = openedUri ?: return
+        viewModelScope.launch {
+            val shown: Result<ViewerEffect> = runCatching {
+                lock.withLock {
+                    withContext(Dispatchers.IO) {
+                        val current = session ?: error("Nothing is open")
+                        ViewerEffect.ShowInfo(displayName(uri), DocumentInfo.read(current.workingFile, current.password))
                     }
                 }
             }
-            copy.onSuccess { _effects.send(ViewerEffect.Share(it)) }
-                .onFailure { _effects.send(ViewerEffect.Message(R.string.share_failed)) }
+            _effects.send(shown.getOrElse { ViewerEffect.Message(R.string.info_failed) })
+        }
+    }
+
+    /** Prints the PDF as it is now, unsaved changes included. */
+    fun print() {
+        val uri = openedUri ?: return
+        viewModelScope.launch {
+            val effect = runCatching {
+                lock.withLock {
+                    withContext(Dispatchers.IO) {
+                        val current = session ?: error("Nothing is open")
+                        val copy = File(context.cacheDir, "print/${UUID.randomUUID()}.pdf")
+                        Printing.printableCopy(current.workingFile, copy, current.password)
+                        ViewerEffect.Print(copy, displayName(uri), renderer?.pageCount ?: 0)
+                    }
+                }
+            }.getOrElse { ViewerEffect.Message(if (it is Printing.NotAllowed) R.string.print_not_allowed else R.string.print_failed) }
+            _effects.send(effect)
         }
     }
 
@@ -543,7 +876,22 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 withContext(Dispatchers.IO) {
                     session?.takeIf { it.canUndo }?.let {
                         it.undo()
-                        editLog.removeLastOrNull()
+                        // An undone edit that was not logged leaves the log as it is.
+                        if (editLog.isNotEmpty()) redoLog += editLog.removeAt(editLog.lastIndex)
+                    }
+                }
+                _state.value = reloadLocked()
+            }
+        }
+    }
+
+    fun redo() {
+        viewModelScope.launch {
+            lock.withLock {
+                withContext(Dispatchers.IO) {
+                    session?.takeIf { it.canRedo }?.let {
+                        it.redo()
+                        if (redoLog.isNotEmpty()) editLog += redoLog.removeAt(redoLog.lastIndex)
                     }
                 }
                 _state.value = reloadLocked()
@@ -601,14 +949,25 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     private class NothingChanged : Exception()
 
     /** Applies [change] as one undo step. [event] goes on the audit page if the user finishes signing. */
-    private fun edit(@StringRes onNoChange: Int? = null, event: AuditEvent? = null, change: (PDDocument) -> Unit) {
+    private fun edit(@StringRes onNoChange: Int? = null, event: AuditEvent? = null, change: (PDDocument) -> Unit) =
+        update(onNoChange, event) { it.edit(change) }
+
+    /** Makes one undo step through [step], like [edit] does, then shows [done] if given. */
+    private fun update(
+        @StringRes onNoChange: Int? = null,
+        event: AuditEvent? = null,
+        @StringRes done: Int? = null,
+        step: (EditSession) -> Unit,
+    ) {
         viewModelScope.launch {
             lock.withLock {
-                val result = runCatching { withContext(Dispatchers.IO) { session?.edit(change) } }
+                val result = runCatching { withContext(Dispatchers.IO) { session?.let(step) } }
                 when (val error = result.exceptionOrNull()) {
                     null -> {
                         editLog += event?.copy(at = Instant.now())
+                        redoLog.clear()
                         _state.value = reloadLocked()
+                        done?.let { _effects.send(ViewerEffect.Message(it)) }
                     }
                     is NothingChanged -> onNoChange?.let { _effects.send(ViewerEffect.Message(it)) }
                     else -> _effects.send(ViewerEffect.Message(R.string.edit_failed))
@@ -646,19 +1005,35 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         renderer?.close()
         renderer = null
         cache.evictAll()
+        textDocument?.close()
+        textDocument = null
+        wordCache.clear()
+        searchJob?.cancel()
+        _search.value = SearchResults()
         revision++
         val next = PdfRenderer.open(context, Uri.fromFile(current.workingFile), current.password.ifEmpty { null })
+        _marks.value = withContext(Dispatchers.IO) {
+            runCatching { PDDocument.load(current.workingFile, current.password).use { Marks.list(it) } }.getOrDefault(emptyList())
+        }
         renderer = next
         val hasSignature = editLog.any { it?.type == AuditEvent.Type.Signed }
-        return ViewerState.Ready(next.pageSizes, revision, current.canUndo, current.hasUnsavedChanges, hasSignature)
+        val outline = runCatching { next.outline() }.getOrDefault(emptyList())
+        return ViewerState.Ready(
+            next.pageSizes, revision, current.canUndo, current.canRedo, current.hasUnsavedChanges, hasSignature, outline,
+            isProtected = current.password.isNotEmpty(),
+        )
     }
 
-    /** Lists [uri] in the Files tab; in the history too if the app can reopen it later. */
+    /**
+     * Lists [uri] in the Files tab; in the history too if the app can reopen it later and history
+     * is not paused in Settings.
+     */
     private suspend fun remember(uri: Uri) {
         val name = withContext(Dispatchers.IO) { displayName(uri) }
         val lasting = uri.scheme == "file" ||
             context.contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
-        getApplication<FreePdfApp>().documents.opened(uri.toString(), name, remember = lasting)
+        val app = getApplication<FreePdfApp>()
+        app.documents.opened(uri.toString(), name, remember = lasting && app.settings.rememberHistory.value)
     }
 
     private fun displayName(uri: Uri): String {
@@ -672,6 +1047,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     override fun onCleared() {
         renderer?.close()
+        textDocument?.close()
         session?.close()
         cache.evictAll()
         pendingSignedCopy?.delete()

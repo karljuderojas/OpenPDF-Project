@@ -10,7 +10,8 @@ import java.nio.file.StandardCopyOption
 /**
  * A private working copy of the open PDF. Edits are applied to the copy with PdfBox and the viewer
  * re-renders it, so nothing touches the user's file until [writeTo]. Every edit keeps a snapshot
- * of the copy before it, which is what [undo] restores.
+ * of the copy before it, and the password then in effect, which is what [undo] restores; an
+ * undone edit can be put back with [redo] until the next new edit.
  *
  * Not thread-safe: the caller serialises edits (the viewer does them under its render lock).
  */
@@ -18,11 +19,18 @@ class EditSession(private val dir: File, source: InputStream) {
 
     val workingFile = File(dir, "working.pdf")
 
-    private val undoStack = ArrayDeque<File>()
+    /** A saved copy of the document, which version of it that was, and the password that opens it. */
+    private class Snapshot(val file: File, val version: Int, val password: String)
+
+    private val undoStack = ArrayDeque<Snapshot>()
+    private val redoStack = ArrayDeque<Snapshot>()
     private var snapshotCount = 0
 
-    /** Undo depth at the last save; -1 once that state has been trimmed off the undo stack. */
-    private var savedDepth = 0
+    // Every state of the working copy gets its own number, so undoing back to the saved state,
+    // or redoing forward to it, counts as saved, while a new edit made after an undo does not.
+    private var versionCount = 0
+    private var version = 0
+    private var savedVersion = 0
 
     init {
         dir.mkdirs()
@@ -40,44 +48,75 @@ class EditSession(private val dir: File, source: InputStream) {
     fun unlock(candidate: String): Boolean = PdfDocuments.opens(workingFile, candidate).also { if (it) password = candidate }
 
     val canUndo: Boolean get() = undoStack.isNotEmpty()
-    val hasUnsavedChanges: Boolean get() = undoStack.size != savedDepth
+    val canRedo: Boolean get() = redoStack.isNotEmpty()
+    val hasUnsavedChanges: Boolean get() = version != savedVersion
 
     /** Applies [change] to the working copy. If it throws, the copy is left as it was. */
-    fun edit(change: (PDDocument) -> Unit) {
+    fun edit(change: (PDDocument) -> Unit) = commit(password) { document ->
+        change(document)
+        PdfDocuments.keepProtection(document, password)
+    }
+
+    /**
+     * Locks the working copy with [newPassword] from now on, or removes its password when
+     * [newPassword] is empty, as one undoable edit. See [PdfDocuments.setProtection].
+     */
+    fun setPassword(newPassword: String) = commit(newPassword) { PdfDocuments.setProtection(it, newPassword) }
+
+    /** Saves [change] as the new working copy, which [nextPassword] opens, and records an undo step. */
+    private fun commit(nextPassword: String, change: (PDDocument) -> Unit) {
         val next = File(dir, "next.pdf")
         try {
             PDDocument.load(workingFile, password).use { document ->
                 change(document)
-                PdfDocuments.keepProtection(document, password)
                 document.save(next)
             }
         } catch (e: Throwable) {
             next.delete()
             throw e
         }
-        val snapshot = File(dir, "undo-${snapshotCount++}.pdf")
-        moveOver(workingFile, snapshot)
+        undoStack.addLast(stash())
         moveOver(next, workingFile)
-        undoStack.addLast(snapshot)
-        if (undoStack.size > MAX_UNDO) {
-            undoStack.removeFirst().delete()
-            savedDepth--
-        }
+        password = nextPassword
+        version = ++versionCount
+        redoStack.forEach { it.file.delete() }
+        redoStack.clear()
+        if (undoStack.size > MAX_UNDO) undoStack.removeFirst().file.delete()
     }
 
     fun undo() {
         val snapshot = undoStack.removeLastOrNull() ?: return
-        moveOver(snapshot, workingFile)
+        redoStack.addLast(stash())
+        restore(snapshot)
+    }
+
+    fun redo() {
+        val snapshot = redoStack.removeLastOrNull() ?: return
+        undoStack.addLast(stash())
+        restore(snapshot)
     }
 
     /** Copies the working copy to [output] and marks the current state as saved. */
     fun writeTo(output: OutputStream) {
         workingFile.inputStream().use { it.copyTo(output) }
-        savedDepth = undoStack.size
+        savedVersion = version
     }
 
     fun close() {
         dir.deleteRecursively()
+    }
+
+    /** Moves the working copy aside as a snapshot of the current version. */
+    private fun stash(): Snapshot {
+        val file = File(dir, "snapshot-${snapshotCount++}.pdf")
+        moveOver(workingFile, file)
+        return Snapshot(file, version, password)
+    }
+
+    private fun restore(snapshot: Snapshot) {
+        moveOver(snapshot.file, workingFile)
+        version = snapshot.version
+        password = snapshot.password
     }
 
     private fun moveOver(from: File, to: File) {

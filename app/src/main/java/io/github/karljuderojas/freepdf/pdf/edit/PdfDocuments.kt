@@ -3,6 +3,7 @@ package io.github.karljuderojas.freepdf.pdf.edit
 import android.content.Context
 import android.net.Uri
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import java.io.File
@@ -41,5 +42,24 @@ object PdfDocuments {
         val permissions = document.currentAccessPermission
         val owner = if (permissions.isOwnerPermission) password else UUID.randomUUID().toString()
         document.protect(StandardProtectionPolicy(owner, password, permissions).apply { encryptionKeyLength = 256 })
+    }
+
+    /**
+     * Locks [document] so that [password] opens it, or takes the password off when [password] is
+     * empty, with AES-256. If it was not locked, or was opened with its owner password, [password]
+     * becomes the owner password too and everything is allowed. Otherwise only its permissions
+     * stay as they were, under a random owner password as in [keepProtection], so restrictions set
+     * by someone else are not dropped.
+     */
+    fun setProtection(document: PDDocument, password: String) {
+        val permissions = document.currentAccessPermission
+        val isOwner = !document.isEncrypted || permissions.isOwnerPermission
+        when {
+            isOwner && password.isEmpty() -> document.isAllSecurityToBeRemoved = true
+            isOwner -> document.protect(StandardProtectionPolicy(password, password, AccessPermission()).apply { encryptionKeyLength = 256 })
+            else -> document.protect(
+                StandardProtectionPolicy(UUID.randomUUID().toString(), password, permissions).apply { encryptionKeyLength = 256 },
+            )
+        }
     }
 }
