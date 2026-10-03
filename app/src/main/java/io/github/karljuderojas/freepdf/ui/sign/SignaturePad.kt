@@ -68,6 +68,7 @@ import androidx.core.content.res.ResourcesCompat
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
+import io.github.karljuderojas.freepdf.ui.create.CropBox
 import kotlin.math.hypot
 
 private val InkColors = listOf(R.string.ink_black to Color(0xFF111111), R.string.ink_blue to Color(0xFF1A3FA8))
@@ -75,7 +76,7 @@ private val InkColors = listOf(R.string.ink_black to Color(0xFF111111), R.string
 /** Bundled script fonts for typed signatures, both under the SIL Open Font License (see docs/licenses). */
 val ScriptFonts = listOf(R.font.dancing_script, R.font.caveat)
 
-private enum class PadTab(@StringRes val label: Int) { Draw(R.string.pad_draw), Type(R.string.pad_type) }
+private enum class PadTab(@StringRes val label: Int) { Draw(R.string.pad_draw), Type(R.string.pad_type), Photo(R.string.pad_photo) }
 
 /**
  * Draw or type a signature or initials once; it is saved on the device for next time. Drawings
@@ -102,6 +103,10 @@ fun SignaturePadDialog(
     var tooSimple by remember { mutableStateOf(false) }
     var typed by rememberSaveable { mutableStateOf(if (initials) TypedSignature.initialsOf(typedName) else typedName) }
     var font by rememberSaveable { mutableIntStateOf(ScriptFonts.first()) }
+    // The Photo tab's picture and crop live here so they survive switching tabs.
+    var photoPath by rememberSaveable { mutableStateOf<String?>(null) }
+    var crop by rememberSaveable(stateSaver = CropSaver) { mutableStateOf(CropBox.Whole) }
+    var photoResult by remember { mutableStateOf<Bitmap?>(null) }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
@@ -113,6 +118,8 @@ fun SignaturePadDialog(
                 Text(
                     stringResource(
                         when {
+                            tab == PadTab.Photo && initials -> R.string.pad_title_photo_initials
+                            tab == PadTab.Photo -> R.string.pad_title_photo_signature
                             tab == PadTab.Type && initials -> R.string.pad_title_type_initials
                             tab == PadTab.Type -> R.string.pad_title_type_signature
                             initials -> R.string.pad_title_initials
@@ -174,6 +181,15 @@ fun SignaturePadDialog(
                             modifier = Modifier.padding(top = 8.dp),
                         )
                     }
+                    PadTab.Photo -> SignaturePhotoPane(
+                        photoPath = photoPath,
+                        onPhotoPath = { photoPath = it },
+                        crop = crop,
+                        onCrop = { crop = it },
+                        ink = ink,
+                        result = photoResult,
+                        onResult = { photoResult = it },
+                    )
                     PadTab.Type -> {
                         OutlinedTextField(
                             value = typed,
@@ -233,9 +249,14 @@ fun SignaturePadDialog(
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
                     Button(
-                        enabled = if (tab == PadTab.Draw) strokes.isNotEmpty() else typed.isNotBlank(),
+                        enabled = when (tab) {
+                            PadTab.Draw -> strokes.isNotEmpty()
+                            PadTab.Type -> typed.isNotBlank()
+                            PadTab.Photo -> photoResult != null
+                        },
                         onClick = {
                             when {
+                                tab == PadTab.Photo -> photoResult?.let { onSave(it, SignatureMethod.Uploaded) }
                                 tab == PadTab.Type -> {
                                     val typeface = ResourcesCompat.getFont(context, font) ?: Typeface.SERIF
                                     onSave(TypedSignature.render(typed.trim(), typeface, ink.toArgb()), SignatureMethod.Typed)
@@ -253,6 +274,12 @@ fun SignaturePadDialog(
         }
     }
 }
+
+/** Keeps the Photo tab's crop box in the instance state as four floats. */
+private val CropSaver = androidx.compose.runtime.saveable.Saver<CropBox, List<Float>>(
+    save = { listOf(it.left, it.top, it.right, it.bottom) },
+    restore = { CropBox(it[0], it[1], it[2], it[3]) },
+)
 
 /**
  * Saves the pad's strokes in the instance state as one float array per stroke (x, y, x, y, ...),
