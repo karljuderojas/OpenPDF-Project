@@ -210,6 +210,11 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
     val readAloud: ReadAloud by readAloudDelegate
 
+    /** Pauses reading aloud if it is going, without starting the speech engine when it is not. */
+    fun pauseReadAloud() {
+        if (readAloudDelegate.isInitialized()) readAloud.pause()
+    }
+
     /** The session this view model shows and edits; null until [open] has attached one. */
     private var doc: DocumentSession? = null
     private val session: EditSession? get() = doc?.session

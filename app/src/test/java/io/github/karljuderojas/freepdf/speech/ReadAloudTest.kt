@@ -1,5 +1,6 @@
 package io.github.karljuderojas.freepdf.speech
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -125,6 +126,71 @@ class ReadAloudTest {
         assertTrue(reader.state.value.unavailable)
         reader.start(0)
         assertFalse(reader.state.value.unavailable)
+    }
+
+    @Test
+    fun anEngineThatNeverStartsIsReportedEveryTimeNotJustOnce() {
+        // Like a phone with no speech engine: every attempt to speak fails as it starts.
+        val broken = object : Speaker {
+            override var listener: Speaker.Listener? = null
+            var attempts = 0
+            override fun speak(text: String, id: String) {
+                attempts++
+                listener?.onError(id)
+            }
+            override fun stop() = Unit
+            override fun shutdown() = Unit
+        }
+        val reader = ReadAloud(broken, CoroutineScope(SupervisorJob() + Dispatchers.Unconfined), { pages.size }) { pages[it] }
+        reader.start(0)
+        assertTrue(reader.state.value.unavailable)
+        assertFalse(reader.state.value.active)
+        reader.start(0)
+        assertEquals("The second try reaches the engine again", 2, broken.attempts)
+        assertTrue("and is reported again rather than hanging", reader.state.value.unavailable)
+        assertFalse(reader.state.value.active)
+    }
+
+    @Test
+    fun theUnavailableMessageIsClearedOnceAcknowledged() {
+        reader.start(0)
+        speaker.listener!!.onError(speaker.lastId)
+        assertTrue(reader.state.value.unavailable)
+        reader.acknowledgeUnavailable()
+        assertFalse(reader.state.value.unavailable)
+    }
+
+    @Test
+    fun pausingWhileTheFirstPageLoadsThenPlayingLoadsItAgain() {
+        // Text extraction waits on the document lock; the page is released by completing the gate.
+        val gate = CompletableDeferred<Unit>()
+        val slow = ReadAloud(speaker, CoroutineScope(SupervisorJob() + Dispatchers.Unconfined), { pages.size }) { page ->
+            gate.await()
+            pages[page]
+        }
+        slow.start(0)
+        assertTrue(speaker.spoken.isEmpty())
+        slow.pause()
+        assertFalse(slow.state.value.speaking)
+        slow.resume()
+        assertTrue(slow.state.value.speaking)
+        assertTrue("Nothing to say until the page is loaded", speaker.spoken.isEmpty())
+        gate.complete(Unit)
+        assertEquals(listOf("One a."), speaker.spoken)
+        assertEquals("One a.", slow.state.value.text)
+        assertTrue(slow.state.value.speaking)
+    }
+
+    @Test
+    fun losingTheSoundPausesWithThePlaceKept() {
+        reader.start(0)
+        reader.next()
+        speaker.listener!!.onInterrupted()
+        assertTrue(reader.state.value.active)
+        assertFalse(reader.state.value.speaking)
+        assertEquals("One b.", reader.state.value.text)
+        reader.resume()
+        assertEquals(listOf("One a.", "One b.", "One b."), speaker.spoken)
     }
 
     @Test
