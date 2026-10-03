@@ -98,6 +98,7 @@ import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
+import io.github.karljuderojas.freepdf.print.Printing
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
@@ -117,6 +118,7 @@ sealed interface ViewerAction {
     data class Move(val from: Int, val to: Int) : ViewerAction
     data object Merge : ViewerAction
     data object Share : ViewerAction
+    data object Print : ViewerAction
     data class Search(val query: String) : ViewerAction
     data class Unlock(val password: String) : ViewerAction
 
@@ -204,6 +206,7 @@ fun ViewerScreen(
                 is ViewerEffect.SaveAs -> saveAsPicker.launch(effect.suggestedName)
                 ViewerEffect.Close -> onBack()
                 is ViewerEffect.Share -> Sharing.shareFile(context, effect.file)
+                is ViewerEffect.Print -> Printing.print(context, effect.file, effect.name, effect.pageCount)
                 is ViewerEffect.SaveSigned -> signedCopyPicker.launch(effect.suggestedName)
             }
         }
@@ -236,6 +239,7 @@ fun ViewerScreen(
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
                 ViewerAction.Merge -> mergePicker.launch(arrayOf("application/pdf"))
                 ViewerAction.Share -> viewModel.share()
+                ViewerAction.Print -> viewModel.print()
                 is ViewerAction.Search -> viewModel.search(action.query)
                 is ViewerAction.Unlock -> viewModel.unlock(action.password)
                 is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.style)
@@ -574,6 +578,7 @@ fun ViewerContent(
                 else -> ToolStrip(mode, selectedTool = null, onToolSelected = {
                     when (it) {
                         R.string.tool_share -> onAction(ViewerAction.Share)
+                        R.string.tool_print -> onAction(ViewerAction.Print)
                         R.string.tool_comments -> showComments = true
                     }
                 })
