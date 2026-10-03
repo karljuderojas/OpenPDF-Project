@@ -306,6 +306,13 @@
     <string name="open_documents_viewing">Viewing</string>
     <string name="open_documents_close_all">Close all</string>
     <string name="open_documents_open_another">Open another</string>
+    <!-- Reading modes -->
+    <string name="page_colors">Page colors</string>
+    <string name="page_colors_normal">Normal</string>
+    <string name="page_colors_night">Night</string>
+    <string name="page_colors_sepia">Sepia</string>
+    <string name="settings_reading">Reading</string>
+    <string name="settings_page_colors_detail">Night and sepia are easier on the eyes in the dark. Your PDF is not changed.</string>
     <!-- Tips -->
     <string name="tip_read_zoom">Pinch to zoom. Double-tap to go back to the full page.</string>
     <string name="tip_annotate">Pick a tool, then mark the page. Pick it again to scroll with one finger.</string>
