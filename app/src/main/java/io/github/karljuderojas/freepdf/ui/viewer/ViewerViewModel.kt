@@ -52,6 +52,7 @@ import io.github.karljuderojas.freepdf.pdf.edit.TextEditing
 import io.github.karljuderojas.freepdf.pdf.edit.WatermarkStyle
 import io.github.karljuderojas.freepdf.pdf.edit.Watermarks
 import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
+import io.github.karljuderojas.freepdf.pdf.redact.RedactFill
 import io.github.karljuderojas.freepdf.pdf.redact.Redactor
 import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
 import io.github.karljuderojas.freepdf.pdf.render.PageBox
@@ -286,12 +287,8 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
         set(value) = keep(KEY_PENDING_EXTRACT, value?.toIntArray())
 
     private var pendingRedaction: List<RedactBox>?
-        get() = handle.get<FloatArray>(KEY_PENDING_REDACTION)?.toList()?.chunked(5)
-            ?.map { (page, left, top, right, bottom) -> RedactBox(page.toInt(), Rect(left, top, right, bottom)) }
-        set(value) = keep(
-            KEY_PENDING_REDACTION,
-            value?.flatMap { listOf(it.page.toFloat(), it.rect.left, it.rect.top, it.rect.right, it.rect.bottom) }?.toFloatArray(),
-        )
+        get() = handle.get<FloatArray>(KEY_PENDING_REDACTION)?.toList()?.let(::unflattenRedactBoxes)
+        set(value) = keep(KEY_PENDING_REDACTION, value?.let(::flattenRedactBoxes)?.toFloatArray())
 
     // Each part as its length followed by its pages.
     private var pendingSplit: List<List<Int>>?
@@ -1234,7 +1231,7 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
                             var redacted: Redactor.Result? = null
                             SafeWrite.write(context, target) { out ->
                                 PDDocument.load(current.workingFile, current.password).use { document ->
-                                    redacted = Redactor.redact(document, redactAreas(document, boxes)) { page, of ->
+                                    redacted = Redactor.redact(document, redactAreas(document, boxes), redactFills(boxes)) { page, of ->
                                         _redacting.value = RedactProgress(page, of)
                                     }
                                     PdfDocuments.keepProtection(document, current.password)
@@ -1286,6 +1283,10 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
                 }
             }
         }
+
+    /** The box colour of each area [redactAreas] gives, in the same order. */
+    private fun redactFills(boxes: List<RedactBox>): Map<Int, List<RedactFill>> =
+        boxes.groupBy { it.page }.mapValues { (_, onPage) -> onPage.map { it.fill } }
 
     fun cancelRedaction() {
         pendingRedaction = null

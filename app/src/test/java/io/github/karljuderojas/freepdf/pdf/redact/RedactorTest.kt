@@ -781,6 +781,53 @@ class RedactorTest {
         }
     }
 
+    @Test
+    fun paintsEachAreaWithTheBoxColourAskedFor() {
+        PDDocument().use { source ->
+            // Black text on the page, and white text on a dark band.
+            source.addPage(
+                "BT /F1 12 Tf 72 700 Td (Card: 4111) Tj ET " +
+                    "0.1 0.15 0.3 rg 60 560 300 30 re f BT 1 1 1 rg /F1 12 Tf 72 572 Td (Member: 9876) Tj ET",
+            )
+            val black = boxOf("Card: 4111", 12f, 72f, 700f, from = 6, to = 10)
+            val white = boxOf("Member: 9876", 12f, 72f, 572f, from = 8, to = 12)
+            val result = Redactor.redact(
+                source,
+                mapOf(0 to listOf(black, white)),
+                mapOf(0 to listOf(RedactFill.Black, RedactFill.White)),
+            )
+            assertEquals(8, result.textCharacters)
+
+            roundTrip(source).use { saved ->
+                val text = textOf(saved)
+                assertFalse(text, text.contains("4111"))
+                assertFalse(text, text.contains("9876"))
+                assertTrue(text, text.contains("Member:"))
+                // The band is kept, and both boxes are page content in their own colours, last on the page.
+                val ops = operators(saved)
+                assertEquals(listOf("f", "f", "f"), ops.filter { it == "f" })
+                val raw = rawContent(saved)
+                val boxes = raw.substring(raw.lastIndexOf("ET"))
+                assertTrue(boxes, boxes.contains("0 0 0 rg"))
+                assertTrue(boxes, boxes.contains("1 1 1 rg"))
+                assertTrue(saved.getPage(0).annotations.isEmpty())
+            }
+        }
+    }
+
+    @Test
+    fun areasWithoutAColourGetABlackBox() {
+        PDDocument().use { source ->
+            source.addPage("BT /F1 12 Tf 72 700 Td (hello) Tj ET")
+            Redactor.redact(source, mapOf(0 to listOf(PdfRect(300f, 300f, 400f, 340f), PdfRect(300f, 400f, 400f, 440f))), mapOf(0 to listOf(RedactFill.White)))
+            roundTrip(source).use { saved ->
+                val raw = rawContent(saved)
+                assertTrue(raw, raw.contains("1 1 1 rg"))
+                assertTrue(raw, raw.contains("0 0 0 rg"))
+            }
+        }
+    }
+
     // ---- round 3: forms without a box or resources, stencil masks, attachments ----
 
     @Test
@@ -1112,12 +1159,22 @@ class RedactorTest {
         PDDocument().use { source ->
             source.addPage(
                 "BT /F1 16 Tf 72 720 Td (Patient record) Tj 0 -30 Td /F1 12 Tf (Name: Alice Johnson) Tj 0 -20 Td " +
-                    "(Date of birth: 04/12/1986) Tj 0 -20 Td (SSN: 123-45-6789) Tj 0 -20 Td (Diagnosis: seasonal allergies) Tj ET",
+                    "(Date of birth: 04/12/1986) Tj 0 -20 Td (SSN: 123-45-6789) Tj 0 -20 Td (Diagnosis: seasonal allergies) Tj ET " +
+                    // A dark banner with white text, where a black box would not show: it gets a white one.
+                    "0.12 0.2 0.4 rg 60 560 300 30 re f BT 1 1 1 rg /F1 12 Tf 72 572 Td (Member ID: 9876-5432) Tj ET",
             )
+            val member = "Member ID: 9876-5432"
             val ssn = "SSN: 123-45-6789"
             Redactor.redact(
                 source,
-                mapOf(0 to listOf(boxOf(ssn, 12f, 72f, 650f, from = 5, to = ssn.length), boxOf("Date of birth: 04/12/1986", 12f, 72f, 670f, 15, 25))),
+                mapOf(
+                    0 to listOf(
+                        boxOf(ssn, 12f, 72f, 650f, from = 5, to = ssn.length),
+                        boxOf("Date of birth: 04/12/1986", 12f, 72f, 670f, 15, 25),
+                        boxOf(member, 12f, 72f, 572f, from = 11, to = member.length),
+                    ),
+                ),
+                mapOf(0 to listOf(RedactFill.Black, RedactFill.Black, RedactFill.White)),
             )
             val out = File("build/outputs/qa/redacted-example.pdf").apply { parentFile?.mkdirs() }
             source.save(out)
@@ -1125,6 +1182,7 @@ class RedactorTest {
         PDDocument.load(File("build/outputs/qa/redacted-example.pdf")).use { saved ->
             assertNotNull(saved)
             assertFalse(textOf(saved).contains("6789"))
+            assertFalse(textOf(saved).contains("9876"))
         }
     }
 }

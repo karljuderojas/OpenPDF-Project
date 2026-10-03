@@ -29,6 +29,7 @@ import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
@@ -114,6 +115,7 @@ import io.github.karljuderojas.freepdf.ui.viewer.GoToPageDialog
 import io.github.karljuderojas.freepdf.ui.viewer.SearchResults
 import io.github.karljuderojas.freepdf.ui.viewer.TextMatch
 import io.github.karljuderojas.freepdf.ui.viewer.PlacedStamp
+import io.github.karljuderojas.freepdf.pdf.redact.RedactFill
 import io.github.karljuderojas.freepdf.ui.viewer.RedactBox
 import io.github.karljuderojas.freepdf.ui.viewer.RedactCheck
 import io.github.karljuderojas.freepdf.ui.viewer.RedactProgress
@@ -1352,6 +1354,38 @@ class ScreenshotTest {
         viewer(ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions())
     }
 
+    @Test
+    fun viewerRedactWhiteBoxes() {
+        // White chosen for new marks: the company name keeps its black boxes, the line marked after it gets white ones.
+        val from = wordIndex(0, "Lakeside")
+        val white = sampleWords[0].subList(from, from + 2).map { RedactBox(0, Rect(it.left, it.top, it.right, it.bottom), RedactFill.White) }
+        show { viewer(ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions() + white, redactFill = RedactFill.White) }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("redact-fill-white").assertIsSelected()
+        captureRoot("viewer_redact_white")
+    }
+
+    @Test
+    fun viewerRedactMarksGetTheChosenColour() {
+        val actions = mutableListOf<ViewerAction>()
+        show { viewer(ViewerMode.Edit, tool = R.string.tool_redact, onAction = { actions += it }) }
+        composeRule.onNodeWithTag("redact-fill-white").performClick()
+        val from = wordIndex(0, "Northwind")
+        val layer = "annotation-layer-0"
+        composeRule.onNodeWithTag(layer).performTouchInput {
+            down(wordCentre(layer, 0, from))
+            moveTo(wordCentre(layer, 0, from + 1))
+            up()
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Apply").performClick()
+        composeRule.waitForIdle()
+        // The confirmation asks for the marks to be checked, and they carry the colour picked before marking.
+        val boxes = actions.filterIsInstance<ViewerAction.CheckRedaction>().last().boxes
+        assertTrue(boxes.isNotEmpty())
+        assertTrue(boxes.toString(), boxes.all { it.fill == RedactFill.White })
+    }
+
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerRedactConfirm() {
@@ -1909,6 +1943,7 @@ class ScreenshotTest {
         selectedStamp: Long? = null,
         redactions: List<RedactBox> = emptyList(),
         confirmRedact: Boolean = false,
+        redactFill: RedactFill? = null,
         redactCheck: RedactCheck? = null,
         redactProgress: RedactProgress? = null,
         onAction: (ViewerAction) -> Unit = {},
@@ -1972,6 +2007,7 @@ class ScreenshotTest {
             initialSelectedStamp = selectedStamp,
             initialRedactions = redactions,
             initialConfirmRedact = confirmRedact,
+            initialRedactFill = redactFill,
             redactCheck = redactCheck,
             redactProgress = redactProgress,
             onAction = onAction,
