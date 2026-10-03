@@ -1078,7 +1078,9 @@ fun ViewerContent(
                 marks = marks,
                 onGoToPage = { page -> scope.launch { listState.animateScrollToItem(page / columns) } },
                 onOpenMark = { mark ->
-                    if (mode != ViewerMode.Annotate) mode = ViewerMode.Read
+                    // Mark editing happens while reading, or in Annotate with no tool picked. Done
+                    // is taken on the way out of Sign or Edit, so stamps still being placed are kept.
+                    if (mode != ViewerMode.Annotate) backToReading()
                     selectedTool = null
                     returnToPage = mark.page
                     pickedMark = mark.page to mark.index
@@ -1166,7 +1168,7 @@ fun ViewerContent(
                                 LinkLayer(page, onPage) { link ->
                                     when (val target = link.target) {
                                         is LinkTarget.Web -> openingLink = target.uri
-                                        is LinkTarget.Page -> scope.launch { listState.animateScrollToItem(target.index.coerceIn(0, pageCount - 1)) }
+                                        is LinkTarget.Page -> scope.launch { listState.animateScrollToItem(target.index.coerceIn(0, pageCount - 1) / columns) }
                                     }
                                 }
                             }
