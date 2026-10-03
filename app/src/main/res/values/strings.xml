@@ -300,6 +300,13 @@
     <string name="settings_version">%1$s %2$s</string>
     <string name="settings_about_detail">Free and open source under the Apache 2.0 license. No ads, no account, and your files never leave this phone.</string>
     <string name="settings_source_code">Source code</string>
+    <!-- Reading modes -->
+    <string name="page_colors">Page colors</string>
+    <string name="page_colors_normal">Normal</string>
+    <string name="page_colors_night">Night</string>
+    <string name="page_colors_sepia">Sepia</string>
+    <string name="settings_reading">Reading</string>
+    <string name="settings_page_colors_detail">Night and sepia are easier on the eyes in the dark. Your PDF is not changed.</string>
     <!-- Tips -->
     <string name="tip_read_zoom">Pinch to zoom. Double-tap to go back to the full page.</string>
     <string name="tip_annotate">Pick a tool, then mark the page. Pick it again to scroll with one finger.</string>
