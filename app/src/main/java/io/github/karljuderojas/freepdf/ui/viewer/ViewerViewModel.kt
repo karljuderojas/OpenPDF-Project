@@ -35,6 +35,8 @@ import io.github.karljuderojas.freepdf.pdf.annotate.TextBoxes
 import io.github.karljuderojas.freepdf.pdf.displayToPdf
 import io.github.karljuderojas.freepdf.pdf.edit.EditSession
 import io.github.karljuderojas.freepdf.pdf.edit.Flattener
+import io.github.karljuderojas.freepdf.pdf.edit.CropMargins
+import io.github.karljuderojas.freepdf.pdf.edit.PageCrop
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import io.github.karljuderojas.freepdf.pdf.edit.PdfText
@@ -450,6 +452,11 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun rotatePages(pages: Set<Int>) = edit(movesPages = true) { PageEditor.rotate(it, pages, 90) }
+
+    /** Trims [pages] by [margins], or shows them in full again when [margins] is null. */
+    fun cropPages(pages: Set<Int>, margins: CropMargins?) = edit(movesPages = true) {
+        if (margins == null) PageCrop.reset(it, pages) else PageCrop.crop(it, pages, margins)
+    }
 
     fun deletePages(pages: Set<Int>) {
         val pageCount = (_state.value as? ViewerState.Ready)?.pageSizes?.size ?: return

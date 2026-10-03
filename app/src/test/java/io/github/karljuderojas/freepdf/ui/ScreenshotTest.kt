@@ -11,6 +11,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -22,6 +23,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
@@ -832,6 +834,22 @@ class ScreenshotTest {
         composeRule.onNodeWithText("Split").performClick()
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_split.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesCrop() {
+        show { viewer(ViewerMode.Pages, sixPages, selectedPage = 1) }
+        composeRule.onNodeWithText("Crop").performScrollTo()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Crop").performClick()
+        composeRule.waitForIdle()
+        // Trim a bit off three edges so the sketch shows what stays.
+        for ((tag, amount) in listOf("crop-left" to 0.1f, "crop-top" to 0.2f, "crop-right" to 0.05f)) {
+            composeRule.onNodeWithTag(tag).performSemanticsAction(SemanticsActions.SetProgress) { it(amount) }
+        }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_crop.png")
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
