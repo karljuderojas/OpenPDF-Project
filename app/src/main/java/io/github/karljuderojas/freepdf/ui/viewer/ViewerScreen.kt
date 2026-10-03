@@ -354,6 +354,7 @@ fun ViewerScreen(
         loadPage = viewModel::page,
         loadWords = viewModel::words,
         findLine = viewModel::editableLine,
+        loadEditableLines = viewModel::editableLines,
         loadRegion = viewModel::pageRegion,
         initialMode = initialMode,
         initialTool = initialTool,
@@ -499,6 +500,7 @@ fun ViewerContent(
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
     loadWords: suspend (page: Int) -> List<PageWord> = { emptyList() },
     findLine: suspend (page: Int, at: Offset) -> TextEditing.EditableLine? = { _, _ -> null },
+    loadEditableLines: suspend (page: Int) -> List<TextEditing.EditableLine> = { emptyList() },
     loadRegion: LoadRegion = { _, _, _ -> null },
     initialMode: ViewerMode = ViewerMode.Read,
     initialSelectedPage: Int = 0,
@@ -1175,7 +1177,9 @@ fun ViewerContent(
                             LinkBoxLayer(page) { box -> newLinkBox = page to box }
                         }
                         if (editsText) {
-                            EditTextLayer(page, words) { at ->
+                            // Outlined are the lines Edit text can change, which are not all of the page's words.
+                            val editableLines by produceState(emptyList<TextEditing.EditableLine>(), page, ready.revision) { value = loadEditableLines(page) }
+                            EditTextLayer(page, editableLines) { at ->
                                 scope.launch {
                                     val line = findLine(page, at)
                                     if (line == null) snackbarHostState.showSnackbar(noEditableText)

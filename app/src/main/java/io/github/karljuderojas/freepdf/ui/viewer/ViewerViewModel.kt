@@ -585,6 +585,16 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** Every line on [page] that Edit text could change, for outlining them. Empty for scanned pages. */
+    suspend fun editableLines(page: Int): List<TextEditing.EditableLine> = lock.withLock {
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val document = textDocument ?: (session?.let { PDDocument.load(it.workingFile, it.password) } ?: error("Nothing is open")).also { textDocument = it }
+                TextEditing.lines(document, page)
+            }.getOrDefault(emptyList())
+        }
+    }
+
     /** Edit text: replaces the words of the line [oldText] under [at] with [newText], as one undo step. */
     fun replaceText(page: Int, at: Offset, oldText: String, newText: String) = edit { document ->
         val outcome = TextEditing.replace(document, page, at.x, at.y, oldText, newText)
