@@ -143,6 +143,9 @@ internal class PageRedactor(
     /** The pictures and forms this page drew that were swapped for a rewritten copy, or dropped. */
     val replacedObjects: MutableSet<COSBase> = Collections.newSetFromMap(IdentityHashMap())
 
+    // Named property lists (from a /Properties resource) that lost alternate text, each with its stripped copy.
+    private val strippedProperties: MutableMap<COSBase, COSDictionary> = IdentityHashMap()
+
     // The run of removed text being collected; it continues across show operators until a kept glyph.
     private val removedRun = StringBuilder()
     private var unreadableStreak = 0
@@ -158,9 +161,9 @@ internal class PageRedactor(
     /**
      * A marked-content sequence being replayed: where its property list operand is in the frame's
      * tokens (-1 when it has none), the [properties] themselves (inline, or looked up from the
-     * resources by name), and how much had been removed when it began.
+     * resources by [name]), and how much had been removed when it began.
      */
-    private class Marked(val at: Int, val properties: COSDictionary?, val before: Int)
+    private class Marked(val at: Int, val properties: COSDictionary?, val name: COSName?, val before: Int)
 
     private class Glyph(
         val hit: Boolean,
@@ -223,7 +226,10 @@ internal class PageRedactor(
         // Only now is everything that was swapped out known, so every resources dictionary made
         // here (a form copy's may have started from the page's) is cleaned of the originals at once.
         finished += done
-        finished.forEach { dropReplaced(it) }
+        finished.forEach {
+            dropReplaced(it)
+            stripProperties(it)
+        }
         val contents = PDStream(document)
         contents.createOutputStream(COSName.FLATE_DECODE).use { ContentStreamWriter(it).writeTokens(done.tokens) }
         page.setContents(contents)
@@ -255,8 +261,9 @@ internal class PageRedactor(
             // the sequence was removed.
             "BDC", "BMC" -> {
                 super.processOperator(operator, operands)
-                val properties = if (operator.name == "BDC") propertiesOf(operands.getOrNull(1)) else null
-                frame.marked += Marked(if (properties != null) frame.tokens.size + 1 else -1, properties, removedSoFar())
+                val operand = if (operator.name == "BDC") operands.getOrNull(1) else null
+                val properties = propertiesOf(operand)
+                frame.marked += Marked(if (properties != null) frame.tokens.size + 1 else -1, properties, operand as? COSName, removedSoFar())
                 emit(operands, operator)
             }
             "EMC" -> {
@@ -264,8 +271,12 @@ internal class PageRedactor(
                 frame.marked.removeLastOrNull()?.let { marked ->
                     if (marked.at >= 0 && marked.properties != null && removedSoFar() > marked.before) {
                         val stripped = withoutAlternateText(marked.properties)
-                        // A named list is written back inline, so the one in the resources stays as other content needs it.
-                        if (stripped !== marked.properties) frame.tokens[marked.at] = stripped
+                        if (stripped !== marked.properties) {
+                            // An inline list is replaced in the content; a named one in the resources it came
+                            // from (every resources dictionary written here, once the page is done), since the
+                            // list in the resources would otherwise keep the text.
+                            if (marked.name == null) frame.tokens[marked.at] = stripped else strippedProperties[marked.properties] = stripped
+                        }
                     }
                 }
                 emit(operands, operator)
@@ -549,7 +560,9 @@ internal class PageRedactor(
      */
     private fun blank(image: PDImageXObject): PDImageXObject? = try {
         val rects = pixelRects(image.width, image.height)
-        if (rects == null) null else blankSamples(image, rects) ?: blankPixels(image, rects)
+        // A picture whose samples turn out not to be editable after all (a stream that cannot be
+        // read as planned) still gets the pixel fallback rather than going whole.
+        if (rects == null) null else runCatching { blankSamples(image, rects) }.getOrNull() ?: blankPixels(image, rects)
     } catch (_: Exception) {
         null
     } catch (_: OutOfMemoryError) {
@@ -689,9 +702,9 @@ internal class PageRedactor(
             }
         }
         val dictionary = stream.cosObject
-        image.cosObject.entrySet().forEach { (key, value) ->
-            if (key !in NOT_COPIED_IMAGE) dictionary.setItem(key, value)
-        }
+        // Only what describes the samples is carried over: an /Alternates copy of the picture, an
+        // /OPI proxy or a /Mask would bring the old picture, or part of it, back with it.
+        COPIED_IMAGE.forEach { key -> image.cosObject.getItem(key)?.let { dictionary.setItem(key, it) } }
         if (softMask != null) dictionary.setItem(COSName.SMASK, softMask.cosObject)
         return PDImageXObject(stream, null)
     }
@@ -914,6 +927,23 @@ internal class PageRedactor(
         xobjects.keySet().filter { it !in drawn && xobjects.getDictionaryObject(it) in replacedObjects }.forEach { xobjects.removeItem(it) }
     }
 
+    /**
+     * Swaps, in [done]'s resources, every named property list that lost alternate text for its
+     * stripped copy. The /Properties dictionary is copied first, so pages sharing the original
+     * are not changed. Every frame's resources are gone through, since a form copy's may have
+     * been taken from the page's before the list was stripped.
+     */
+    private fun stripProperties(done: Frame) {
+        if (strippedProperties.isEmpty()) return
+        val resources = done.target.cosObject
+        val properties = resources.getDictionaryObject(COSName.PROPERTIES) as? COSDictionary ?: return
+        val stale = properties.keySet().filter { properties.getDictionaryObject(it) in strippedProperties }
+        if (stale.isEmpty()) return
+        val own = COSDictionary(properties)
+        stale.forEach { own.setItem(it, strippedProperties.getValue(properties.getDictionaryObject(it))) }
+        resources.setItem(COSName.PROPERTIES, own)
+    }
+
     /** [properties] without the alternate text and expansion a tagged PDF may attach to marked content. */
     private fun withoutAlternateText(properties: COSDictionary): COSDictionary {
         if (ALTERNATE_TEXT.none { properties.containsKey(it) }) return properties
@@ -934,7 +964,10 @@ internal class PageRedactor(
         const val GLYPH_ABOVE = 0.9f
 
         val NOT_COPIED = setOf(COSName.LENGTH, COSName.FILTER, COSName.DECODE_PARMS, COSName.RESOURCES, COSName.METADATA)
-        val NOT_COPIED_IMAGE = setOf(COSName.LENGTH, COSName.FILTER, COSName.DECODE_PARMS, COSName.SMASK, COSName.METADATA)
+        val COPIED_IMAGE = listOf(
+            COSName.TYPE, COSName.SUBTYPE, COSName.WIDTH, COSName.HEIGHT, COSName.BITS_PER_COMPONENT, COSName.COLORSPACE,
+            COSName.IMAGE_MASK, COSName.DECODE, COSName.INTENT, COSName.INTERPOLATE, COSName.OC, COSName.STRUCT_PARENT, COSName.NAME,
+        )
 
         // Filters that are a picture format in themselves, not a way of packing samples.
         val IMAGE_FILTERS = setOf(COSName.DCT_DECODE, COSName.JPX_DECODE, COSName.JBIG2_DECODE)

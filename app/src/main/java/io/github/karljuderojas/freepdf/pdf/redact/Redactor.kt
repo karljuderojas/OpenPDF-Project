@@ -4,6 +4,7 @@ import com.tom_roush.pdfbox.cos.COSArray
 import com.tom_roush.pdfbox.cos.COSBase
 import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSName
+import com.tom_roush.pdfbox.cos.COSObject
 import com.tom_roush.pdfbox.cos.COSStream
 import com.tom_roush.pdfbox.cos.COSString
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -117,7 +118,7 @@ object Redactor {
         val annotations = removedAnnotations.size
         if (removedAnnotations.isNotEmpty()) removeAnnotationLeftovers(document, removedAnnotations)
         if (replaced.isNotEmpty()) dropUnusedOriginals(document, replaced)
-        val attachments = removeAttachments(document)
+        val attachments = removeAttachments(document, removedAnnotations)
         // One unreadable glyph is a bullet or a symbol; a run of them is a word that cannot be searched for.
         val unreadable = unreadableRun >= MIN_FRAGMENT
         scrubMetadata(document, fragments.filter { it.replace(SPACES, "").length >= MIN_FRAGMENT }, unreadable)
@@ -141,8 +142,16 @@ object Redactor {
      * associated files (PDF/A-3, electronic invoices) on the catalog and the pages, and
      * file-attachment notes on any page. An attachment is a whole second document that the marks
      * cannot reach into. Returns how many went.
+     *
+     * The file's bytes go, not just the ways of reaching them: a file specification keeps its
+     * name but loses its embedded stream (/EF, /RF), and a file-attachment note loses its /FS,
+     * since a note dropped from a page's /Annots is still reachable through its popup's
+     * /Parent, a reply's /IRT or a structure tree's OBJR, and a specification taken out of the
+     * name tree may be shared by an /AF on a picture or a structure element, a GoToE action or a
+     * collection. Besides the places above, everything reachable from the trailer is searched
+     * for specifications and notes, and [removed] (notes taken off marked pages) as well.
      */
-    private fun removeAttachments(document: PDDocument): Int {
+    private fun removeAttachments(document: PDDocument, removed: Set<COSBase>): Int {
         val files = identitySet()
         var unknown = 0
         val catalog = document.documentCatalog
@@ -166,15 +175,57 @@ object Redactor {
         fileSpecsIn(catalog.cosObject.getDictionaryObject(associated) as? COSArray)
         catalog.cosObject.removeItem(associated)
 
+        val notes = identitySet()
         for (page in document.pages) {
             fileSpecsIn(page.cosObject.getDictionaryObject(associated) as? COSArray)
             page.cosObject.removeItem(associated)
             val (kept, gone) = page.annotations.partition { it !is PDAnnotationFileAttachment }
             if (gone.isEmpty()) continue
             page.annotations = kept
-            gone.forEach { files += it.cosObject.getDictionaryObject(COSName.getPDFName("FS")) ?: it.cosObject }
+            gone.forEach { notes += it.cosObject }
+        }
+        removed.forEach { if (it is COSDictionary && it.getCOSName(COSName.SUBTYPE) == FILE_ATTACHMENT) notes += it }
+        for (node in reachableDictionaries(document)) {
+            if (node.containsKey(EF) || node.containsKey(RF)) files += node
+            if (node.getCOSName(COSName.SUBTYPE) == FILE_ATTACHMENT && node.containsKey(FS)) notes += node
+        }
+
+        for (note in notes) {
+            val dictionary = note as? COSDictionary ?: continue
+            dictionary.getDictionaryObject(FS)?.let { files += it }
+            dictionary.removeItem(FS)
+        }
+        for (file in files) {
+            val dictionary = file as? COSDictionary ?: continue
+            dictionary.removeItem(EF)
+            dictionary.removeItem(RF)
         }
         return files.size + unknown
+    }
+
+    /** Every dictionary (streams included) reachable from the trailer of [document], without going into any stream's data. */
+    private fun reachableDictionaries(document: PDDocument): List<COSDictionary> {
+        val seen = identitySet()
+        val found = ArrayList<COSDictionary>()
+        val pending = ArrayDeque<COSBase>()
+        pending += document.document.trailer
+        while (pending.isNotEmpty()) {
+            val node = pending.removeLast()
+            when (node) {
+                is COSObject -> node.`object`?.let { pending += it }
+                is COSDictionary -> {
+                    if (!seen.add(node)) continue
+                    found += node
+                    node.entrySet().forEach { (_, value) -> if (value != null) pending += value }
+                }
+                is COSArray -> {
+                    if (!seen.add(node)) continue
+                    for (i in 0 until node.size()) node.get(i)?.let { pending += it }
+                }
+                else -> Unit
+            }
+        }
+        return found
     }
 
     private fun allNames(node: PDNameTreeNode<PDComplexFileSpecification>): List<PDComplexFileSpecification> =
@@ -384,6 +435,12 @@ object Redactor {
     private const val MAX_PARENTS = 16
     private const val REMOVED = "[removed]"
     private val SPACES = Regex("\\s+")
+    private val FILE_ATTACHMENT = COSName.getPDFName("FileAttachment")
+
+    // A file specification's embedded and related files, and the specification a file-attachment note carries.
+    private val EF = COSName.getPDFName("EF")
+    private val RF = COSName.getPDFName("RF")
+    private val FS = COSName.getPDFName("FS")
 
     private fun identitySet(): MutableSet<COSBase> = Collections.newSetFromMap(IdentityHashMap())
 

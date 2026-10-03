@@ -2,6 +2,9 @@ package io.github.karljuderojas.freepdf.pdf.redact
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tom_roush.pdfbox.contentstream.operator.Operator
+import com.tom_roush.pdfbox.cos.COSArray
+import com.tom_roush.pdfbox.cos.COSBoolean
+import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSFloat
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.cos.COSString
@@ -10,10 +13,14 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.common.PDStream
+import com.tom_roush.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification
+import com.tom_roush.pdfbox.pdmodel.common.filespecification.PDEmbeddedFile
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
 import com.tom_roush.pdfbox.pdmodel.graphics.color.PDDeviceRGB
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationFileAttachment
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationPopup
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationText
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
@@ -931,6 +938,166 @@ class RedactorTest {
             // Nothing was touched: the red corner is still there and the inline picture is still drawn.
             assertEquals(listOf(listOf(255, 0, 0)), picturesIn(source))
             assertTrue(rawContent(source, 1).contains("EI"))
+        }
+    }
+
+    // ---- round 4: attachments reachable another way, alternate pictures, named property lists ----
+
+    /** A file specification named [name] with [secret] as its embedded file. */
+    private fun PDDocument.attachment(name: String, secret: String) = PDComplexFileSpecification().apply {
+        file = name
+        embeddedFile = PDEmbeddedFile(this@attachment, ByteArrayInputStream(secret.toByteArray()))
+    }
+
+    @Test
+    fun removesAttachedFilesThatStayReachableThroughAPopupOrTheStructureTree() {
+        PDDocument().use { source ->
+            val page = source.addPage("BT /F1 12 Tf 72 700 Td (Client: Zebediah) Tj ET")
+            // A note far from the mark, with a popup that still points at it once it is off the page.
+            val note = PDAnnotationFileAttachment().apply {
+                rectangle = PDRectangle(400f, 300f, 20f, 20f)
+                file = source.attachment("note.txt", "POPUPSECRET")
+            }
+            val popup = PDAnnotationPopup().apply {
+                rectangle = PDRectangle(420f, 300f, 100f, 60f)
+                parent = note
+            }
+            // A note inside the mark, which a tagged PDF's structure tree still refers to.
+            val marked = PDAnnotationFileAttachment().apply {
+                rectangle = PDRectangle(130f, 695f, 20f, 20f)
+                file = source.attachment("marked.txt", "MARKEDSECRET")
+            }
+            page.annotations = listOf(note, popup, marked)
+            // An embedded file in the name tree that a structure element also lists as its associated file.
+            val invoice = source.attachment("invoice.xml", "TREESECRET")
+            val tree = com.tom_roush.pdfbox.pdmodel.PDEmbeddedFilesNameTreeNode().apply { names = mapOf("invoice.xml" to invoice) }
+            source.documentCatalog.names = com.tom_roush.pdfbox.pdmodel.PDDocumentNameDictionary(source.documentCatalog).apply { embeddedFiles = tree }
+            val reference = COSDictionary().apply {
+                setItem(COSName.TYPE, COSName.getPDFName("OBJR"))
+                setItem(COSName.PG, page.cosObject)
+                setItem(COSName.OBJ, marked.cosObject)
+            }
+            val element = COSDictionary().apply {
+                setItem(COSName.TYPE, COSName.getPDFName("StructElem"))
+                setItem(COSName.S, COSName.P)
+                setItem(COSName.K, COSArray().apply { add(reference) })
+                setItem(COSName.getPDFName("AF"), COSArray().apply { add(invoice.cosObject) })
+            }
+            source.documentCatalog.cosObject.setItem(
+                COSName.STRUCT_TREE_ROOT,
+                COSDictionary().apply {
+                    setItem(COSName.TYPE, COSName.STRUCT_TREE_ROOT)
+                    setItem(COSName.K, element)
+                },
+            )
+
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(120f, 690f, 200f, 720f))))
+            assertEquals(3, result.attachments)
+            val everything = everythingIn(source)
+            assertFalse(everything.contains("POPUPSECRET"))
+            assertFalse(everything.contains("MARKEDSECRET"))
+            assertFalse(everything.contains("TREESECRET"))
+            roundTrip(source).use { saved ->
+                assertTrue(saved.getPage(0).annotations.none { it is PDAnnotationFileAttachment })
+                // The structure tree is still there; what it points at just has no file any more.
+                val root = saved.documentCatalog.cosObject.getDictionaryObject(COSName.STRUCT_TREE_ROOT) as COSDictionary
+                val kept = (root.getDictionaryObject(COSName.K) as COSDictionary).getDictionaryObject(COSName.K) as COSArray
+                val pointed = (kept.getObject(0) as COSDictionary).getDictionaryObject(COSName.OBJ) as COSDictionary
+                assertFalse(pointed.containsKey(COSName.getPDFName("FS")))
+                assertTrue(textOf(saved).contains("Client"))
+            }
+        }
+    }
+
+    @Test
+    fun aPictureListedAsItsOwnAlternateDoesNotComeBack() {
+        PDDocument().use { source ->
+            val page = source.addPage("q 200 0 0 200 100 400 cm /Im1 Do Q")
+            val picture = twoColourPicture(source)
+            val alternate = twoColourPicture(source)
+            picture.cosObject.setItem(
+                COSName.getPDFName("Alternates"),
+                COSArray().apply {
+                    add(
+                        COSDictionary().apply {
+                            setItem(COSName.IMAGE, alternate.cosObject)
+                            setItem(COSName.getPDFName("DefaultForPrinting"), COSBoolean.FALSE)
+                        },
+                    )
+                },
+            )
+            page.resources.put(COSName.getPDFName("Im1"), picture)
+
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(100f, 500f, 200f, 600f))))
+            assertEquals(1, result.pictures)
+            assertEquals(0, result.wholePictures)
+            // Only the blanked picture is left in the file: no copy with its red corner, through /Alternates or otherwise.
+            assertEquals(listOf(listOf(0, 0, 0)), picturesIn(source))
+            roundTrip(source).use { saved ->
+                val resources = saved.getPage(0).resources
+                val left = resources.getXObject(resources.xObjectNames.single()) as PDImageXObject
+                assertFalse(left.cosObject.containsKey(COSName.getPDFName("Alternates")))
+                assertEquals(listOf(0, 255, 0), storedPixel(left, 80, 10))
+            }
+        }
+    }
+
+    private fun propertyList(vararg text: Pair<String, String>) = COSDictionary().apply {
+        text.forEach { (key, value) -> setItem(COSName.getPDFName(key), COSString(value)) }
+    }
+
+    @Test
+    fun stripsAlternateTextFromANamedPropertyListInTheResources() {
+        PDDocument().use { source ->
+            val page = source.addPage(
+                "/Span /MC0 BDC BT /F1 12 Tf 72 700 Td (outside) Tj ET EMC " +
+                    "/Span /MC1 BDC BT /F1 12 Tf 72 500 Td (inside) Tj ET EMC",
+            )
+            page.resources.cosObject.setItem(
+                COSName.PROPERTIES,
+                COSDictionary().apply {
+                    setItem(COSName.getPDFName("MC0"), propertyList("ActualText" to "kept words"))
+                    setItem(COSName.getPDFName("MC1"), propertyList("ActualText" to "secret words", "Alt" to "secret alt", "E" to "secret expansion"))
+                },
+            )
+
+            Redactor.redact(source, mapOf(0 to listOf(PdfRect(60f, 490f, 200f, 520f))))
+            val everything = everythingIn(source)
+            assertTrue(everything.contains("kept words"))
+            assertFalse(everything.contains("secret words"))
+            assertFalse(everything.contains("secret alt"))
+            assertFalse(everything.contains("secret expansion"))
+            roundTrip(source).use { saved ->
+                // The content still names the list, and the list is still there, only without its text.
+                assertTrue(rawContent(saved).contains("/MC1"))
+                val properties = saved.getPage(0).resources.cosObject.getDictionaryObject(COSName.PROPERTIES) as COSDictionary
+                val list = properties.getDictionaryObject(COSName.getPDFName("MC1")) as COSDictionary
+                assertFalse(list.containsKey(COSName.getPDFName("ActualText")))
+                assertEquals("kept words", (properties.getDictionaryObject(COSName.getPDFName("MC0")) as COSDictionary).getString("ActualText"))
+            }
+        }
+    }
+
+    @Test
+    fun stripsANamedPropertyListAFormWithoutResourcesFindsInThePage() {
+        PDDocument().use { source ->
+            val form = PDFormXObject(source).apply { bBox = PDRectangle(0f, 0f, 300f, 100f) }
+            form.cosObject.removeItem(COSName.RESOURCES)
+            form.stream.createOutputStream().use {
+                it.write("/Span /MC0 BDC BT /F1 12 Tf 10 50 Td (form secret) Tj ET EMC".toByteArray())
+            }
+            val page = source.addPage("q 1 0 0 1 100 400 cm /Fm1 Do Q")
+            page.resources.put(COSName.getPDFName("Fm1"), form)
+            page.resources.cosObject.setItem(
+                COSName.PROPERTIES,
+                COSDictionary().apply { setItem(COSName.getPDFName("MC0"), propertyList("ActualText" to "secret words")) },
+            )
+
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(105f, 445f, 400f, 470f))))
+            assertEquals(1, result.forms)
+            val everything = everythingIn(source)
+            assertFalse(everything.contains("secret words"))
+            roundTrip(source).use { saved -> assertFalse(textOf(saved).contains("secret")) }
         }
     }
 
