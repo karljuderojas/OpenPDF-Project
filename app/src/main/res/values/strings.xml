@@ -33,10 +33,11 @@
     <string name="tool_add_image">Add image</string>
     <string name="tool_redact">Redact</string>
     <string name="tool_links">Links</string>
-    <string name="tool_reorder">Reorder</string>
+    <string name="tool_move_earlier">Move earlier</string>
+    <string name="tool_move_later">Move later</string>
     <string name="tool_rotate">Rotate</string>
     <string name="tool_delete">Delete</string>
-    <string name="tool_insert">Insert</string>
+    <string name="tool_insert">Insert blank</string>
     <string name="tool_extract">Extract</string>
     <string name="tool_merge">Merge</string>
     <string name="tool_split">Split</string>
@@ -44,4 +45,18 @@
     <string name="tool_print">Print</string>
     <string name="tool_share">Share</string>
     <string name="tool_info">Document info</string>
+    <string name="page_number">Page %1$d</string>
+    <string name="save">Save</string>
+    <string name="undo">Undo</string>
+    <string name="cancel">Cancel</string>
+    <string name="discard">Discard</string>
+    <string name="saved">Saved</string>
+    <string name="save_failed">Could not save this PDF.</string>
+    <string name="edit_failed">That change could not be made to this PDF.</string>
+    <string name="coming_soon">Coming soon</string>
+    <string name="cannot_delete_last_page">A PDF needs at least one page.</string>
+    <string name="delete_page_title">Delete page %1$d?</string>
+    <string name="delete_page_body">You can undo this until you leave the PDF.</string>
+    <string name="unsaved_title">Save changes?</string>
+    <string name="unsaved_body">This PDF has changes that are not saved yet.</string>
 </resources>

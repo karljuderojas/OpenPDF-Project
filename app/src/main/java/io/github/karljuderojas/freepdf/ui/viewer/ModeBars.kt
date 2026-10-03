@@ -35,8 +35,8 @@ fun ModeBar(onModeSelected: (ViewerMode) -> Unit) {
 }
 
 /**
- * A mode's tool strip. Tools are labeled and stay selected after use ("sticky tools").
- * The tools themselves are not wired up yet; see docs/ROADMAP.md.
+ * A mode's tool strip. Drawing tools are labeled and stay selected after use ("sticky tools");
+ * Pages mode passes no selection because its tools act once. Progress is in docs/ROADMAP.md.
  */
 @Composable
 fun ToolStrip(mode: ViewerMode, selectedTool: Int?, onToolSelected: (Int) -> Unit) {

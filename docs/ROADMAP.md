@@ -36,9 +36,10 @@ Goal: the features people use in PDFGear and Xodo, free, offline and open source
 - ⬜ RFC 3161 timestamps, LTV
 
 ## Editing (Edit and Pages modes)
-- 🧱 Rotate, delete, move, insert blank pages, merge (`PageEditor`)
+- ✅ Pages mode: thumbnail grid; rotate, move, insert blank, delete and merge the selected page
+- ✅ Edits go to a private working copy with undo; Save writes back, or asks where to save when the file is read-only; leaving with unsaved changes asks first
 - 🧱 Add text (`PageEditor.addText`)
-- ⬜ Page thumbnail grid with drag to reorder
+- ⬜ Drag to reorder in the page grid, multi-select
 - ⬜ Extract and split
 - ⬜ Add image, redact (true removal, not a black box), links
 - ⬜ Edit existing text (hard; needs font handling)
