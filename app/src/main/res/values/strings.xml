@@ -410,4 +410,28 @@
     <string name="settings_reset_tips">Show all tips again</string>
     <string name="settings_reset_tips_detail">Each hint appears once more when its feature comes up.</string>
     <string name="settings_reset_tips_done">Tips will show again</string>
+    <string name="tools_create">Create</string>
+    <string name="tool_images_to_pdf">Images to PDF</string>
+    <string name="tool_about_images_to_pdf">Turn photos from your gallery into one PDF.</string>
+    <string name="tool_synonyms_images_to_pdf">picture, photo, jpg, jpeg, png, gallery, convert, make pdf, create</string>
+    <string name="images_title">Images to PDF</string>
+    <string name="images_empty_title">Pick the pictures for your PDF</string>
+    <string name="images_empty_body">Each picture becomes one page. You can reorder them before saving.</string>
+    <string name="images_choose">Choose pictures</string>
+    <string name="images_add_more">Add more</string>
+    <string name="images_create">Create PDF</string>
+    <string name="images_page_size">Page size</string>
+    <string name="images_fit_a4">A4</string>
+    <string name="images_fit_picture">Same as picture</string>
+    <string name="images_page_n">Page %1$d</string>
+    <string name="images_move_earlier">Move page %1$d earlier</string>
+    <string name="images_move_later">Move page %1$d later</string>
+    <string name="images_remove">Remove page %1$d</string>
+    <string name="images_making">Making page %1$d of %2$d…</string>
+    <string name="images_failed">Could not make the PDF. Check that there is room on your phone and try again.</string>
+    <string name="images_default_name">Images</string>
+    <plurals name="images_count">
+        <item quantity="one">%1$d picture</item>
+        <item quantity="other">%1$d pictures</item>
+    </plurals>
 </resources>
