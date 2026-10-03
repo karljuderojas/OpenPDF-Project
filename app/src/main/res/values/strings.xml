@@ -77,6 +77,10 @@
     <string name="sign_hint_date">Tap where today\'s date goes. Drag it to move it.</string>
     <string name="sign_hint_text">Tap where you want to type text. Drag it to move it.</string>
     <string name="sign_hint_checkmark">Tap a box to tick it. Drag the tick to move it.</string>
+    <string name="tool_add_text">Add text</string>
+    <string name="tool_add_image">Add image</string>
+    <string name="edit_hint_text">Tap where the text goes. Drag it to move it, or its corner to resize.</string>
+    <string name="image_failed">Could not open that picture.</string>
     <string name="stamp_delete">Delete</string>
     <string name="stamp_resize">Resize</string>
     <string name="finish">Finish</string>

@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
@@ -110,6 +111,10 @@ sealed interface ViewerAction {
     data class ResizeStamp(val id: Long, val factor: Float) : ViewerAction
     data class DeleteStamp(val id: Long) : ViewerAction
     data object CommitStamps : ViewerAction
+
+    /** Edit actions. The screen opens the photo picker for [PickImage], then places the picture. */
+    data class AddEditText(val page: Int, val at: Offset, val text: String) : ViewerAction
+    data class PickImage(val page: Int) : ViewerAction
 }
 
 @Composable
@@ -131,6 +136,11 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
     }
     val mergePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
         if (it != null) viewModel.merge(it)
+    }
+    // The page a picked image goes on, kept across the picker in case the activity is recreated.
+    var imagePage by rememberSaveable { mutableIntStateOf(0) }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) {
+        if (it != null) viewModel.addImage(imagePage, it)
     }
 
     LaunchedEffect(viewModel) {
@@ -189,6 +199,11 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.ResizeStamp -> viewModel.resizeStamp(action.id, action.factor)
                 is ViewerAction.DeleteStamp -> viewModel.deleteStamp(action.id)
                 ViewerAction.CommitStamps -> viewModel.commitStamps()
+                is ViewerAction.AddEditText -> viewModel.addEditText(action.page, action.at, action.text)
+                is ViewerAction.PickImage -> {
+                    imagePage = action.page
+                    imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }
             }
         },
     )
@@ -276,7 +291,7 @@ fun ViewerContent(
     fun backToReading() {
         if (mode == ViewerMode.Pages) returnToPage = selectedPage
         // Done keeps what was placed: it is written into the PDF on the way out.
-        if (mode == ViewerMode.Sign && stamps.isNotEmpty()) onAction(ViewerAction.CommitStamps)
+        if ((mode == ViewerMode.Sign || mode == ViewerMode.Edit) && stamps.isNotEmpty()) onAction(ViewerAction.CommitStamps)
         selectedStamp = null
         mode = ViewerMode.Read
         selectedTool = null
@@ -344,6 +359,20 @@ fun ViewerContent(
                         else -> selectedTool = it
                     }
                 })
+                mode == ViewerMode.Edit -> Column {
+                    if (selectedTool == R.string.tool_add_text) EditHint(R.string.edit_hint_text)
+                    ToolStrip(mode, selectedTool, onToolSelected = { label ->
+                        when {
+                            // Add image acts once: pick a picture and it lands on the page in view.
+                            label == R.string.tool_add_image -> {
+                                selectedTool = null
+                                onAction(ViewerAction.PickImage(currentPage))
+                            }
+                            selectedTool == label -> selectedTool = null
+                            else -> selectedTool = label
+                        }
+                    })
+                }
                 mode == ViewerMode.Sign -> Column {
                     SignTool.forLabel(selectedTool)?.let { tool ->
                         SignHint(
@@ -389,13 +418,16 @@ fun ViewerContent(
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
                     val signTool = SignTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Sign }
                     PageList(ready.pageSizes, ready.revision, loadPage, listState) { page ->
-                        val pageStamps = if (mode == ViewerMode.Sign) stamps.filter { it.page == page } else emptyList()
-                        if (signTool != null || (selectedStamp != null && pageStamps.isNotEmpty())) {
+                        val showsStamps = mode == ViewerMode.Sign || mode == ViewerMode.Edit
+                        val pageStamps = if (showsStamps) stamps.filter { it.page == page } else emptyList()
+                        val addsText = mode == ViewerMode.Edit && selectedTool == R.string.tool_add_text
+                        if (signTool != null || addsText || (selectedStamp != null && pageStamps.isNotEmpty())) {
                             TapLayer(page) { at ->
                                 val kind = signTool?.signatureKind
                                 when {
                                     // The first tap away from a selected stamp only lets go of it.
                                     selectedStamp != null -> selectedStamp = null
+                                    addsText -> pendingText = page to at
                                     signTool == null -> Unit
                                     kind != null && savedSignatures[kind] == null -> padFor = kind
                                     kind != null -> onAction(ViewerAction.PlaceSignature(page, at, kind))
@@ -483,7 +515,7 @@ fun ViewerContent(
             onDismiss = { pendingText = null },
             onAdd = { text ->
                 pendingText = null
-                onAction(ViewerAction.AddText(page, at, text))
+                onAction(if (mode == ViewerMode.Edit) ViewerAction.AddEditText(page, at, text) else ViewerAction.AddText(page, at, text))
             },
         )
     }

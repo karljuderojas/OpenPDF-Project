@@ -138,7 +138,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     // Stamps already on their way into the PDF, so a second commit does not draw them twice.
     private var committing = emptySet<Long>()
 
-    /** Sign-mode stamps that can still be moved or resized; see [commitStamps]. */
+    /** Sign and Edit mode stamps that can still be moved or resized; see [commitStamps]. */
     val stamps: StateFlow<List<PlacedStamp>> = _stamps.asStateFlow()
 
     init {
@@ -267,10 +267,26 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addText(page: Int, at: Offset, text: String) = placeText(page, at, text, "text")
 
-    private fun placeText(page: Int, at: Offset, text: String, what: String) {
+    private fun placeText(page: Int, at: Offset, text: String, what: String?, fontSize: Float = StampGeometry.TEXT_SIZE) {
         val size = pageSize(page) ?: return
         val content = StampContent.Text(text, what)
-        addStamp(page, content, StampGeometry.textBox(at, content.lines, size, ::emWidth))
+        addStamp(page, content, StampGeometry.textBox(at, content.lines, size, fontSize, ::emWidth))
+    }
+
+    /** Edit mode's Add text: like Sign's Text, but larger and kept off the audit page. */
+    fun addEditText(page: Int, at: Offset, text: String) = placeText(page, at, text, what = null, StampGeometry.EDIT_TEXT_SIZE)
+
+    /** Edit mode's Add image: the picture lands in the middle of [page], ready to move and resize. */
+    fun addImage(page: Int, uri: Uri) {
+        viewModelScope.launch {
+            val image = runCatching { withContext(Dispatchers.IO) { PickedImage.load(context, uri) } }.getOrNull()
+            val size = pageSize(page)
+            if (image == null || size == null) {
+                _effects.send(ViewerEffect.Message(R.string.image_failed))
+                return@launch
+            }
+            addStamp(page, StampContent.Image(image), StampGeometry.imageBox(Offset(0.5f, 0.5f), image.width, image.height, size))
+        }
     }
 
     fun addCheckmark(page: Int, at: Offset) {
@@ -288,7 +304,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     /**
      * Writes every placed stamp into the PDF where it now sits, one undo step each. Called on
-     * leaving Sign mode and before finishing, after which they are part of the page.
+     * leaving Sign or Edit mode and before finishing, after which they are part of the page.
      */
     fun commitStamps() {
         val placed = _stamps.value.filter { it.id !in committing }
@@ -301,7 +317,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                     val current = session ?: return@withContext
                     placed.forEach { stamp ->
                         runCatching { current.edit { document -> drawStamp(document, stamp) } }
-                            .onSuccess { editLog += auditEventFor(stamp).copy(at = Instant.now()) }
+                            .onSuccess { editLog += auditEventFor(stamp)?.copy(at = Instant.now()) }
                             .onFailure { failed = true }
                     }
                 }
@@ -340,18 +356,24 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             StampContent.Checkmark -> PageEditor.addCheckmark(
                 document, stamp.page, toPdf(StampGeometry.checkmarkAnchor(box, size)), StampGeometry.checkmarkSize(box, size),
             )
+            is StampContent.Image -> PageEditor.addImage(
+                document, stamp.page, content.image, toPdf(StampGeometry.imageAnchor(box)),
+                width = box.width * size.widthPt, height = box.height * size.heightPt,
+            )
         }
     }
 
-    private fun auditEventFor(stamp: PlacedStamp): AuditEvent {
+    /** What the audit page records for [stamp], or null for Edit-mode content that is not part of signing. */
+    private fun auditEventFor(stamp: PlacedStamp): AuditEvent? {
         val where = "on page ${stamp.page + 1}"
         return when (val content = stamp.content) {
             is StampContent.Signature -> {
                 val what = if (content.kind == SignatureStore.Kind.Initials) "initials" else "signature"
                 AuditEvent(AuditEvent.Type.Signed, SIGNER, detail = "$what $where")
             }
-            is StampContent.Text -> AuditEvent(AuditEvent.Type.FieldFilled, SIGNER, detail = "${content.what} $where")
+            is StampContent.Text -> content.what?.let { AuditEvent(AuditEvent.Type.FieldFilled, SIGNER, detail = "$it $where") }
             StampContent.Checkmark -> AuditEvent(AuditEvent.Type.FieldFilled, SIGNER, detail = "checkmark $where")
+            is StampContent.Image -> null
         }
     }
 
