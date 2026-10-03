@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.toOffset
 import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.zIndex
 import kotlinx.coroutines.flow.first
+import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 
