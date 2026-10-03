@@ -33,7 +33,8 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 - ⬜ Move and resize a placed signature (for now: Undo and tap again)
 - 🧱 Digital signature with an on-device or imported certificate (`DigitalSigner`, `SigningIdentity`)
 - 🧱 Audit trail, SHA-256 fingerprints and audit page
-- ⬜ Type or photograph a signature instead of drawing it
+- ✅ Type a signature or initials instead of drawing them, in one of two bundled script fonts
+- ⬜ Photograph a signature on paper
 - ⬜ Field detection and the guided next-field walk
 - ⬜ Fill AcroForm fields
 - ⬜ Verify banner for signed PDFs
