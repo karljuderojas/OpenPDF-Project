@@ -254,6 +254,36 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerSwitcherUnsaved() {
+        // The document on screen and the W-9 both have changes not saved yet; switching keeps
+        // them, and the cards say so.
+        show {
+            viewer(
+                ViewerMode.Read,
+                sample.copy(canUndo = true, hasUnsavedChanges = true),
+                openDocuments = sampleRecent.take(3),
+                unsavedDocuments = setOf(sampleRecent[1].uri),
+            )
+        }
+        composeRule.onNodeWithTag("open-documents").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_switcher_unsaved.png")
+    }
+
+    @Test
+    fun viewerCloseAllWithOthersUnsaved() {
+        // Close all with changes in another document: saving from here could only save this
+        // one, so the only choices are to discard them all or go back.
+        show { viewer(ViewerMode.Read, openDocuments = sampleRecent.take(3), unsavedDocuments = setOf(sampleRecent[1].uri)) }
+        composeRule.onNodeWithTag("open-documents").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Close all").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Discard changes?").assertExists()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_close_all_unsaved.png")
+    }
+
+    @Test
     fun viewerReadNight() = capture("viewer_read_night") { viewer(ViewerMode.Read, pageColors = PageColors.Night) }
 
     @Test
@@ -1117,6 +1147,7 @@ class ScreenshotTest {
         search: SearchResults = SearchResults(),
         searchQuery: String? = null,
         openDocuments: List<DocumentEntry> = emptyList(),
+        unsavedDocuments: Set<String> = emptySet(),
         pageColors: PageColors = PageColors.Normal,
         tip: Int? = null,
         stamps: List<PlacedStamp> = emptyList(),
@@ -1151,6 +1182,7 @@ class ScreenshotTest {
             search = search,
             initialSearchQuery = searchQuery,
             openDocuments = openDocuments,
+            unsavedDocuments = unsavedDocuments,
             currentUri = openDocuments.firstOrNull()?.uri,
             pageColors = pageColors,
             tip = tip,

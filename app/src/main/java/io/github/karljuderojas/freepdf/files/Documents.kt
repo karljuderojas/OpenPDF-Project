@@ -16,8 +16,14 @@ data class DocumentEntry(val uri: String, val name: String, val openedAt: Long)
 /**
  * What the Files tab lists: the PDFs open in this session, and a recent history that survives
  * restarts. Both live only on this device (history in app preferences, never synced anywhere).
+ * [onClosed] hears of every PDF leaving the open list, closed or dropped off the end, so
+ * whatever is kept for it while it is open can be let go.
  */
-class Documents(private val prefs: SharedPreferences, private val clock: () -> Long = System::currentTimeMillis) {
+class Documents(
+    private val prefs: SharedPreferences,
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val onClosed: (uri: String) -> Unit = {},
+) {
 
     private val _recent = MutableStateFlow(readRecent())
     val recent: StateFlow<List<DocumentEntry>> = _recent.asStateFlow()
@@ -33,7 +39,10 @@ class Documents(private val prefs: SharedPreferences, private val clock: () -> L
      */
     fun opened(uri: String, name: String, remember: Boolean) {
         val entry = DocumentEntry(uri, name, clock())
-        _open.update { list -> (listOf(entry) + list.filter { it.uri != uri }).take(MAX_OPEN) }
+        val before = _open.value
+        val after = (listOf(entry) + before.filter { it.uri != uri }).take(MAX_OPEN)
+        _open.value = after
+        before.filter { old -> after.none { it.uri == old.uri } }.forEach { onClosed(it.uri) }
         if (remember) {
             _recent.update { list -> (listOf(entry) + list.filter { it.uri != uri }).take(MAX_RECENT) }
             writeRecent()
@@ -41,11 +50,15 @@ class Documents(private val prefs: SharedPreferences, private val clock: () -> L
     }
 
     fun close(uri: String) {
-        _open.update { list -> list.filter { it.uri != uri } }
+        val before = _open.value
+        _open.value = before.filter { it.uri != uri }
+        if (before.any { it.uri == uri }) onClosed(uri)
     }
 
     fun closeAll() {
+        val before = _open.value
         _open.value = emptyList()
+        before.forEach { onClosed(it.uri) }
     }
 
     fun forget(uri: String) {
@@ -78,8 +91,8 @@ class Documents(private val prefs: SharedPreferences, private val clock: () -> L
         private const val KEY = "recent"
         private const val MAX_RECENT = 50
 
-        // The viewer's switcher lists every open file, so the oldest drop off past this.
-        private const val MAX_OPEN = 8
+        /** The viewer's switcher lists every open file, so the oldest drop off past this. */
+        const val MAX_OPEN = 8
 
         /**
          * True if the app can open [uri] again after a restart, so it is worth keeping in the

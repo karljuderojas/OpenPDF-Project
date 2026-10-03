@@ -140,8 +140,14 @@ sealed interface ViewerAction {
     data object Redo : ViewerAction
     data object Save : ViewerAction
 
-    /** Saves, then runs [then] once the save lands: back out, or on to another open document. */
-    data class SaveAndLeave(val then: () -> Unit) : ViewerAction
+    /**
+     * Saves, then runs [then] once the save lands: back out, or close a document. [document]
+     * names another open document to save, from the switcher; null saves the one on screen.
+     */
+    data class SaveAndLeave(val then: () -> Unit, val document: String? = null) : ViewerAction
+
+    /** Lets the unsaved changes of the document on screen go, on the way out. */
+    data object DiscardChanges : ViewerAction
 
     data class Rotate(val pages: Set<Int>) : ViewerAction
     data class Delete(val pages: Set<Int>) : ViewerAction
@@ -254,6 +260,8 @@ fun ViewerScreen(
     }
     val documents = (context.applicationContext as FreePdfApp).documents
     val openDocuments by documents.open.collectAsStateWithLifecycle()
+    val unsavedDocuments by (context.applicationContext as FreePdfApp).sessions.unsaved.collectAsStateWithLifecycle()
+    val position by viewModel.position.collectAsStateWithLifecycle()
     val pickAnother = rememberPdfPicker(onSwitchTo)
 
     // Where to go once a save before leaving lands: back, or to another document.
@@ -326,11 +334,14 @@ fun ViewerScreen(
         stamps = stamps,
         snackbarHostState = snackbarHostState,
         openDocuments = openDocuments,
+        unsavedDocuments = unsavedDocuments,
         currentUri = uri.toString(),
         onSwitchTo = { onSwitchTo(Uri.parse(it.uri)) },
         onCloseDocument = { documents.close(it.uri) },
         onCloseAll = documents::closeAll,
         onOpenAnother = pickAnother,
+        restorePosition = position,
+        onViewPosition = viewModel::viewPositionChanged,
         pageColors = pageColors,
         onPageColors = settings::setPageColors,
         tip = tip?.text,
@@ -346,8 +357,9 @@ fun ViewerScreen(
                 ViewerAction.Save -> viewModel.save()
                 is ViewerAction.SaveAndLeave -> {
                     afterSave = action.then
-                    viewModel.save(thenClose = true)
+                    viewModel.save(thenClose = true, document = action.document)
                 }
+                ViewerAction.DiscardChanges -> viewModel.discardChanges()
                 is ViewerAction.Rotate -> viewModel.rotatePages(action.pages)
                 is ViewerAction.Delete -> viewModel.deletePages(action.pages)
                 is ViewerAction.InsertBlank -> viewModel.insertBlankPage(action.afterPage)
@@ -455,11 +467,14 @@ fun ViewerContent(
     initialSelectedStamp: Long? = null,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     openDocuments: List<DocumentEntry> = emptyList(),
+    unsavedDocuments: Set<String> = emptySet(),
     currentUri: String? = null,
     onSwitchTo: (DocumentEntry) -> Unit = {},
     onCloseDocument: (DocumentEntry) -> Unit = {},
     onCloseAll: () -> Unit = {},
     onOpenAnother: () -> Unit = {},
+    restorePosition: ViewPosition? = null,
+    onViewPosition: (ViewPosition) -> Unit = {},
     pageColors: PageColors = PageColors.Normal,
     onPageColors: (PageColors) -> Unit = {},
     @StringRes tip: Int? = null,
@@ -478,7 +493,7 @@ fun ViewerContent(
     var extracting by rememberSaveable { mutableStateOf(false) }
     var splitting by rememberSaveable { mutableStateOf(false) }
     // What to do once the reader settles unsaved changes; non-null while the dialog shows.
-    var leaveThen by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var leavePrompt by remember { mutableStateOf<LeavePrompt?>(null) }
     var showSwitcher by rememberSaveable { mutableStateOf(false) }
     var pendingNote by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var pendingTextBox by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
@@ -603,9 +618,31 @@ fun ViewerContent(
         if (isReady) currentOnModeEntered(mode)
     }
 
-    fun leave(then: () -> Unit = onBack) {
-        // Stamps still on screen (placed, or being written in after Done) are changes too.
-        if (ready?.hasUnsavedChanges == true || stamps.isNotEmpty()) leaveThen = then else then()
+    // Stamps still on screen (placed, or being written in after Done) are changes too.
+    val hasUnsavedChanges = ready?.hasUnsavedChanges == true || stamps.isNotEmpty()
+
+    /**
+     * Runs [then] once the reader has settled the unsaved changes of the document on screen,
+     * asking to save first when there are any. Discarding runs [discard] before [then].
+     */
+    fun leave(discard: () -> Unit = {}, then: () -> Unit = onBack) {
+        if (hasUnsavedChanges) leavePrompt = LeavePrompt(then, discard = discard) else then()
+    }
+
+    // Where the reader was when this document was last on screen, once, as soon as it is shown.
+    var positionRestored by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(isReady, restorePosition) {
+        val position = restorePosition ?: return@LaunchedEffect
+        if (!isReady || positionRestored) return@LaunchedEffect
+        positionRestored = true
+        if (position.page in 1 until pageCount || (position.page == 0 && position.offset > 0)) {
+            listState.scrollToItem(position.page, position.offset)
+        }
+    }
+    val currentOnViewPosition by rememberUpdatedState(onViewPosition)
+    LaunchedEffect(listState) {
+        snapshotFlow { ViewPosition(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) }
+            .collect { currentOnViewPosition(it) }
     }
 
     fun onPagesTool(tool: Int) {
@@ -683,7 +720,7 @@ fun ViewerContent(
             selectedMark != null -> pickedMark = null
             mode != ViewerMode.Read -> backToReading()
             searching -> closeSearch()
-            else -> leave()
+            else -> leave(discard = { onAction(ViewerAction.DiscardChanges) })
         }
     }
 
@@ -713,7 +750,7 @@ fun ViewerContent(
                 },
                 navigationIcon = {
                     if (mode == ViewerMode.Read) {
-                        IconButton(onClick = { if (searching) closeSearch() else leave() }) {
+                        IconButton(onClick = { if (searching) closeSearch() else leave(discard = { onAction(ViewerAction.DiscardChanges) }) }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                         }
                     } else if (mode == ViewerMode.Pages && selectedPages.size > 1) {
@@ -1215,29 +1252,41 @@ fun ViewerContent(
     }
 
     if (showSwitcher) {
+        // Every open document keeps its own session, so switching and opening another never
+        // lose anything and ask nothing; closing a document with unsaved changes does ask.
+        val unsavedOthers = unsavedDocuments.filter { it != currentUri }
         OpenDocumentsSheet(
             documents = openDocuments,
+            unsaved = if (hasUnsavedChanges) unsavedOthers.toSet() + setOfNotNull(currentUri) else unsavedOthers.toSet(),
             currentUri = currentUri,
             onDismiss = { showSwitcher = false },
             onSwitchTo = { entry ->
                 showSwitcher = false
-                if (entry.uri != currentUri) leave { onSwitchTo(entry) }
+                if (entry.uri != currentUri) onSwitchTo(entry)
             },
             onClose = { entry ->
-                if (entry.uri == currentUri) {
-                    showSwitcher = false
-                    leave { onCloseDocument(entry); onBack() }
-                } else {
-                    onCloseDocument(entry)
+                when {
+                    entry.uri == currentUri -> {
+                        showSwitcher = false
+                        leave { onCloseDocument(entry); onBack() }
+                    }
+                    entry.uri in unsavedOthers -> {
+                        showSwitcher = false
+                        leavePrompt = LeavePrompt(then = { onCloseDocument(entry) }, document = entry.uri)
+                    }
+                    else -> onCloseDocument(entry)
                 }
             },
             onCloseAll = {
                 showSwitcher = false
-                leave { onCloseAll(); onBack() }
+                val closeAll = { onCloseAll(); onBack() }
+                // Saving from here could only save the document on screen, so when others have
+                // changes too the choice is to discard them all or go back and save each.
+                if (unsavedOthers.isNotEmpty()) leavePrompt = LeavePrompt(closeAll, canSave = false) else leave(then = closeAll)
             },
             onOpenAnother = {
                 showSwitcher = false
-                leave(onOpenAnother)
+                onOpenAnother()
             },
         )
     }
@@ -1271,29 +1320,44 @@ fun ViewerContent(
         )
     }
 
-    leaveThen?.let { then ->
+    leavePrompt?.let { prompt ->
         AlertDialog(
-            onDismissRequest = { leaveThen = null },
-            title = { Text(stringResource(R.string.unsaved_title)) },
-            text = { Text(stringResource(R.string.unsaved_body)) },
+            onDismissRequest = { leavePrompt = null },
+            title = { Text(stringResource(if (prompt.canSave) R.string.unsaved_title else R.string.unsaved_others_title)) },
+            text = { Text(stringResource(if (prompt.canSave) R.string.unsaved_body else R.string.unsaved_others_body)) },
             confirmButton = {
-                TextButton(onClick = {
-                    leaveThen = null
-                    onAction(ViewerAction.SaveAndLeave(then))
-                }) { Text(stringResource(R.string.save)) }
+                if (prompt.canSave) {
+                    TextButton(onClick = {
+                        leavePrompt = null
+                        onAction(ViewerAction.SaveAndLeave(prompt.then, prompt.document))
+                    }) { Text(stringResource(R.string.save)) }
+                }
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { leaveThen = null }) { Text(stringResource(R.string.cancel)) }
+                    TextButton(onClick = { leavePrompt = null }) { Text(stringResource(R.string.cancel)) }
                     TextButton(onClick = {
-                        leaveThen = null
-                        then()
+                        leavePrompt = null
+                        prompt.discard()
+                        prompt.then()
                     }) { Text(stringResource(R.string.discard)) }
                 }
             },
         )
     }
 }
+
+/**
+ * The unsaved-changes question: [then] runs once they are saved or discarded, [discard] first
+ * when they are discarded. [document] is the other open document being closed, or null for the
+ * one on screen. With [canSave] false only discarding is offered (several documents have changes).
+ */
+private class LeavePrompt(
+    val then: () -> Unit,
+    val document: String? = null,
+    val canSave: Boolean = true,
+    val discard: () -> Unit = {},
+)
 
 @Composable
 private fun PageList(

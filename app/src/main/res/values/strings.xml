@@ -117,6 +117,8 @@
     <string name="delete_page_body">You can undo this until you leave the PDF.</string>
     <string name="unsaved_title">Save changes?</string>
     <string name="unsaved_body">This PDF has changes that are not saved yet.</string>
+    <string name="unsaved_others_title">Discard changes?</string>
+    <string name="unsaved_others_body">Some open PDFs have changes that are not saved yet. Switch to each one to save it, or discard them all.</string>
     <string name="add">Add</string>
     <string name="note_title">Add a note</string>
     <string name="note_hint">Type your note</string>
@@ -385,6 +387,7 @@
     <string name="open_documents_switch">Open documents: %1$d, switch</string>
     <string name="open_documents_title">Open documents · %1$d</string>
     <string name="open_documents_viewing">Viewing</string>
+    <string name="open_documents_unsaved">Unsaved changes</string>
     <string name="open_documents_close_all">Close all</string>
     <string name="open_documents_open_another">Open another</string>
     <!-- Reading modes -->

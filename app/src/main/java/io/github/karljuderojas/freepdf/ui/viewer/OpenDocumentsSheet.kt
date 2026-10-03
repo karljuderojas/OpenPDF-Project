@@ -57,14 +57,16 @@ internal fun OpenDocumentsButton(count: Int, onClick: () -> Unit) {
 
 /**
  * Lists the open [documents] so the reader can jump between them. The one on screen, [currentUri],
- * is outlined. Leaving it (switching, closing it, closing all) goes through the caller, which
- * asks about unsaved changes first.
+ * is outlined, and those in [unsaved] say they have changes not saved yet. Each keeps its own
+ * session, so switching loses nothing; closing one goes through the caller, which asks about
+ * unsaved changes first.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun OpenDocumentsSheet(
     documents: List<DocumentEntry>,
     currentUri: String?,
+    unsaved: Set<String> = emptySet(),
     onDismiss: () -> Unit,
     onSwitchTo: (DocumentEntry) -> Unit,
     onClose: (DocumentEntry) -> Unit,
@@ -83,7 +85,7 @@ internal fun OpenDocumentsSheet(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(documents, key = { it.uri }) { entry ->
-                OpenDocumentCard(entry, current = entry.uri == currentUri, onSwitchTo = onSwitchTo, onClose = onClose)
+                OpenDocumentCard(entry, current = entry.uri == currentUri, unsaved = entry.uri in unsaved, onSwitchTo = onSwitchTo, onClose = onClose)
             }
         }
         Row(
@@ -104,6 +106,7 @@ internal fun OpenDocumentsSheet(
 private fun OpenDocumentCard(
     entry: DocumentEntry,
     current: Boolean,
+    unsaved: Boolean,
     onSwitchTo: (DocumentEntry) -> Unit,
     onClose: (DocumentEntry) -> Unit,
 ) {
@@ -116,11 +119,15 @@ private fun OpenDocumentCard(
             PdfBadge(Modifier.size(40.dp))
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(entry.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (current) {
+                val status = listOfNotNull(
+                    stringResource(R.string.open_documents_viewing).takeIf { current },
+                    stringResource(R.string.open_documents_unsaved).takeIf { unsaved },
+                )
+                if (status.isNotEmpty()) {
                     Text(
-                        stringResource(R.string.open_documents_viewing),
+                        status.joinToString(" · "),
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }

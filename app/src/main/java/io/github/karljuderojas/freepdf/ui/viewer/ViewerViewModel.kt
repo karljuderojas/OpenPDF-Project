@@ -68,6 +68,7 @@ import io.github.karljuderojas.freepdf.pdf.sign.info
 import io.github.karljuderojas.freepdf.print.Printing
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.sign.FinishOptions
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -174,26 +175,53 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     val effects: Flow<ViewerEffect> = _effects.receiveAsFlow()
 
     private var renderer: PdfRenderer? = null
-    private var session: EditSession? = null
-    private var openedUri: Uri? = null
+
+    // The open documents' sessions live in the application, so they survive this view model
+    // (switching documents replaces it) and switching back finds edits, undo and place as left.
+    private val sessions = getApplication<FreePdfApp>().sessions
+
+    /** The session this view model shows and edits; null until [open] has attached one. */
+    private var doc: DocumentSession? = null
+    private val session: EditSession? get() = doc?.session
+
+    /** Where saving goes: the opened file, or the copy Save As made. */
+    private val openedUri: Uri? get() = doc?.uri
 
     /** The URI the last [open] was asked for, which may differ from [openedUri] after Save As. */
     private var requestedUri: Uri? = null
     private var revision = 0
     private var closeAfterSave = false
 
+    /** Another open document being saved from the switcher; null while the one on screen is. */
+    private var savingOther: DocumentSession? = null
+
     // For the audit page: the original's fingerprint, when it was opened, and one entry per
     // edit (null for edits that are not part of signing), so undo can drop the matching entry.
-    private var originalSha256 = ""
-    private var openedAt = Instant.now()
-    private val editLog = ArrayList<AuditEvent?>()
-    private val redoLog = ArrayList<AuditEvent?>()
+    // All kept in the session; before one is attached there is nothing to edit, so the logs
+    // written then are throwaways.
+    private val originalSha256: String get() = doc?.originalSha256.orEmpty()
+    private val openedAt: Instant get() = doc?.openedAt ?: Instant.now()
+    private val editLog: MutableList<AuditEvent?> get() = doc?.editLog ?: ArrayList()
+    private val redoLog: MutableList<AuditEvent?> get() = doc?.redoLog ?: ArrayList()
 
     /** What [SignatureVerifier] found in the file as opened. */
-    private var signatures: List<SignatureReport> = emptyList()
+    private var signatures: List<SignatureReport>
+        get() = doc?.signatures.orEmpty()
+        set(value) {
+            doc?.signatures = value
+        }
 
     // Finding the places to sign reads all the text, so it is done again only when pages change.
-    private var signFields: List<SignField>? = null
+    private var signFields: List<SignField>?
+        get() = doc?.signFields
+        set(value) {
+            doc?.signFields = value
+        }
+
+    private val _position = MutableStateFlow<ViewPosition?>(null)
+
+    /** Where the reader was in the document when it was last on screen; null until it is open. */
+    val position: StateFlow<ViewPosition?> = _position.asStateFlow()
 
     /** See [ViewerState.Ready.failedPageEdits]. */
     private var failedPageEdits = 0
@@ -260,8 +288,10 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     private val _stamps = MutableStateFlow<List<PlacedStamp>>(emptyList())
     private var nextStampId = 1L
 
-    // Stamps already on their way into the PDF, so a second commit does not draw them twice.
+    // Stamps already on their way into the PDF, so a second commit does not draw them twice, and
+    // those already drawn in, so a switch of document mid-commit does not keep them as placed.
     private var committing = emptySet<Long>()
+    private var committed = emptySet<Long>()
 
     // Commits still running, each answering whether every stamp of it was drawn. Finish waits
     // for all of them, so a signed copy is never made without a signature the user placed.
@@ -290,29 +320,65 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         // configuration change would otherwise reopen the original and throw the session away.
         if (uri == requestedUri) return
         requestedUri = uri
-        openedUri = uri
         _state.value = ViewerState.Loading
         viewModelScope.launch {
             _state.value = runCatching {
                 lock.withLock {
-                    withContext(Dispatchers.IO) {
-                        val input = context.contentResolver.openInputStream(uri) ?: error("Cannot read $uri")
-                        val dir = File(context.cacheDir, "edit/${UUID.randomUUID()}")
-                        val newSession = input.use { EditSession(dir, it) }
-                        session?.close()
-                        session = newSession
-                        originalSha256 = newSession.workingFile.inputStream().use { DocumentHash.sha256(it) }
-                        openedAt = Instant.now()
-                        editLog.clear()
-                        signatures = SignatureVerifier().verify(newSession.workingFile)
-                        redoLog.clear()
-                        signFields = null
+                    val entry = withContext(Dispatchers.IO) {
+                        detachLocked()
+                        val entry = sessions.attach(uri.toString()) {
+                            context.contentResolver.openInputStream(uri) ?: error("Cannot read $uri")
+                        }
+                        // A session made just now, rather than one left by an earlier visit.
+                        if (entry.originalSha256.isEmpty()) {
+                            entry.originalSha256 = entry.session.workingFile.inputStream().use { DocumentHash.sha256(it) }
+                            entry.openedAt = Instant.now()
+                            entry.signatures = SignatureVerifier().verify(entry.session.workingFile)
+                        }
+                        entry
                     }
-                    _stamps.value = emptyList()
+                    doc = entry
+                    _stamps.value = entry.stamps
+                    nextStampId = entry.nextStampId
+                    _position.value = entry.position
                     firstLoadLocked()
                 }
-            }.onSuccess { remember(uri) }.getOrElse { ViewerState.Failed(it.message) }
+            }.onSuccess { remember(uri) }.getOrElse {
+                if (it is CancellationException) throw it
+                // A document that could not be opened is not in the open list, so nothing is kept for it.
+                doc = null
+                sessions.close(uri.toString())
+                ViewerState.Failed(it.message)
+            }
         }
+    }
+
+    /**
+     * Gives the attached session what only this view model knew, stamps still being placed and
+     * where the reader was, so the next view model to attach finds them. Call with [lock] held,
+     * or from [onCleared], when nothing else runs.
+     */
+    private fun detachLocked() {
+        val current = doc ?: return
+        current.stamps = _stamps.value.filter { it.id !in committed }
+        current.nextStampId = nextStampId
+        sessions.refresh()
+    }
+
+    /** Called as the reader scrolls, so switching back to this document lands at the same place. */
+    fun viewPositionChanged(position: ViewPosition) {
+        doc?.position = position
+    }
+
+    /**
+     * Throws away this document's unsaved changes: its session ends, and it is opened fresh
+     * from its file next time. The document stays in the open list.
+     */
+    fun discardChanges() {
+        val current = doc ?: return
+        doc = null
+        _stamps.value = emptyList()
+        sessions.close(current.key)
     }
 
     /** Searches every page for [query], publishing matches page by page. A blank query clears. */
@@ -611,6 +677,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                             .onSuccess {
                                 editLog += auditEventFor(stamp)?.copy(at = Instant.now())
                                 redoLog.clear()
+                                committed = committed + stamp.id
                             }
                             .onFailure { failed = true }
                     }
@@ -620,6 +687,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 val done = placed.map { it.id }.toSet()
                 _stamps.update { stamps -> stamps.filter { it.id !in done } }
                 committing = committing - done
+                committed = committed - done
                 if (failed && notify) _effects.send(ViewerEffect.Message(R.string.edit_failed))
                 !failed
             }
@@ -1074,30 +1142,39 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** Saves over the opened file, or asks for a new location when that file is read-only. */
-    fun save(thenClose: Boolean = false) {
-        val uri = openedUri ?: return
+    /**
+     * Saves over the opened file, or asks for a new location when that file is read-only.
+     * [document] names another open document to save instead, from the switcher; null, or the
+     * one on screen, saves this one.
+     */
+    fun save(thenClose: Boolean = false, document: String? = null) {
+        val other = document?.takeIf { it != doc?.key }?.let { sessions.get(it) ?: return }
+        val target = other ?: doc ?: return
+        savingOther = other
         closeAfterSave = thenClose
         viewModelScope.launch {
-            val saved = lock.withLock { runCatching { writeLocked(uri) }.isSuccess }
+            val uri = target.uri
+            val saved = lock.withLock { runCatching { writeLocked(uri, target) }.isSuccess }
             if (saved) finishSave() else _effects.send(ViewerEffect.SaveAs(displayName(uri)))
         }
     }
 
     /** Called with the location the user picked after [ViewerEffect.SaveAs]. */
     fun saveAs(target: Uri) {
+        val saving = savingOther ?: doc ?: return
         viewModelScope.launch {
-            val saved = lock.withLock { runCatching { writeLocked(target) }.isSuccess }
+            val saved = lock.withLock { runCatching { writeLocked(target, saving) }.isSuccess }
             if (saved) {
                 // Later saves go to the new copy, which the user can write to.
-                openedUri = target
+                saving.uri = target
                 val read = Intent.FLAG_GRANT_READ_URI_PERMISSION
                 runCatching { context.contentResolver.takePersistableUriPermission(target, read or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
                     .recoverCatching { context.contentResolver.takePersistableUriPermission(target, read) }
-                remember(target)
+                if (saving === doc) remember(target)
                 finishSave()
             } else {
                 closeAfterSave = false
+                savingOther = null
                 _effects.send(ViewerEffect.Message(R.string.save_failed))
             }
         }
@@ -1105,20 +1182,24 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun cancelSaveAs() {
         closeAfterSave = false
+        savingOther = null
     }
 
     private suspend fun finishSave() {
         _effects.send(ViewerEffect.Message(R.string.saved))
-        (_state.value as? ViewerState.Ready)?.let { _state.value = it.copy(hasUnsavedChanges = false) }
+        if (savingOther == null) {
+            (_state.value as? ViewerState.Ready)?.let { _state.value = it.copy(hasUnsavedChanges = false) }
+        }
+        sessions.refresh()
         if (closeAfterSave) _effects.send(ViewerEffect.Close)
         closeAfterSave = false
+        savingOther = null
     }
 
-    private suspend fun writeLocked(uri: Uri) = withContext(Dispatchers.IO) {
-        val current = session ?: error("Nothing is open")
+    private suspend fun writeLocked(uri: Uri, document: DocumentSession) = withContext(Dispatchers.IO) {
         // The working copy is complete, so it goes out as a whole; only a finished write counts as saved.
-        SafeWrite.write(context, uri, current.workingFile)
-        current.markSaved()
+        SafeWrite.write(context, uri, document.session.workingFile)
+        document.session.markSaved()
     }
 
     /** Thrown from an edit that turns out to have nothing to do, so no undo step is recorded. */
@@ -1253,6 +1334,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             }.getOrDefault(emptyList())
         }
         renderer = next
+        sessions.refresh()
         val hasSignature = editLog.any { it?.type == AuditEvent.Type.Signed }
         // A form that PdfBox cannot read just offers nothing to fill. The signatures placed so far
         // are read from the pages too, so they follow the pages they are on through moves,
@@ -1298,9 +1380,12 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     override fun onCleared() {
+        // The session stays with the application for the next visit; only this screen's
+        // renderer and bitmaps go, so a document that is not on screen holds no PDFium memory.
+        detachLocked()
         renderer?.close()
+        renderer = null
         textDocument?.close()
-        session?.close()
         cache.evictAll()
         pendingSignedCopy?.delete()
     }

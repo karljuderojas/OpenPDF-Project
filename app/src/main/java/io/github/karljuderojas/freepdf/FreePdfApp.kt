@@ -6,11 +6,16 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import io.github.karljuderojas.freepdf.files.Documents
 import io.github.karljuderojas.freepdf.settings.AppSettings
 import io.github.karljuderojas.freepdf.settings.Tips
+import io.github.karljuderojas.freepdf.ui.viewer.DocumentSessions
+import java.io.File
 
 class FreePdfApp : Application() {
 
-    /** Open and recent PDFs for the Files tab. */
-    val documents by lazy { Documents(getSharedPreferences("documents", Context.MODE_PRIVATE)) }
+    /** Open and recent PDFs for the Files tab. A PDF leaving the open list ends its session. */
+    val documents by lazy { Documents(getSharedPreferences("documents", Context.MODE_PRIVATE), onClosed = sessions::close) }
+
+    /** The live working copies of the open PDFs, which the viewer attaches to; see [DocumentSessions]. */
+    val sessions by lazy { DocumentSessions(File(cacheDir, "edit")) }
 
     /** Choices from the Settings tab. */
     val settings by lazy { AppSettings(getSharedPreferences("settings", Context.MODE_PRIVATE)) }
