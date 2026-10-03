@@ -55,6 +55,7 @@ import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
 import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
+import io.github.karljuderojas.freepdf.ui.sign.CertificatePasswordDialog
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.home.HomeContent
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
@@ -147,6 +148,27 @@ class ScreenshotTest {
         shell(MainTab.Settings) {
             SettingsContent(
                 theme = ThemeChoice.System,
+                onTheme = {},
+                rememberHistory = true,
+                onRememberHistory = {},
+                onClearHistory = {},
+                version = "0.1.0",
+                onSourceCode = {},
+                showTips = true,
+                onShowTips = {},
+                onResetTips = {},
+                modifier = it,
+                pageColors = PageColors.Normal,
+                onPageColors = {},
+            )
+        }
+    }
+
+    @Test
+    fun settingsDark() = capture("settings_dark", darkTheme = true) {
+        shell(MainTab.Settings) {
+            SettingsContent(
+                theme = ThemeChoice.Dark,
                 onTheme = {},
                 rememberHistory = true,
                 onRememberHistory = {},
@@ -284,6 +306,29 @@ class ScreenshotTest {
 
     @Test
     fun viewerPassword() = capture("viewer_password") { viewer(ViewerMode.Read, ViewerState.Locked()) }
+
+    @Test
+    fun viewerFailed() = capture("viewer_failed") { viewer(ViewerMode.Read, ViewerState.Failed("Not a PDF file")) }
+
+    @Test
+    fun viewerLoading() {
+        show { viewer(ViewerMode.Read, ViewerState.Loading) }
+        // The spinner never stops, so hold the clock at one moment before capturing.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.mainClock.advanceTimeBy(500)
+        captureRoot("viewer_loading")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerSaveChanges() {
+        show { viewer(ViewerMode.Read, sample.copy(canUndo = true, hasUnsavedChanges = true)) }
+        // Going back with unsaved changes asks whether to save them first.
+        composeRule.onNodeWithContentDescription("Back").performClick()
+        composeRule.waitForIdle()
+        // The dialog is its own window, so capture the whole screen rather than the root node.
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_save_changes.png")
+    }
 
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
@@ -699,6 +744,21 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_split.png")
     }
 
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesSplitEvery() {
+        // With the last page selected there is nothing to split after it, so the dialog opens in
+        // "every few pages" mode. Its text field never lets Compose go idle (see viewerPasswordAdd),
+        // so no further taps are possible once it is open; the clock is driven by hand instead.
+        show { viewer(ViewerMode.Pages, sixPages, selectedPage = 5) }
+        composeRule.onNodeWithText("Split").performScrollTo()
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Split").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_split_every.png")
+    }
+
     @Test
     fun viewerPagesMultiSelect() = capture("viewer_pages_multi_select") {
         viewer(ViewerMode.Pages, sixPages, selectedPages = setOf(0, 2, 3))
@@ -786,6 +846,23 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_certificate_imported.png")
     }
 
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerSignCertificatePassword() {
+        // Asked for the .p12 file's password once a certificate file is picked (see ViewerScreen).
+        var asking by mutableStateOf(false)
+        show {
+            viewer(ViewerMode.Sign)
+            if (asking) CertificatePasswordDialog(onDismiss = {}, onImport = {})
+        }
+        // The dialog's password field never lets Compose go idle, so it opens only once the clock
+        // is driven by hand, as in viewerSignFinishEditable.
+        composeRule.mainClock.autoAdvance = false
+        asking = true
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_certificate_password.png")
+    }
+
     /** A signature made with FreePDF's device certificate, checked and unchanged. */
     private val signedByDana = SignatureReport(
         fieldName = "Signature1",
@@ -836,12 +913,46 @@ class ScreenshotTest {
 
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
+    fun viewerShareImages() {
+        show { viewer(ViewerMode.Read) }
+        composeRule.onNodeWithContentDescription("Share").performClick()
+        // A short PDF starts with every page picked.
+        composeRule.onNodeWithText("As images").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_share_images.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
     fun viewerPasswordLocked() {
         show { viewer(ViewerMode.More, sample.copy(isProtected = true)) }
         composeRule.onNodeWithText("Password").performScrollTo()
         composeRule.onNodeWithText("Password").performClick()
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_password_locked.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPasswordChange() {
+        show { viewer(ViewerMode.More, sample.copy(isProtected = true)) }
+        composeRule.onNodeWithText("Password").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        // The new password's fields never let Compose go idle, as in viewerPasswordAdd.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Change password").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_password_change.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPasswordRemove() {
+        show { viewer(ViewerMode.More, sample.copy(isProtected = true)) }
+        composeRule.onNodeWithText("Password").performScrollTo().performClick()
+        composeRule.onNodeWithText("Remove password").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_password_remove.png")
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
@@ -1029,13 +1140,13 @@ class ScreenshotTest {
         )
     }
 
-    private fun capture(name: String, content: @Composable () -> Unit) {
-        show(content)
+    private fun capture(name: String, darkTheme: Boolean = false, content: @Composable () -> Unit) {
+        show(darkTheme, content)
         captureRoot(name)
     }
 
-    private fun show(content: @Composable () -> Unit) {
-        composeRule.setContent { FreePdfTheme(dynamicColor = false, content = content) }
+    private fun show(darkTheme: Boolean = false, content: @Composable () -> Unit) {
+        composeRule.setContent { FreePdfTheme(darkTheme = darkTheme, dynamicColor = false, content = content) }
     }
 
     private fun captureRoot(name: String) {
