@@ -154,9 +154,12 @@ class ScreenshotTest {
     @Test
     fun viewerSignFinish() {
         show { viewer(ViewerMode.Sign, sample.copy(canUndo = true, hasUnsavedChanges = true, hasSignature = true), signerName = "Dana Whitfield") }
+        // The dialog's name field takes focus, and its blinking cursor never lets Compose go idle.
+        composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithText("Finish").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
         composeRule.onNodeWithTag("consent").performClick()
-        composeRule.waitForIdle()
+        composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_finish.png")
     }
 

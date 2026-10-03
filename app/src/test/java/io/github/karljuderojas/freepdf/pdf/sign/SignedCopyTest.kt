@@ -35,7 +35,7 @@ class SignedCopyTest {
 
     private val dir = Files.createTempDirectory("signed-copy").toFile()
     private val source = File(dir, "agreement.pdf").apply {
-        outputStream().use { out -> javaClass.classLoader!!.getResourceAsStream("sample/agreement.pdf").use { it.copyTo(out) } }
+        outputStream().use { out -> SignedCopyTest::class.java.classLoader!!.getResourceAsStream("sample/agreement.pdf")!!.use { it.copyTo(out) } }
     }
     private val originalSha256 = source.inputStream().use { DocumentHash.sha256(it) }
 
