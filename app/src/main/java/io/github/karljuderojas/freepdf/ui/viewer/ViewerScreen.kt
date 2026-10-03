@@ -137,8 +137,15 @@ sealed interface ViewerAction {
     data object CommitStamps : ViewerAction
 }
 
+/** Opens [uri] in [initialMode] (Read unless a Home shortcut or the Tools tab asked otherwise). */
 @Composable
-fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = viewModel()) {
+fun ViewerScreen(
+    uri: Uri,
+    onBack: () -> Unit,
+    initialMode: ViewerMode = ViewerMode.Read,
+    initialTool: Int? = null,
+    viewModel: ViewerViewModel = viewModel(),
+) {
     LaunchedEffect(uri) { viewModel.open(uri) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val savedSignatures by viewModel.savedSignatures.collectAsStateWithLifecycle()
@@ -178,6 +185,8 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
         onBack = onBack,
         loadPage = viewModel::page,
         loadRegion = viewModel::pageRegion,
+        initialMode = initialMode,
+        initialTool = initialTool,
         savedSignatures = savedSignatures,
         signerName = signerName,
         toolStyles = toolStyles,
