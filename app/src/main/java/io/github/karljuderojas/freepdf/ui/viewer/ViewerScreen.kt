@@ -934,7 +934,7 @@ fun ViewerContent(
     ) { padding ->
         Row(Modifier.fillMaxSize().padding(padding)) {
         // On a large screen the pages, contents and comments sit beside the document.
-        if (window.sidePanel && panelOpen && ready != null && mode != ViewerMode.Pages && !reflowing) {
+        if (window.sidePanel && panelOpen && ready != null && mode != ViewerMode.Pages) {
             ViewerSidePanel(
                 pageSizes = ready.pageSizes,
                 revision = ready.revision,
