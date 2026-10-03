@@ -10,7 +10,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -63,6 +65,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -462,6 +465,7 @@ private fun PageList(
     overlay: @Composable BoxScope.(page: Int) -> Unit = {},
 ) {
     var zoom by remember { mutableFloatStateOf(1f) }
+    var pan by remember { mutableStateOf(Offset.Zero) }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
@@ -469,7 +473,10 @@ private fun PageList(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                // Pinch to zoom; single-finger drags fall through to the list's scrolling.
+                .testTag("page-list")
+                // Pinch to zoom and drag with two fingers to pan; single-finger drags fall through
+                // to the list's scrolling. The scaled content is kept inside the screen, so no part
+                // of a zoomed page is ever out of reach.
                 .pointerInput(Unit) {
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false)
@@ -477,12 +484,20 @@ private fun PageList(
                             val event = awaitPointerEvent()
                             if (event.changes.count { it.pressed } >= 2) {
                                 zoom = (zoom * event.calculateZoom()).coerceIn(1f, 5f)
+                                val reach = Offset(size.width * (zoom - 1) / 2, size.height * (zoom - 1) / 2)
+                                pan = (pan + event.calculatePan()).let {
+                                    Offset(it.x.coerceIn(-reach.x, reach.x), it.y.coerceIn(-reach.y, reach.y))
+                                }
                                 event.changes.forEach { it.consume() }
                             }
                         } while (event.changes.any { it.pressed })
                     }
                 }
-                .graphicsLayer { scaleX = zoom; scaleY = zoom },
+                // Double-tap brings the page back to its normal size.
+                .pointerInput(Unit) {
+                    detectTapGestures(onDoubleTap = { zoom = 1f; pan = Offset.Zero })
+                }
+                .graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = pan.x; translationY = pan.y },
             contentPadding = PaddingValues(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {

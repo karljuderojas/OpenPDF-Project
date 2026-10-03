@@ -22,6 +22,7 @@ import io.github.karljuderojas.freepdf.pdf.displayToPdf
 import io.github.karljuderojas.freepdf.pdf.edit.EditSession
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
+import io.github.karljuderojas.freepdf.pdf.edit.PdfText
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.render.PdfRenderer
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStamper
@@ -41,6 +42,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
+import java.util.Locale
 import java.util.UUID
 
 sealed interface ViewerState {
@@ -145,8 +147,10 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun insertBlankPage(afterIndex: Int) = edit { document ->
-        val size = document.getPage(afterIndex).mediaBox
-        PageEditor.insertBlank(document, afterIndex + 1, size)
+        val neighbour = document.getPage(afterIndex)
+        PageEditor.insertBlank(document, afterIndex + 1, neighbour.mediaBox)
+        // A blank next to a rotated scan should face the same way as its neighbour.
+        document.getPage(afterIndex + 1).rotation = neighbour.rotation
     }
 
     fun movePage(from: Int, to: Int) = edit { PageEditor.move(it, from, to) }
@@ -203,16 +207,15 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             val point = displayMapper(document, page)(at)
             val maxWidth = if (kind == SignatureStore.Kind.Initials) 60f else 160f
             val maxHeight = if (kind == SignatureStore.Kind.Initials) 32f else 56f
-            val scale = minOf(maxWidth / image.width, maxHeight / image.height)
-            val width = image.width * scale
-            val height = image.height * scale
-            val box = PdfRect(point.x - width / 2, point.y, point.x + width / 2, point.y + height)
-            SignatureStamper.stamp(document, page, image, box)
+            SignatureStamper.stamp(document, page, image, point, maxWidth, maxHeight)
         }
     }
 
     fun addDate(page: Int, at: Offset) {
-        val today = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date())
+        // The phone's own date format, unless it uses a script the bundled fonts cannot show
+        // (Arabic, Devanagari, CJK), in which case the English form is placed instead of "?".
+        val today = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date()).takeIf { PdfText.isLatinGreekOrCyrillic(it) }
+            ?: DateFormat.getDateInstance(DateFormat.MEDIUM, Locale.US).format(Date())
         addText(page, at, today)
     }
 
@@ -267,11 +270,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             if (saved) {
                 // Later saves go to the new copy, which the user can write to.
                 openedUri = target
-                runCatching {
-                    context.contentResolver.takePersistableUriPermission(
-                        target, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                    )
-                }
+                val read = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                runCatching { context.contentResolver.takePersistableUriPermission(target, read or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+                    .recoverCatching { context.contentResolver.takePersistableUriPermission(target, read) }
                 remember(target)
                 finishSave()
             } else {
@@ -364,6 +365,8 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private companion object {
-        const val CACHE_BYTES = 96 * 1024 * 1024
+        // A quarter of the heap, capped: bitmaps are the bulk of the app's memory, and a fixed
+        // 96 MB is more than low-end phones with a 128 MB heap can give without an OutOfMemoryError.
+        val CACHE_BYTES = (Runtime.getRuntime().maxMemory() / 4).coerceAtMost(96L * 1024 * 1024).toInt()
     }
 }
