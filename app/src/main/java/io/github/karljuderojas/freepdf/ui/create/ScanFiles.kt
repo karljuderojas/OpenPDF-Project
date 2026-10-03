@@ -17,6 +17,14 @@ object ScanFiles {
     /** The address to hand the camera app for [file]. */
     fun cameraUri(context: Context, file: File): Uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
 
+    /**
+     * Deletes every waiting photo except [keep]: leftovers from an earlier visit that never got
+     * used. [keep] is the file the camera app may be writing into right now.
+     */
+    fun sweep(context: Context, keep: File? = null) {
+        dir(context).listFiles()?.forEach { if (it.absolutePath != keep?.absolutePath) it.delete() }
+    }
+
     /** Copies the picture at [uri] (from the gallery picker) into a new file here. */
     fun copyFrom(context: Context, uri: Uri): File = newPhoto(context).also { file ->
         val input = context.contentResolver.openInputStream(uri) ?: error("Cannot read $uri")
