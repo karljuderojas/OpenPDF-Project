@@ -13,6 +13,9 @@ import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDBorderStyleDictiona
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
 import io.github.karljuderojas.freepdf.pdf.PdfRect
 import java.util.Calendar
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
  * Standard PDF annotations, so marks made here show up in Acrobat, Xodo, browsers and others.
@@ -67,7 +70,11 @@ object Annotator {
         annotation.constructAppearances(document)
     }
 
-    /** Freehand drawing. Each stroke is a list of points in PDF user space. */
+    /**
+     * Freehand drawing. Each stroke is a list of points in PDF user space. A stroke that does
+     * not go anywhere (a tap, or one or two points on the same spot) is drawn as a dot about as
+     * wide as the pen, since viewers stroke ink with flat caps and would otherwise show nothing.
+     */
     fun ink(
         document: PDDocument,
         pageIndex: Int,
@@ -76,11 +83,12 @@ object Annotator {
         lineWidth: Float = 2f,
         author: String? = null,
     ) {
-        val points = strokes.flatten()
-        require(points.isNotEmpty())
+        require(strokes.flatten().isNotEmpty())
+        val drawn = strokes.filter { it.isNotEmpty() }.map { stroke -> if (stroke.isDot(lineWidth)) dot(stroke.first(), lineWidth) else stroke }
+        val points = drawn.flatten()
         val annotation = PDAnnotationMarkup().apply {
             cosObject.setName(COSName.SUBTYPE, PDAnnotationMarkup.SUB_TYPE_INK)
-            inkList = strokes.map { stroke -> stroke.flatMap { listOf(it.x, it.y) }.toFloatArray() }.toTypedArray()
+            inkList = drawn.map { stroke -> stroke.flatMap { listOf(it.x, it.y) }.toFloatArray() }.toTypedArray()
             rectangle = PdfRect(
                 points.minOf { it.x } - lineWidth, points.minOf { it.y } - lineWidth,
                 points.maxOf { it.x } + lineWidth, points.maxOf { it.y } + lineWidth,
@@ -132,6 +140,27 @@ object Annotator {
         document.getPage(pageIndex).annotations.add(annotation)
         annotation.constructAppearances(document)
     }
+
+    /** True when every point of the stroke sits within a fraction of the pen width of the first. */
+    private fun List<PdfPoint>.isDot(lineWidth: Float): Boolean {
+        val (x, y) = first()
+        val reach = lineWidth * 0.25f
+        return all { abs(it.x - x) <= reach && abs(it.y - y) <= reach }
+    }
+
+    /**
+     * A small closed ring around [center]: stroked with the pen it fills in to a round blob a
+     * little wider than the pen, which is how a tap with a real pen looks.
+     */
+    private fun dot(center: PdfPoint, lineWidth: Float): List<PdfPoint> {
+        val radius = lineWidth * 0.2f
+        return (0..DOT_SIDES).map { i ->
+            val angle = 2 * Math.PI * i / DOT_SIDES
+            PdfPoint(center.x + radius * cos(angle).toFloat(), center.y + radius * sin(angle).toFloat())
+        }
+    }
+
+    private const val DOT_SIDES = 8
 
     private fun PDAnnotationMarkup.stamp(author: String?) {
         if (author != null) titlePopup = author
