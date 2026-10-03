@@ -779,12 +779,16 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
-    /** Lists [uri] in the Files tab; in the history too if the app can reopen it later. */
+    /**
+     * Lists [uri] in the Files tab; in the history too if the app can reopen it later and history
+     * is not paused in Settings.
+     */
     private suspend fun remember(uri: Uri) {
         val name = withContext(Dispatchers.IO) { displayName(uri) }
         val lasting = uri.scheme == "file" ||
             context.contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
-        getApplication<FreePdfApp>().documents.opened(uri.toString(), name, remember = lasting)
+        val app = getApplication<FreePdfApp>()
+        app.documents.opened(uri.toString(), name, remember = lasting && app.settings.rememberHistory.value)
     }
 
     private fun displayName(uri: Uri): String {
