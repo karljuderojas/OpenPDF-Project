@@ -37,6 +37,16 @@ class EditSession(private val dir: File, source: InputStream) {
         workingFile.outputStream().use { source.copyTo(it) }
     }
 
+    /** The password the PDF was unlocked with; empty for one that opens without. See [unlock]. */
+    var password: String = ""
+        private set
+
+    /** True if the PDF is locked and [unlock] has not been given its password yet. */
+    fun needsPassword(): Boolean = !PdfDocuments.opens(workingFile, password)
+
+    /** Uses [candidate] from now on if it opens the PDF. Edits keep the file locked with it. */
+    fun unlock(candidate: String): Boolean = PdfDocuments.opens(workingFile, candidate).also { if (it) password = candidate }
+
     val canUndo: Boolean get() = undoStack.isNotEmpty()
     val canRedo: Boolean get() = redoStack.isNotEmpty()
     val hasUnsavedChanges: Boolean get() = version != savedVersion
@@ -45,8 +55,9 @@ class EditSession(private val dir: File, source: InputStream) {
     fun edit(change: (PDDocument) -> Unit) {
         val next = File(dir, "next.pdf")
         try {
-            PDDocument.load(workingFile).use { document ->
+            PDDocument.load(workingFile, password).use { document ->
                 change(document)
+                PdfDocuments.keepProtection(document, password)
                 document.save(next)
             }
         } catch (e: Throwable) {

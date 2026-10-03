@@ -13,6 +13,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.unit.IntRect
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -78,6 +79,9 @@ sealed interface ViewerState {
         val hasUnsavedChanges: Boolean = false,
         val hasSignature: Boolean = false,
     ) : ViewerState
+
+    /** The PDF is password protected; [wrongPassword] after a password that did not open it. */
+    data class Locked(val wrongPassword: Boolean = false) : ViewerState
 
     data class Failed(val message: String?) : ViewerState
 }
@@ -176,9 +180,23 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         editLog.clear()
                         redoLog.clear()
                     }
-                    reloadLocked()
+                    firstLoadLocked()
                 }
             }.onSuccess { remember(uri) }.getOrElse { ViewerState.Failed(it.message) }
+        }
+    }
+
+    /** Tries [password] on a [ViewerState.Locked] PDF. */
+    fun unlock(password: String) {
+        viewModelScope.launch {
+            _state.value = lock.withLock {
+                val current = session ?: return@withLock ViewerState.Failed(null)
+                if (withContext(Dispatchers.IO) { current.unlock(password) }) {
+                    runCatching { reloadLocked() }.getOrElse { ViewerState.Failed(it.message) }
+                } else {
+                    ViewerState.Locked(wrongPassword = true)
+                }
+            }
         }
     }
 
@@ -190,6 +208,17 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             if (index >= current.pageCount) return@withLock null
             cache.get(key) ?: current.renderPage(index, widthPx).also { cache.put(key, it) }
         }
+    }
+
+    /**
+     * The part of page [index] in [region], rendered as if the page were [fullWidthPx] wide.
+     * Not cached: it is only good for one zoom and scroll position, and it is at most a
+     * screenful of pixels, so a zoomed screen never holds much more than two screenfuls.
+     */
+    suspend fun pageRegion(index: Int, fullWidthPx: Int, region: IntRect): Bitmap? = lock.withLock {
+        val current = renderer ?: return@withLock null
+        if (index >= current.pageCount) return@withLock null
+        current.renderRegion(index, fullWidthPx, region)
     }
 
     fun rotatePage(index: Int) = edit { PageEditor.rotate(it, index, 90) }
@@ -252,7 +281,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     suspend fun words(page: Int): List<PageWord> = lock.withLock {
         wordCache[page] ?: withContext(Dispatchers.IO) {
             runCatching {
-                val document = textDocument ?: PDDocument.load(session?.workingFile ?: error("Nothing is open")).also { textDocument = it }
+                val document = textDocument ?: (session?.let { PDDocument.load(it.workingFile, it.password) } ?: error("Nothing is open")).also { textDocument = it }
                 PageText.words(document, page)
             }.getOrDefault(emptyList())
         }.also { wordCache[page] = it }
@@ -387,7 +416,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                         }
                         val out = File(context.cacheDir, "signed/${UUID.randomUUID()}.pdf").apply { parentFile?.mkdirs() }
                         out.outputStream().use { output ->
-                            SignedCopy.write(current.workingFile, trail, name, identity, output, File(out.path + ".tmp"))
+                            SignedCopy.write(current.workingFile, trail, name, identity, output, File(out.path + ".tmp"), current.password)
                         }
                         pendingSignedCopy?.delete()
                         pendingSignedCopy = out
@@ -561,6 +590,15 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         return PdfRect(minOf(a.x, b.x), minOf(a.y, b.y), maxOf(a.x, b.x), maxOf(a.y, b.y))
     }
 
+    /** Loads a newly opened PDF, or asks for its password if it is locked. Call with [lock] held. */
+    private suspend fun firstLoadLocked(): ViewerState = try {
+        reloadLocked()
+    } catch (e: Exception) {
+        // PDFium only says it could not open the file; PdfBox can tell whether a password is why.
+        val locked = session?.let { withContext(Dispatchers.IO) { runCatching { it.needsPassword() }.getOrDefault(false) } }
+        if (locked == true) ViewerState.Locked() else throw e
+    }
+
     /** Re-opens the working copy in PDFium. Call with [lock] held. */
     private suspend fun reloadLocked(): ViewerState {
         val current = session ?: return ViewerState.Failed(null)
@@ -571,9 +609,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         textDocument = null
         wordCache.clear()
         revision++
-        val next = PdfRenderer.open(context, Uri.fromFile(current.workingFile))
+        val next = PdfRenderer.open(context, Uri.fromFile(current.workingFile), current.password.ifEmpty { null })
         _marks.value = withContext(Dispatchers.IO) {
-            runCatching { PDDocument.load(current.workingFile).use { Marks.list(it) } }.getOrDefault(emptyList())
+            runCatching { PDDocument.load(current.workingFile, current.password).use { Marks.list(it) } }.getOrDefault(emptyList())
         }
         renderer = next
         val hasSignature = editLog.any { it?.type == AuditEvent.Type.Signed }
