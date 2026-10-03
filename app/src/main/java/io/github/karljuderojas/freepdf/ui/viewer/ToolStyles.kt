@@ -113,7 +113,7 @@ fun StampBar(selected: Stamps.Kind, onSelect: (Stamps.Kind) -> Unit) {
                 FilterChip(
                     selected = kind == selected,
                     onClick = { onSelect(kind) },
-                    label = { Text(stringResource(kind.label).uppercase(), color = color, fontWeight = FontWeight.Bold) },
+                    label = { Text(stringResource(kind.labelRes).uppercase(), color = color, fontWeight = FontWeight.Bold) },
                     border = FilterChipDefaults.filterChipBorder(
                         enabled = true, selected = kind == selected, borderColor = color, selectedBorderColor = color,
                         borderWidth = 1.5.dp, selectedBorderWidth = 2.5.dp,
@@ -126,7 +126,7 @@ fun StampBar(selected: Stamps.Kind, onSelect: (Stamps.Kind) -> Unit) {
 }
 
 /** The stamp's name in the app's language; the PDF itself keeps the English label. */
-val Stamps.Kind.label: Int
+val Stamps.Kind.labelRes: Int
     get() = when (this) {
         Stamps.Kind.Approved -> R.string.stamp_approved
         Stamps.Kind.NotApproved -> R.string.stamp_not_approved
