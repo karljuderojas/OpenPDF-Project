@@ -11,6 +11,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertTextContains
@@ -70,6 +74,15 @@ import io.github.karljuderojas.freepdf.ui.home.HomeContent
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
 import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
 import io.github.karljuderojas.freepdf.ui.create.ImagesToPdfContent
+import io.github.karljuderojas.freepdf.ui.create.ScannerContent
+import io.github.karljuderojas.freepdf.ui.create.thumbKey
+import io.github.karljuderojas.freepdf.pdf.scan.PageDetector
+import io.github.karljuderojas.freepdf.pdf.scan.PerspectiveWarp
+import io.github.karljuderojas.freepdf.pdf.scan.Quad
+import io.github.karljuderojas.freepdf.pdf.scan.ScanFilter
+import io.github.karljuderojas.freepdf.pdf.scan.ScanFilters
+import io.github.karljuderojas.freepdf.pdf.scan.ScanPage
+import io.github.karljuderojas.freepdf.pdf.scan.SyntheticPhoto
 import io.github.karljuderojas.freepdf.pdf.create.PageFit
 import androidx.compose.ui.graphics.asImageBitmap
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
@@ -165,6 +178,66 @@ class ScreenshotTest {
         val photos = listOf("content://a", "content://b", "content://c")
         val thumbs = photos.zip(listOf(samplePages[0], samplePages[1], samplePages[0])).toMap().mapValues { it.value.asImageBitmap() }
         ImagesToPdfContent(photos, thumbs, PageFit.Picture, 2, false, {}, { _, _ -> }, {}, {}, {}, {})
+    }
+
+    // A skewed photo of the sample page on a desk, with the corners the app's own detector finds in it.
+    private val deskPhoto by lazy { SyntheticPhoto.make(samplePages[0]) }
+    private val detectedQuad by lazy { PageDetector.detect(deskPhoto) ?: Quad.inset(0.04f) }
+
+    private fun scanThumbs(pages: List<ScanPage>, filter: ScanFilter) = pages.associate { page ->
+        thumbKey(page, filter) to ScanFilters.apply(PerspectiveWarp.warp(deskPhoto, page.quad, 480), filter).asImageBitmap()
+    }
+
+    @Test
+    fun scannerEmpty() = capture("scanner_empty") {
+        ScannerContent(emptyList(), emptyMap(), ScanFilter.Color, null, false, null, false, null, false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {})
+    }
+
+    @Test
+    fun scannerPages() = capture("scanner_pages") {
+        val pages = listOf(ScanPage(1, "a", detectedQuad), ScanPage(2, "b", detectedQuad))
+        ScannerContent(pages, scanThumbs(pages, ScanFilter.Color), ScanFilter.Color, null, false, null, false, null, false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {})
+    }
+
+    @Test
+    fun scannerPagesBlackAndWhite() = capture("scanner_pages_black_white") {
+        val pages = listOf(ScanPage(1, "a", detectedQuad), ScanPage(2, "b", detectedQuad))
+        ScannerContent(pages, scanThumbs(pages, ScanFilter.BlackWhite), ScanFilter.BlackWhite, null, false, null, false, null, false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {})
+    }
+
+    @Test
+    fun scannerAdjustEdges() = capture("scanner_adjust_edges") {
+        val pages = listOf(ScanPage(1, "a", detectedQuad))
+        ScannerContent(pages, emptyMap(), ScanFilter.Color, 0, true, deskPhoto.asImageBitmap(), false, null, false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {})
+    }
+
+    @Test
+    fun scannerSaving() = capture("scanner_saving") {
+        val pages = listOf(ScanPage(1, "a", detectedQuad), ScanPage(2, "b", detectedQuad))
+        ScannerContent(pages, scanThumbs(pages, ScanFilter.Grayscale), ScanFilter.Grayscale, null, false, null, false, 1, false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {})
+    }
+
+    /** The photo, then the straightened page in each look, so the pipeline can be judged by eye. */
+    @Test
+    fun scannerLooks() = capture("scanner_looks") {
+        val flat = PerspectiveWarp.warp(deskPhoto, detectedQuad, 700)
+        val shots = listOf(
+            "Photo" to deskPhoto,
+            "Color" to ScanFilters.apply(flat, ScanFilter.Color),
+            "Grayscale" to ScanFilters.apply(flat, ScanFilter.Grayscale),
+            "Black and white" to ScanFilters.apply(flat, ScanFilter.BlackWhite),
+        )
+        androidx.compose.foundation.layout.Row(
+            Modifier.fillMaxSize().background(Color.White).padding(8.dp),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+        ) {
+            shots.forEach { (label, bitmap) ->
+                androidx.compose.foundation.layout.Column(Modifier.weight(1f), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                    androidx.compose.material3.Text(label, color = Color.Black)
+                    androidx.compose.foundation.Image(bitmap.asImageBitmap(), contentDescription = label, modifier = Modifier.fillMaxWidth())
+                }
+            }
+        }
     }
 
     @Test
