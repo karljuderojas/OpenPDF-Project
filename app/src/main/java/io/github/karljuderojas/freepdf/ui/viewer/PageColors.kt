@@ -77,6 +77,14 @@ internal val PageColors.paper: Color
         PageColors.Sepia -> Color(0xFFF4ECD8)
     }
 
+/** The text color for reading mode, on [paper]. */
+internal val PageColors.ink: Color
+    get() = when (this) {
+        PageColors.Normal -> Color(0xFF1B1B1F)
+        PageColors.Night -> Color(0xFFE6E6E6)
+        PageColors.Sepia -> Color(0xFF3B2F1E)
+    }
+
 @get:StringRes
 val PageColors.label: Int
     get() = when (this) {

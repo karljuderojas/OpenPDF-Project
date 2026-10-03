@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -23,6 +24,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
@@ -57,11 +59,15 @@ import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
 import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
+import io.github.karljuderojas.freepdf.ui.files.UnsavedCloseDialog
 import io.github.karljuderojas.freepdf.ui.sign.CertificatePasswordDialog
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.home.HomeContent
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
 import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
+import io.github.karljuderojas.freepdf.ui.create.ImagesToPdfContent
+import io.github.karljuderojas.freepdf.pdf.create.PageFit
+import androidx.compose.ui.graphics.asImageBitmap
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
 import io.github.karljuderojas.freepdf.ui.viewer.DocumentInfoDialog
 import io.github.karljuderojas.freepdf.ui.viewer.AnnotateTool
@@ -137,6 +143,25 @@ class ScreenshotTest {
 
     @Test
     fun tools() = capture("tools") { shell(MainTab.Tools) { ToolsContent(onToolPicked = {}, modifier = it) } }
+
+    @Test
+    fun imagesToPdfEmpty() = capture("images_to_pdf_empty") {
+        ImagesToPdfContent(emptyList(), emptyMap(), PageFit.A4, null, false, {}, { _, _ -> }, {}, {}, {}, {})
+    }
+
+    @Test
+    fun imagesToPdfPicked() = capture("images_to_pdf_picked") {
+        val photos = listOf("content://a", "content://b", "content://c")
+        val thumbs = photos.zip(listOf(samplePages[0], samplePages[1], samplePages[0])).toMap().mapValues { it.value.asImageBitmap() }
+        ImagesToPdfContent(photos, thumbs, PageFit.A4, null, false, {}, { _, _ -> }, {}, {}, {}, {})
+    }
+
+    @Test
+    fun imagesToPdfMaking() = capture("images_to_pdf_making") {
+        val photos = listOf("content://a", "content://b", "content://c")
+        val thumbs = photos.zip(listOf(samplePages[0], samplePages[1], samplePages[0])).toMap().mapValues { it.value.asImageBitmap() }
+        ImagesToPdfContent(photos, thumbs, PageFit.Picture, 2, false, {}, { _, _ -> }, {}, {}, {}, {})
+    }
 
     @Test
     fun toolsSearch() = capture("tools_search_tick") {
@@ -219,6 +244,27 @@ class ScreenshotTest {
         files(
             open = listOf(sampleRecent[0], DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * HOUR)),
             recent = sampleRecent,
+        )
+    }
+
+    @Test
+    fun viewerReflow() = capture("viewer_reflow") { viewer(ViewerMode.Read, reflow = true) }
+
+    @Test
+    fun viewerReflowNightLarge() = capture("viewer_reflow_night_large") {
+        viewer(ViewerMode.Read, reflow = true, pageColors = PageColors.Night, readingTextSize = 26)
+    }
+
+    @Test
+    fun viewerReflowSepia() = capture("viewer_reflow_sepia") { viewer(ViewerMode.Read, reflow = true, pageColors = PageColors.Sepia) }
+
+    @Test
+    fun filesCloseUnsaved() = capture("files_close_unsaved") {
+        files(
+            open = listOf(sampleRecent[0], DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * HOUR)),
+            recent = sampleRecent,
+            unsaved = setOf("content://b"),
+            closing = true,
         )
     }
 
@@ -865,6 +911,22 @@ class ScreenshotTest {
 
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
+    fun viewerPagesCrop() {
+        show { viewer(ViewerMode.Pages, sixPages, selectedPage = 1) }
+        composeRule.onNodeWithText("Crop").performScrollTo()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Crop").performClick()
+        composeRule.waitForIdle()
+        // Trim a bit off three edges so the sketch shows what stays.
+        for ((tag, amount) in listOf("crop-left" to 0.1f, "crop-top" to 0.2f, "crop-right" to 0.05f)) {
+            composeRule.onNodeWithTag(tag).performSemanticsAction(SemanticsActions.SetProgress) { it(amount) }
+        }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_crop.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
     fun viewerPagesSplitEvery() {
         // With the last page selected there is nothing to split after it, so the dialog opens in
         // "every few pages" mode. Its text field never lets Compose go idle (see viewerPasswordAdd),
@@ -1169,8 +1231,9 @@ class ScreenshotTest {
     )
 
     @Composable
-    private fun files(open: List<DocumentEntry>, recent: List<DocumentEntry>) = shell(MainTab.Files) {
-        FilesContent(open, recent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {}, modifier = it, now = now)
+    private fun files(open: List<DocumentEntry>, recent: List<DocumentEntry>, unsaved: Set<String> = emptySet(), closing: Boolean = false) = shell(MainTab.Files) {
+        FilesContent(open, recent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {}, modifier = it, unsaved = unsaved, now = now)
+        if (closing) UnsavedCloseDialog(onSave = {}, onDiscard = {}, onCancel = {})
     }
 
     /** A tab's screen inside the bottom tab bar, as the app shows it. */
@@ -1200,6 +1263,8 @@ class ScreenshotTest {
         openDocuments: List<DocumentEntry> = emptyList(),
         unsavedDocuments: Set<String> = emptySet(),
         pageColors: PageColors = PageColors.Normal,
+        reflow: Boolean = false,
+        readingTextSize: Int = 18,
         tip: Int? = null,
         stamps: List<PlacedStamp> = emptyList(),
         selectedStamp: Long? = null,
@@ -1238,6 +1303,8 @@ class ScreenshotTest {
             unsavedDocuments = unsavedDocuments,
             currentUri = openDocuments.firstOrNull()?.uri,
             pageColors = pageColors,
+            initialReflow = reflow,
+            readingTextSize = readingTextSize,
             tip = tip,
             stamps = stamps,
             initialSelectedStamp = selectedStamp,

@@ -20,6 +20,14 @@ data class ToolEntry(val mode: ViewerMode, @StringRes val label: Int) {
 }
 
 /**
+ * A tool that makes a new PDF, so it needs no open document and has no viewer mode. They are
+ * listed above the viewer's tools and open their own screen.
+ */
+enum class CreateTool(@StringRes val label: Int, @StringRes val description: Int, @StringRes val synonyms: Int) {
+    ImagesToPdf(R.string.tool_images_to_pdf, R.string.tool_about_images_to_pdf, R.string.tool_synonyms_images_to_pdf),
+}
+
+/**
  * Every working tool, grouped like the viewer's mode bar with signing first. It is read from
  * [ViewerMode], so a tool shows up here as soon as it ships there.
  */
@@ -59,6 +67,7 @@ private val descriptions = mapOf(
     R.string.tool_add_image to R.string.tool_about_add_image,
     R.string.tool_redact to R.string.tool_about_redact,
     R.string.tool_rotate to R.string.tool_about_rotate,
+    R.string.tool_crop to R.string.tool_about_crop,
     R.string.tool_move_earlier to R.string.tool_about_move_earlier,
     R.string.tool_move_later to R.string.tool_about_move_later,
     R.string.tool_insert to R.string.tool_about_insert,
@@ -87,6 +96,7 @@ private val synonymLists = mapOf(
     R.string.tool_add_image to R.string.tool_synonyms_add_image,
     R.string.tool_redact to R.string.tool_synonyms_redact,
     R.string.tool_rotate to R.string.tool_synonyms_rotate,
+    R.string.tool_crop to R.string.tool_synonyms_crop,
     R.string.tool_move_earlier to R.string.tool_synonyms_reorder,
     R.string.tool_move_later to R.string.tool_synonyms_reorder,
     R.string.tool_insert to R.string.tool_synonyms_insert,
