@@ -14,7 +14,7 @@ Goal: the features people use in PDFGear and Xodo, free, offline and open source
 - ✅ Files tab: documents open this session on top, recent history grouped by Today / Yesterday / Earlier, "Open file" through Android's file picker (stored on the device only)
 - ⬜ Switcher between open documents, tab style
 - ⬜ Night mode, reading settings
-- ⬜ Password-protected PDFs
+- ✅ Password-protected PDFs: asks for the password, and edits and saves keep the file locked with it
 
 ## Annotating (Annotate mode)
 - ✅ Highlight, underline, strikeout by dragging over the text (an area, until text selection lands)
