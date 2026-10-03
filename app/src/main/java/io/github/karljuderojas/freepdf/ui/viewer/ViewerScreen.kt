@@ -92,6 +92,7 @@ import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
@@ -143,12 +144,18 @@ sealed interface ViewerAction {
     data class Erase(val page: Int, val at: Offset) : ViewerAction
 
     /** Sign actions. */
-    data class SaveSignature(val kind: SignatureStore.Kind, val image: Bitmap) : ViewerAction
+    data class SaveSignature(val kind: SignatureStore.Kind, val image: Bitmap, val method: SignatureMethod) : ViewerAction
     data class PlaceSignature(val page: Int, val at: Offset, val kind: SignatureStore.Kind) : ViewerAction
     data class AddDate(val page: Int, val at: Offset) : ViewerAction
     data class AddText(val page: Int, val at: Offset, val text: String) : ViewerAction
     data class AddCheckmark(val page: Int, val at: Offset) : ViewerAction
     data class FinishSigning(val name: String, val consentText: String, val seal: Boolean) : ViewerAction
+
+    /** Placed stamps; see [StampLayer]. Moves are fractions of the page. */
+    data class MoveStamp(val id: Long, val delta: Offset) : ViewerAction
+    data class ResizeStamp(val id: Long, val factor: Float) : ViewerAction
+    data class DeleteStamp(val id: Long) : ViewerAction
+    data object CommitStamps : ViewerAction
 }
 
 @Composable
@@ -159,6 +166,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
     val signerName by viewModel.signerName.collectAsStateWithLifecycle()
     val toolStyles by viewModel.toolStyles.collectAsStateWithLifecycle()
     val marks by viewModel.marks.collectAsStateWithLifecycle()
+    val stamps by viewModel.stamps.collectAsStateWithLifecycle()
     val resources = LocalResources.current
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -199,6 +207,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
         signerName = signerName,
         toolStyles = toolStyles,
         marks = marks,
+        stamps = stamps,
         snackbarHostState = snackbarHostState,
         onAction = { action ->
             when (action) {
@@ -239,12 +248,16 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                     }
                 }
                 is ViewerAction.Erase -> viewModel.erase(action.page, action.at)
-                is ViewerAction.SaveSignature -> viewModel.saveSignature(action.kind, action.image)
+                is ViewerAction.SaveSignature -> viewModel.saveSignature(action.kind, action.image, action.method)
                 is ViewerAction.PlaceSignature -> viewModel.placeSignature(action.page, action.at, action.kind)
                 is ViewerAction.AddDate -> viewModel.addDate(action.page, action.at)
                 is ViewerAction.AddText -> viewModel.addText(action.page, action.at, action.text)
                 is ViewerAction.AddCheckmark -> viewModel.addCheckmark(action.page, action.at)
                 is ViewerAction.FinishSigning -> viewModel.finishSigning(action.name, action.consentText, action.seal)
+                is ViewerAction.MoveStamp -> viewModel.moveStamp(action.id, action.delta.x, action.delta.y)
+                is ViewerAction.ResizeStamp -> viewModel.resizeStamp(action.id, action.factor)
+                is ViewerAction.DeleteStamp -> viewModel.deleteStamp(action.id)
+                ViewerAction.CommitStamps -> viewModel.commitStamps()
             }
         },
     )
@@ -266,6 +279,8 @@ fun ViewerContent(
     signerName: String = "",
     toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
     marks: List<Mark> = emptyList(),
+    stamps: List<PlacedStamp> = emptyList(),
+    initialSelectedStamp: Long? = null,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onAction: (ViewerAction) -> Unit = {},
 ) {
@@ -296,9 +311,22 @@ fun ViewerContent(
         ?.takeIf { mode == ViewerMode.Read || (mode == ViewerMode.Annotate && AnnotateTool.forLabel(selectedTool) == null) }
     var showComments by remember { mutableStateOf(false) }
     var commentFor by remember { mutableStateOf<Mark?>(null) }
+    var selectedStamp by remember { mutableStateOf(initialSelectedStamp) }
+    // A newly placed stamp starts out selected, so its handles show right away.
+    var newestStamp by remember { mutableStateOf(stamps.maxOfOrNull { it.id } ?: 0L) }
+    LaunchedEffect(stamps) {
+        val newest = stamps.maxOfOrNull { it.id } ?: return@LaunchedEffect
+        if (newest > newestStamp) {
+            newestStamp = newest
+            selectedStamp = newest
+        }
+    }
 
     val ready = state as? ViewerState.Ready
     val pageCount = ready?.pageSizes?.size ?: 0
+    // Stamps still being placed count as changes, for Undo and for offering Finish.
+    val canUndo = ready?.canUndo == true || stamps.isNotEmpty()
+    val hasSignature = ready?.hasSignature == true || stamps.any { it.content is StampContent.Signature }
     LaunchedEffect(mode, selectedTool, ready?.revision) { selection = null }
     LaunchedEffect(pageCount) {
         if (pageCount > 0 && selectedPage >= pageCount) selectedPage = pageCount - 1
@@ -337,6 +365,9 @@ fun ViewerContent(
 
     fun backToReading() {
         if (mode == ViewerMode.Pages) returnToPage = selectedPage
+        // Done keeps what was placed: it is written into the PDF on the way out.
+        if (mode == ViewerMode.Sign && stamps.isNotEmpty()) onAction(ViewerAction.CommitStamps)
+        selectedStamp = null
         mode = ViewerMode.Read
         selectedTool = null
         pickedMark = null
@@ -376,7 +407,7 @@ fun ViewerContent(
                             TextButton(onClick = { onAction(ViewerAction.Save) }) { Text(stringResource(R.string.save)) }
                         }
                     } else {
-                        IconButton(onClick = { onAction(ViewerAction.Undo) }, enabled = ready?.canUndo == true) {
+                        IconButton(onClick = { onAction(ViewerAction.Undo) }, enabled = canUndo) {
                             Icon(EditIcons.Undo, contentDescription = stringResource(R.string.undo))
                         }
                         IconButton(onClick = { onAction(ViewerAction.Redo) }, enabled = ready?.canRedo == true) {
@@ -386,7 +417,7 @@ fun ViewerContent(
                             Text(stringResource(R.string.done))
                         }
                         // Once something is signed, Finish turns it into a signed copy.
-                        if (mode == ViewerMode.Sign && ready?.hasSignature == true) {
+                        if (mode == ViewerMode.Sign && hasSignature) {
                             Button(onClick = { finishing = true }, modifier = Modifier.padding(end = 8.dp)) {
                                 Text(stringResource(R.string.finish))
                             }
@@ -492,6 +523,7 @@ fun ViewerContent(
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
                     val signTool = SignTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Sign }
                     PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState) { page ->
+                        val pageStamps = if (mode == ViewerMode.Sign) stamps.filter { it.page == page } else emptyList()
                         val words by produceState(emptyList<PageWord>(), page, ready.revision) { value = loadWords(page) }
                         // Text can be selected while reading, or in Annotate before a tool is picked.
                         if (mode == ViewerMode.Read || (mode == ViewerMode.Annotate && tool == null)) {
@@ -517,10 +549,13 @@ fun ViewerContent(
                             )
                             }
                         }
-                        if (signTool != null) {
+                        if (signTool != null || (selectedStamp != null && pageStamps.isNotEmpty())) {
                             TapLayer(page) { at ->
-                                val kind = signTool.signatureKind
+                                val kind = signTool?.signatureKind
                                 when {
+                                    // The first tap away from a selected stamp only lets go of it.
+                                    selectedStamp != null -> selectedStamp = null
+                                    signTool == null -> Unit
                                     kind != null && savedSignatures[kind] == null -> padFor = kind
                                     kind != null -> onAction(ViewerAction.PlaceSignature(page, at, kind))
                                     signTool == SignTool.Date -> onAction(ViewerAction.AddDate(page, at))
@@ -528,6 +563,19 @@ fun ViewerContent(
                                     else -> onAction(ViewerAction.AddCheckmark(page, at))
                                 }
                             }
+                        }
+                        if (pageStamps.isNotEmpty()) {
+                            StampLayer(
+                                stamps = pageStamps,
+                                selected = selectedStamp,
+                                onSelect = { selectedStamp = it },
+                                onMove = { id, delta -> onAction(ViewerAction.MoveStamp(id, delta)) },
+                                onResize = { id, factor -> onAction(ViewerAction.ResizeStamp(id, factor)) },
+                                onDelete = { id ->
+                                    selectedStamp = null
+                                    onAction(ViewerAction.DeleteStamp(id))
+                                },
+                            )
                         }
                         if (tool != null) {
                             val style = styleOf(tool)
@@ -575,10 +623,11 @@ fun ViewerContent(
     padFor?.let { kind ->
         SignaturePadDialog(
             kind = kind,
+            typedName = signerName,
             onDismiss = { padFor = null },
-            onSave = {
+            onSave = { image, method ->
                 padFor = null
-                onAction(ViewerAction.SaveSignature(kind, it))
+                onAction(ViewerAction.SaveSignature(kind, image, method))
             },
         )
     }
