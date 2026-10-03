@@ -57,6 +57,55 @@ class TextBoxesTest {
     }
 
     @Test
+    fun longTextWrapsBeforeThePageEdge() {
+        sample().use { document ->
+            val text = "This note is far too long to fit on one line of the page, so it has to wrap " +
+                "onto several lines instead of running off the right-hand edge where nobody can read it. " +
+                "Please check the dates in section two, the payment terms in section four and the " +
+                "notice period in section nine before anyone signs, then send the marked copy back to Dana."
+            val box = TextBoxes.add(document, 0, PdfPoint(72f, 700f), text, Annotator.Rgb.Blue, fontSize = 12f)
+
+            val rect = box.rectangle
+            val page = document.getPage(0).cropBox
+            assertTrue("right ${rect.upperRightX}", rect.upperRightX <= page.upperRightX)
+            // Several lines of 12pt text, 1.2 line spacing: at least three lines tall.
+            assertTrue("height ${rect.height}", rect.height >= 3 * 12f * 1.2f)
+
+            val content = String(box.normalAppearanceStream.contentStream.toByteArray(), Charsets.ISO_8859_1)
+            val shown = Regex("\\) Tj").findAll(content).count()
+            assertTrue("lines shown: $shown", shown >= 3)
+            assertEquals(shown - 1, Regex("\\bT\\*").findAll(content).count())
+            // Every word is still there, in order.
+            val words = Regex("\\((.*?)\\) Tj").findAll(content).joinToString(" ") { it.groupValues[1] }
+            assertEquals(text, words)
+            assertEquals(text, box.contents)
+        }
+    }
+
+    @Test
+    fun aWordWiderThanTheBoxIsBrokenBetweenLetters() {
+        sample().use { document ->
+            // Only 20pt of room before the edge, so the box falls back to its narrowest width and
+            // the word is split rather than left to overflow.
+            val box = TextBoxes.add(document, 0, PdfPoint(592f, 700f), "Unbreakablewordhere", Annotator.Rgb.Blue, fontSize = 12f)
+            val content = String(box.normalAppearanceStream.contentStream.toByteArray(), Charsets.ISO_8859_1)
+            assertTrue(content, Regex("\\) Tj").findAll(content).count() >= 2)
+            assertTrue("width ${box.rectangle.width}", box.rectangle.width <= 4 * 12f + 2 * 4f + 0.01f)
+        }
+    }
+
+    @Test
+    fun editWrapsToo() {
+        sample().use { document ->
+            val box = TextBoxes.add(document, 0, PdfPoint(72f, 700f), "Short", Annotator.Rgb.Red)
+            TextBoxes.edit(document, box, "A line of text ".repeat(12).trim(), Annotator.Rgb.Red, 12f)
+            assertTrue(box.rectangle.upperRightX <= document.getPage(0).cropBox.upperRightX)
+            val content = String(box.normalAppearanceStream.contentStream.toByteArray(), Charsets.ISO_8859_1)
+            assertTrue(content, Regex("\\) Tj").findAll(content).count() >= 2)
+        }
+    }
+
+    @Test
     fun survivesSaveAndReload() {
         val bytes = sample().use { document ->
             TextBoxes.add(document, 0, PdfPoint(100f, 500f), "Kept after saving", Annotator.Rgb.Blue)
