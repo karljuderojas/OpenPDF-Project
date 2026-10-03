@@ -496,44 +496,72 @@ class RedactorTest {
         }
     }
 
+    /** A Type 3 font whose only glyph, at code 65 ("A"), has a meaningless name and no ToUnicode map: the letter is unknown. */
+    private fun unreadableFont(document: PDDocument): com.tom_roush.pdfbox.cos.COSDictionary {
+        val glyph = PDStream(document, ByteArrayInputStream("500 0 d0 0 0 400 600 re f".toByteArray()))
+        return com.tom_roush.pdfbox.cos.COSDictionary().apply {
+            setItem(COSName.TYPE, COSName.FONT)
+            setItem(COSName.SUBTYPE, COSName.TYPE3)
+            setItem(COSName.FONT_BBOX, PDRectangle(0f, 0f, 1000f, 1000f).cosArray)
+            setItem(COSName.FONT_MATRIX, com.tom_roush.pdfbox.cos.COSArray().apply {
+                listOf(0.001f, 0f, 0f, 0.001f, 0f, 0f).forEach { add(COSFloat(it)) }
+            })
+            setItem(COSName.CHAR_PROCS, com.tom_roush.pdfbox.cos.COSDictionary().apply { setItem(COSName.getPDFName("g7"), glyph) })
+            setItem(COSName.ENCODING, com.tom_roush.pdfbox.cos.COSDictionary().apply {
+                setItem(COSName.DIFFERENCES, com.tom_roush.pdfbox.cos.COSArray().apply {
+                    add(com.tom_roush.pdfbox.cos.COSInteger.get(65)); add(COSName.getPDFName("g7"))
+                })
+            })
+            setInt(COSName.FIRST_CHAR, 65)
+            setInt(COSName.LAST_CHAR, 65)
+            setItem(COSName.WIDTHS, com.tom_roush.pdfbox.cos.COSArray().apply { add(COSFloat(500f)) })
+        }
+    }
+
+    private fun PDDocument.addOutline(vararg titles: String) {
+        val outline = com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline()
+        titles.forEach { outline.addLast(com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem().apply { title = it }) }
+        documentCatalog.documentOutline = outline
+    }
+
     @Test
     fun clearsTheTitleWhenTheRemovedTextCannotBeRead() {
         PDDocument().use { source ->
-            // A Type 3 font whose glyph names mean nothing, with no ToUnicode map: the letters are unknown.
-            val glyph = PDStream(source, ByteArrayInputStream("500 0 d0 0 0 400 600 re f".toByteArray()))
-            val font = com.tom_roush.pdfbox.cos.COSDictionary().apply {
-                setItem(COSName.TYPE, COSName.FONT)
-                setItem(COSName.SUBTYPE, COSName.TYPE3)
-                setItem(COSName.FONT_BBOX, PDRectangle(0f, 0f, 1000f, 1000f).cosArray)
-                setItem(COSName.FONT_MATRIX, com.tom_roush.pdfbox.cos.COSArray().apply {
-                    listOf(0.001f, 0f, 0f, 0.001f, 0f, 0f).forEach { add(COSFloat(it)) }
-                })
-                setItem(COSName.CHAR_PROCS, com.tom_roush.pdfbox.cos.COSDictionary().apply { setItem(COSName.getPDFName("g7"), glyph) })
-                setItem(COSName.ENCODING, com.tom_roush.pdfbox.cos.COSDictionary().apply {
-                    setItem(COSName.DIFFERENCES, com.tom_roush.pdfbox.cos.COSArray().apply {
-                        add(com.tom_roush.pdfbox.cos.COSInteger.get(65)); add(COSName.getPDFName("g7"))
-                    })
-                })
-                setInt(COSName.FIRST_CHAR, 65)
-                setInt(COSName.LAST_CHAR, 65)
-                setItem(COSName.WIDTHS, com.tom_roush.pdfbox.cos.COSArray().apply { add(COSFloat(500f)) })
-            }
             val page = source.addPage("BT /T3 12 Tf 72 700 Td (AAAA) Tj ET")
-            page.resources.cosObject.getCOSDictionary(COSName.FONT).setItem(COSName.getPDFName("T3"), font)
+            page.resources.cosObject.getCOSDictionary(COSName.FONT).setItem(COSName.getPDFName("T3"), unreadableFont(source))
             source.documentInformation.title = "Payroll for Zebediah"
             source.documentInformation.author = "Zebediah Quill"
             source.documentInformation.producer = "FreePDF"
-            val outline = com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline()
-            outline.addLast(com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem().apply { title = "Zebediah's pay" })
-            source.documentCatalog.documentOutline = outline
+            source.addOutline("Zebediah's pay")
 
-            Redactor.redact(source, mapOf(0 to listOf(PdfRect(60f, 690f, 200f, 720f))))
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(60f, 690f, 200f, 720f))))
+            assertTrue(result.metadataCleared)
             roundTrip(source).use { saved ->
                 assertNull(saved.documentInformation.title)
                 assertNull(saved.documentInformation.author)
                 assertEquals("FreePDF", saved.documentInformation.producer)
             }
             assertFalse(everythingIn(source).contains("Zebediah"))
+        }
+    }
+
+    @Test
+    fun oneUnreadableGlyphDoesNotClearTheTitle() {
+        PDDocument().use { source ->
+            // A bullet in a symbol font before the number: one unknown glyph, then words that can be read.
+            val page = source.addPage("BT /T3 12 Tf 72 700 Td (A) Tj /F1 12 Tf ( 123-45-6789) Tj ET")
+            page.resources.cosObject.getCOSDictionary(COSName.FONT).setItem(COSName.getPDFName("T3"), unreadableFont(source))
+            source.documentInformation.title = "Payroll for Zebediah"
+            source.addOutline("Zebediah's pay")
+
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(60f, 690f, 300f, 720f))))
+            assertFalse(result.metadataCleared)
+            roundTrip(source).use { saved ->
+                assertEquals("Payroll for Zebediah", saved.documentInformation.title)
+                assertEquals("Zebediah's pay", saved.documentCatalog.documentOutline?.firstChild?.title)
+                assertFalse(textOf(saved).contains("6789"))
+            }
+            assertFalse(everythingIn(source).contains("6789"))
         }
     }
 
@@ -743,6 +771,166 @@ class RedactorTest {
             val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(300f, 300f, 400f, 340f))))
             assertTrue(result.foundNothing)
             roundTrip(source).use { assertTrue(rawContent(it).contains("0 0 0 rg")) }
+        }
+    }
+
+    // ---- round 3: forms without a box or resources, stencil masks, attachments ----
+
+    @Test
+    fun rewritesAFormThatHasNoBBox() {
+        PDDocument().use { source ->
+            // The /BBox is required, but files without it exist, and readers draw them unclipped.
+            val form = PDFormXObject(source)
+            form.resources = com.tom_roush.pdfbox.pdmodel.PDResources().also { it.put(COSName.getPDFName("F1"), helvetica) }
+            form.stream.createOutputStream().use { it.write("BT /F1 12 Tf 10 50 Td (boxless secret) Tj ET".toByteArray()) }
+            assertNull(form.bBox)
+            val page = source.addPage("q 1 0 0 1 100 400 cm /Fm1 Do Q")
+            page.resources.put(COSName.getPDFName("Fm1"), form)
+
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(105f, 445f, 400f, 470f))))
+            assertEquals(1, result.forms)
+            roundTrip(source).use { saved -> assertFalse(textOf(saved), textOf(saved).contains("secret")) }
+            assertFalse(everythingIn(source).contains("boxless secret"))
+        }
+    }
+
+    /** A [size] x [size] stencil mask with every bit painting (0), as a bilevel scan is often stored. */
+    private fun stencilPicture(document: PDDocument, size: Int = 16): PDImageXObject {
+        val deflated = ByteArrayOutputStream().also { out ->
+            java.util.zip.DeflaterOutputStream(out).use { it.write(ByteArray(size * size / 8)) }
+        }.toByteArray()
+        val picture = PDImageXObject(document, ByteArrayInputStream(deflated), COSName.FLATE_DECODE, size, size, 1, com.tom_roush.pdfbox.pdmodel.graphics.color.PDDeviceGray.INSTANCE)
+        picture.isStencil = true
+        picture.cosObject.removeItem(COSName.COLORSPACE)
+        return picture
+    }
+
+    @Test
+    fun aStencilMaskKeepsItsBitsOutsideTheArea() {
+        PDDocument().use { source ->
+            val page = source.addPage("q 0 g 160 0 0 160 100 400 cm /Im1 Do Q")
+            page.resources.put(COSName.getPDFName("Im1"), stencilPicture(source))
+
+            // The mask covers x 100..260, y 400..560. Mark its top-left quarter: 8 x 8 bits.
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(100f, 480f, 180f, 560f))))
+            assertEquals(1, result.pictures)
+            assertEquals(0, result.wholePictures)
+
+            roundTrip(source).use { saved ->
+                val resources = saved.getPage(0).resources
+                assertEquals(1, resources.xObjectNames.count())
+                val picture = resources.getXObject(resources.xObjectNames.first()) as PDImageXObject
+                assertTrue(picture.isStencil)
+                assertEquals(16, picture.width)
+                val bits = picture.stream.createInputStream().use { it.readBytes() }
+                assertEquals(32, bits.size)
+                // Top-left byte of the first row: unpainted now; the rest of the row and the lower rows still paint.
+                assertEquals(0xFF, bits[0].toInt() and 0xFF)
+                assertEquals(0x00, bits[1].toInt() and 0xFF)
+                assertEquals(0xFF, bits[14].toInt() and 0xFF)
+                assertEquals(0x00, bits[16].toInt() and 0xFF)
+                assertEquals(0x00, bits[31].toInt() and 0xFF)
+            }
+        }
+    }
+
+    @Test
+    fun aFormWithoutResourcesStillFindsItsFontAfterARewrite() {
+        PDDocument().use { source ->
+            // The form has no resources of its own: /F1 and /Im1 are the page's.
+            val form = PDFormXObject(source).apply { bBox = PDRectangle(0f, 0f, 400f, 300f) }
+            form.cosObject.removeItem(COSName.RESOURCES)
+            form.stream.createOutputStream().use {
+                it.write("BT /F1 12 Tf 10 250 Td (kept text) Tj ET q 200 0 0 200 0 0 cm /Im1 Do Q".toByteArray())
+            }
+            val page = source.addPage("q 1 0 0 1 100 400 cm /Fm1 Do Q")
+            page.resources.put(COSName.getPDFName("Fm1"), form)
+            page.resources.put(COSName.getPDFName("Im1"), twoColourPicture(source))
+
+            // The picture lands at x 100..300, y 400..600; the text is above it, at y 650.
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(100f, 500f, 200f, 600f))))
+            assertEquals(1, result.forms)
+            assertEquals(1, result.pictures)
+            roundTrip(source).use { saved ->
+                val resources = saved.getPage(0).resources
+                val copy = resources.xObjectNames.map { resources.getXObject(it) }.filterIsInstance<PDFormXObject>().single()
+                // The copy needed resources for its new picture; they started from the page's, so its font is there too.
+                assertNotNull(copy.resources?.getFont(COSName.getPDFName("F1")))
+                assertTrue(textOf(saved), textOf(saved).contains("kept text"))
+            }
+        }
+    }
+
+    @Test
+    fun aFormWithoutResourcesGetsNoneWhenOnlyTextWasCut() {
+        PDDocument().use { source ->
+            val form = PDFormXObject(source).apply { bBox = PDRectangle(0f, 0f, 300f, 100f) }
+            form.cosObject.removeItem(COSName.RESOURCES)
+            form.stream.createOutputStream().use { it.write("BT /F1 12 Tf 10 50 Td (form secret) Tj ET".toByteArray()) }
+            val page = source.addPage("q 1 0 0 1 100 400 cm /Fm1 Do Q")
+            page.resources.put(COSName.getPDFName("Fm1"), form)
+
+            Redactor.redact(source, mapOf(0 to listOf(PdfRect(105f, 445f, 400f, 470f))))
+            roundTrip(source).use { saved ->
+                val resources = saved.getPage(0).resources
+                val copy = resources.xObjectNames.map { resources.getXObject(it) }.filterIsInstance<PDFormXObject>().single()
+                // Nothing was added, so the copy keeps looking its names up in the page, as the original did.
+                assertFalse(copy.cosObject.containsKey(COSName.RESOURCES))
+                assertFalse(textOf(saved).contains("secret"))
+            }
+        }
+    }
+
+    @Test
+    fun removesFilesAttachedToThePdf() {
+        PDDocument().use { source ->
+            val page = source.addPage("BT /F1 12 Tf 72 700 Td (Invoice total: 999) Tj ET")
+            // An embedded file in the name tree, as an electronic invoice carries its XML.
+            val invoice = com.tom_roush.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification().apply {
+                file = "invoice.xml"
+                embeddedFile = com.tom_roush.pdfbox.pdmodel.common.filespecification.PDEmbeddedFile(
+                    source, ByteArrayInputStream("ATTACHEDSECRET total 999".toByteArray()),
+                )
+            }
+            val tree = com.tom_roush.pdfbox.pdmodel.PDEmbeddedFilesNameTreeNode().apply { names = mapOf("invoice.xml" to invoice) }
+            source.documentCatalog.names = com.tom_roush.pdfbox.pdmodel.PDDocumentNameDictionary(source.documentCatalog).apply { embeddedFiles = tree }
+            // A file-attachment note far from the mark, carrying another file.
+            val note = com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationFileAttachment().apply {
+                rectangle = PDRectangle(400f, 300f, 20f, 20f)
+                file = com.tom_roush.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification().apply {
+                    file = "note.txt"
+                    embeddedFile = com.tom_roush.pdfbox.pdmodel.common.filespecification.PDEmbeddedFile(source, ByteArrayInputStream("NOTESECRET".toByteArray()))
+                }
+            }
+            page.annotations = listOf(note)
+
+            val result = Redactor.redact(source, mapOf(0 to listOf(PdfRect(150f, 690f, 220f, 715f))))
+            assertEquals(2, result.attachments)
+            assertEquals(0, result.annotations)
+            val everything = everythingIn(source)
+            assertFalse(everything.contains("ATTACHEDSECRET"))
+            assertFalse(everything.contains("NOTESECRET"))
+            roundTrip(source).use { saved ->
+                assertNull(saved.documentCatalog.names?.embeddedFiles)
+                assertTrue(saved.getPage(0).annotations.isEmpty())
+                assertTrue(textOf(saved).contains("Invoice"))
+            }
+        }
+    }
+
+    @Test
+    fun checkNamesThePagesWhosePicturesWouldGoWholeWithoutChangingAnything() {
+        PDDocument().use { source ->
+            // Page 1 draws a picture that can be blanked; page 2 an inline picture, which cannot be.
+            val first = source.addPage("q 200 0 0 200 100 400 cm /Im1 Do Q")
+            first.resources.put(COSName.getPDFName("Im1"), twoColourPicture(source))
+            source.addPage("q 200 0 0 200 100 400 cm BI /W 1 /H 1 /CS /G /BPC 8 ID ÿ EI Q")
+
+            val area = listOf(PdfRect(100f, 500f, 200f, 600f))
+            assertEquals(listOf(1), Redactor.check(source, mapOf(0 to area, 1 to area)))
+            // Nothing was touched: the red corner is still there and the inline picture is still drawn.
+            assertEquals(listOf(listOf(255, 0, 0)), picturesIn(source))
+            assertTrue(rawContent(source, 1).contains("EI"))
         }
     }
 

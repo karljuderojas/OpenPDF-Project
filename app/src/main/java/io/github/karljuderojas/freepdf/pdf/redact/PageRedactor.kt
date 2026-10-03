@@ -55,6 +55,7 @@ import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSFloat
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.cos.COSNumber
+import com.tom_roush.pdfbox.cos.COSStream
 import com.tom_roush.pdfbox.cos.COSString
 import com.tom_roush.pdfbox.pdfwriter.ContentStreamWriter
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -89,8 +90,11 @@ import kotlin.math.sqrt
  * - Text: each glyph whose box touches an area is removed from its Tj/TJ string, and the width it
  *   took is kept as a TJ gap so the text after it stays where it was. That includes invisible
  *   text, such as the layer an OCR tool puts under a scan.
- * - Pictures: the pixels inside the area are painted black and the picture is stored again. A
- *   picture that cannot be re-stored this way (a stencil mask, an unsupported format) is removed whole.
+ * - Pictures: the samples inside the area are set to black (or, for a stencil mask, to unpainted)
+ *   row by row in the picture's own sample data, which is stored again with the same colour space
+ *   and depth. A picture whose samples cannot be edited that way (an indexed palette, a colour-key
+ *   mask, JPEG) is decoded to pixels and blanked there instead; one that cannot be decoded at all
+ *   (JPX, JBIG2) or is too big to decode is removed whole.
  * - Line art: a drawn or filled shape with an edge in an area is removed whole. A fill that
  *   merely lies under the area (a page or table-cell background) is left alone: it holds only a colour.
  * - Forms (reusable chunks of page content): one that reaches an area is copied and rewritten the
@@ -99,11 +103,15 @@ import kotlin.math.sqrt
  * What was swapped out is also taken out of the page's resources, so the old picture or form is
  * not left in the file. Things that cannot be placed inside a Tj (shadings, pattern fills) are
  * left as they are.
+ *
+ * With [probe] set, nothing is rewritten: the page is only replayed to fill in [stats], so the
+ * pictures that would have to be removed whole can be known before the user commits.
  */
 internal class PageRedactor(
     private val document: PDDocument,
     private val page: PDPage,
     private val areas: List<PdfRect>,
+    private val probe: Boolean = false,
 ) : PDFGraphicsStreamEngine(page) {
 
     /** What the rewrite took out of the page. */
@@ -113,7 +121,7 @@ internal class PageRedactor(
         var shapes = 0
         var forms = 0
 
-        /** Pictures removed whole rather than blanked in part: stencil masks, and pictures too big or odd to decode. */
+        /** Pictures removed whole rather than blanked in part: inline pictures, and pictures too big or odd to decode. */
         var wholePictures = 0
     }
 
@@ -122,24 +130,37 @@ internal class PageRedactor(
     /** Text that was removed, as runs and words, lower case; used to find the same words in metadata. */
     val fragments = LinkedHashSet<String>()
 
-    /** True when some removed glyphs had no known Unicode value, so [fragments] may miss words. */
-    var unreadableText = false
+    /**
+     * The longest run of removed glyphs in a row that had no known Unicode value. A run of a few
+     * means a word [fragments] cannot know; a single one is usually a bullet or a symbol.
+     */
+    var unreadableRun = 0
         private set
+
+    /** True when some removed glyphs had no known Unicode value, so [fragments] may miss words. */
+    val unreadableText: Boolean get() = unreadableRun > 0
 
     /** The pictures and forms this page drew that were swapped for a rewritten copy, or dropped. */
     val replacedObjects: MutableSet<COSBase> = Collections.newSetFromMap(IdentityHashMap())
 
     // The run of removed text being collected; it continues across show operators until a kept glyph.
     private val removedRun = StringBuilder()
+    private var unreadableStreak = 0
 
     /** The stream being written (the page's, or a form copy's), where new resources go and what was replaced. */
     private class Frame(val tokens: MutableList<Any>, val target: PDResources) {
         val replaced = ArrayList<COSName>()
 
-        // Open marked-content sequences: where each one's property list is in [tokens] (-1 for
-        // none), and how much had been removed when it began.
-        val marked = ArrayList<Pair<Int, Int>>()
+        // Open marked-content sequences, innermost last.
+        val marked = ArrayList<Marked>()
     }
+
+    /**
+     * A marked-content sequence being replayed: where its property list operand is in the frame's
+     * tokens (-1 when it has none), the [properties] themselves (inline, or looked up from the
+     * resources by name), and how much had been removed when it began.
+     */
+    private class Marked(val at: Int, val properties: COSDictionary?, val before: Int)
 
     private class Glyph(
         val hit: Boolean,
@@ -155,6 +176,9 @@ internal class PageRedactor(
 
     private val frames = ArrayList<Frame>()
     private val frame get() = frames.last()
+
+    // Frames whose stream has been written, kept for the final clean-up of their resources.
+    private val finished = ArrayList<Frame>()
 
     // Text: glyphs seen by the show operator being replayed.
     private var collecting = false
@@ -190,13 +214,16 @@ internal class PageRedactor(
     /** Replays the page and replaces its contents with the rewritten ones. */
     fun run() {
         // The page's resources may be shared with other pages, so it gets its own copy to change.
-        val resources = copyOf(page.resources)
-        page.resources = resources
+        val resources = if (probe) page.resources ?: PDResources() else copyOf(page.resources).also { page.resources = it }
         frames += Frame(ArrayList(), resources)
         processPage(page)
         flushRun()
         val done = frames.removeAt(frames.lastIndex)
-        dropReplaced(done)
+        if (probe) return
+        // Only now is everything that was swapped out known, so every resources dictionary made
+        // here (a form copy's may have started from the page's) is cleaned of the originals at once.
+        finished += done
+        finished.forEach { dropReplaced(it) }
         val contents = PDStream(document)
         contents.createOutputStream(COSName.FLATE_DECODE).use { ContentStreamWriter(it).writeTokens(done.tokens) }
         page.setContents(contents)
@@ -215,21 +242,30 @@ internal class PageRedactor(
             "BI" -> {
                 inlineHit = false
                 super.processOperator(operator, operands)
-                if (inlineHit) stats.pictures++ else emit(operands, operator)
+                if (inlineHit) {
+                    // An inline picture is small by definition and has no stream of its own to edit: it goes whole.
+                    stats.pictures++
+                    stats.wholePictures++
+                } else {
+                    emit(operands, operator)
+                }
             }
-            // Marked content may carry the text it shows a second time, as /ActualText or /Alt.
-            // That is taken out at EMC if something inside the sequence was removed.
+            // Marked content may carry the text it shows a second time, as /ActualText or /Alt,
+            // inline or in a named property list. That is taken out at EMC if something inside
+            // the sequence was removed.
             "BDC", "BMC" -> {
                 super.processOperator(operator, operands)
-                val properties = if (operator.name == "BDC" && operands.getOrNull(1) is COSDictionary) frame.tokens.size + 1 else -1
-                frame.marked += properties to removedSoFar()
+                val properties = if (operator.name == "BDC") propertiesOf(operands.getOrNull(1)) else null
+                frame.marked += Marked(if (properties != null) frame.tokens.size + 1 else -1, properties, removedSoFar())
                 emit(operands, operator)
             }
             "EMC" -> {
                 super.processOperator(operator, operands)
-                frame.marked.removeLastOrNull()?.let { (at, before) ->
-                    if (at >= 0 && removedSoFar() > before) {
-                        (frame.tokens[at] as? COSDictionary)?.let { frame.tokens[at] = withoutAlternateText(it) }
+                frame.marked.removeLastOrNull()?.let { marked ->
+                    if (marked.at >= 0 && marked.properties != null && removedSoFar() > marked.before) {
+                        val stripped = withoutAlternateText(marked.properties)
+                        // A named list is written back inline, so the one in the resources stays as other content needs it.
+                        if (stripped !== marked.properties) frame.tokens[marked.at] = stripped
                     }
                 }
                 emit(operands, operator)
@@ -242,6 +278,15 @@ internal class PageRedactor(
     }
 
     private fun removedSoFar() = stats.glyphs + stats.pictures + stats.shapes + stats.forms
+
+    /** The property list a BDC names: given inline, or looked up in the resources being replayed. */
+    private fun propertiesOf(operand: COSBase?): COSDictionary? = when (operand) {
+        is COSDictionary -> operand
+        is COSName -> runCatching {
+            (resources?.cosObject?.getDictionaryObject(COSName.PROPERTIES) as? COSDictionary)?.getDictionaryObject(operand) as? COSDictionary
+        }.getOrNull()
+        else -> null
+    }
 
     private fun emit(operands: List<COSBase>, operator: Operator) {
         frame.tokens.addAll(operands)
@@ -302,7 +347,12 @@ internal class PageRedactor(
                         if (glyph.hit) {
                             flushText()
                             gap += gapFor(glyph, span)
-                            if (glyph.unicode == null) unreadableText = true
+                            if (glyph.unicode == null) {
+                                unreadableStreak++
+                                if (unreadableStreak > unreadableRun) unreadableRun = unreadableStreak
+                            } else {
+                                unreadableStreak = 0
+                            }
                             removedRun.append(glyph.unicode ?: "")
                             stats.glyphs++
                         } else {
@@ -348,6 +398,7 @@ internal class PageRedactor(
 
     /** Ends the run of removed text, remembering it and its words. */
     private fun flushRun() {
+        unreadableStreak = 0
         val text = removedRun.toString()
         removedRun.setLength(0)
         val run = text.trim().lowercase()
@@ -389,15 +440,19 @@ internal class PageRedactor(
                     emit(operands, operator)
                     return
                 }
+                stats.pictures++
+                if (probe) {
+                    if (!canBlank(xobject)) stats.wholePictures++
+                    emit(operands, operator)
+                    return
+                }
                 frame.replaced += name
                 replacedObjects += xobject.cosObject
                 val blanked = blank(xobject)
                 if (blanked == null) {
-                    stats.pictures++
                     stats.wholePictures++
                     return
                 }
-                stats.pictures++
                 frame.tokens.add(frame.target.add(blanked))
                 frame.tokens.add(operator)
             }
@@ -433,17 +488,26 @@ internal class PageRedactor(
     override fun showTransparencyGroup(form: PDTransparencyGroup) = rewrite(form)
 
     private fun rewrite(form: PDFormXObject) {
+        // A form without the /BBox it should have is drawn unclipped by Pdfium and other readers,
+        // so it may reach anywhere on the page and is rewritten; nothing of it is left behind.
         val box = formBox(form)
-        if (box == null || areas.none { overlaps(box, it) }) {
+        if (box != null && areas.none { overlaps(box, it) }) {
             formCopy = null
             return
         }
-        val resources = copyOf(form.resources)
+        // A form without resources of its own finds its names in what encloses it, so the copy
+        // starts from those, and only keeps them when something new had to be added.
+        val own = form.resources
+        val resources = copyOf(own ?: frame.target)
         frames += Frame(ArrayList(), resources)
         // PDFStreamEngine.showForm plays the form's stream with its matrix and clip, whatever its kind.
         super.showForm(form)
         val done = frames.removeAt(frames.lastIndex)
-        dropReplaced(done)
+        if (probe) {
+            formCopy = null
+            return
+        }
+        finished += done
 
         val contents = PDStream(document)
         contents.createOutputStream(COSName.FLATE_DECODE).use { ContentStreamWriter(it).writeTokens(done.tokens) }
@@ -451,11 +515,11 @@ internal class PageRedactor(
         form.cosObject.entrySet().forEach { (key, value) ->
             if (key !in NOT_COPIED) dictionary.setItem(key, value)
         }
-        dictionary.setItem(COSName.RESOURCES, resources.cosObject)
+        if (own != null || done.replaced.isNotEmpty()) dictionary.setItem(COSName.RESOURCES, resources.cosObject)
         formCopy = PDFormXObject(dictionary)
     }
 
-    /** Where [form] can paint, in page space, or null if its matrix cannot be inverted or applied. */
+    /** Where [form] can paint, in page space, or null when it has no /BBox to say. */
     private fun formBox(form: PDFormXObject): PdfRect? {
         val bbox = form.bBox ?: return null
         val matrix = form.matrix.multiply(graphicsState.currentTransformationMatrix)
@@ -478,20 +542,32 @@ internal class PageRedactor(
     }
 
     /**
-     * [image] with every pixel inside an area painted black, stored as a new picture; null when that
-     * cannot be done safely and the picture has to go.
+     * [image] with everything inside an area blanked, stored as a new picture; null when that
+     * cannot be done safely and the picture has to go. The samples are edited in place first,
+     * which keeps the picture's format and needs one row of memory; decoding to pixels is the
+     * fallback for formats that cannot be edited that way.
      */
     private fun blank(image: PDImageXObject): PDImageXObject? = try {
-        if (image.isStencil) return null
-        val source = image.image
-        val width = source.width
-        val height = source.height
-        val pixels = IntArray(width * height)
-        source.getPixels(pixels, 0, width, 0, 0, width, height)
-        val jpeg = image.suffix == "jpg"
-        // JPEG pictures decode through BitmapFactory, not PdfBox's own sample reader the probe uses.
-        if (!jpeg && ChannelOrder.decodeSwaps) swapRedAndBlue(pixels)
+        val rects = pixelRects(image.width, image.height)
+        if (rects == null) null else blankSamples(image, rects) ?: blankPixels(image, rects)
+    } catch (_: Exception) {
+        null
+    } catch (_: OutOfMemoryError) {
+        // A picture too big to decode here is removed whole rather than kept.
+        null
+    }
 
+    /** Whether [blank] would manage [image], judged from its format alone; for the probe. */
+    private fun canBlank(image: PDImageXObject): Boolean = runCatching {
+        samplePlan(image) != null || (!image.isStencil && image.suffix !in UNDECODABLE && fitsInMemory(image.width, image.height))
+    }.getOrDefault(false)
+
+    /**
+     * The rows and columns of a [width] x [height] picture drawn now that lie under each area, as
+     * [left, top, right, bottom) in pixels (empty where an area misses it); null when the
+     * picture's matrix cannot be inverted.
+     */
+    private fun pixelRects(width: Int, height: Int): List<IntArray>? {
         // The picture's own space is the unit square, with the top row of pixels at y = 1.
         val ctm = graphicsState.currentTransformationMatrix
         val a = ctm.getValue(0, 0)
@@ -502,7 +578,7 @@ internal class PageRedactor(
         val f = ctm.getValue(2, 1)
         val determinant = a * d - b * c
         if (abs(determinant) < 1e-9f) return null
-        for (area in areas) {
+        return areas.map { area ->
             val us = ArrayList<Float>()
             val vs = ArrayList<Float>()
             listOf(area.left to area.bottom, area.right to area.bottom, area.right to area.top, area.left to area.top)
@@ -512,23 +588,165 @@ internal class PageRedactor(
                     us += (d * dx - c * dy) / determinant
                     vs += (-b * dx + a * dy) / determinant
                 }
-            val left = floor(us.min() * width).toInt().coerceIn(0, width)
-            val right = ceil(us.max() * width).toInt().coerceIn(0, width)
-            val top = floor((1f - vs.max()) * height).toInt().coerceIn(0, height)
-            val bottom = ceil((1f - vs.min()) * height).toInt().coerceIn(0, height)
-            for (row in top until bottom) pixels.fill(BLACK, row * width + left, row * width + right)
+            intArrayOf(
+                floor(us.min() * width).toInt().coerceIn(0, width),
+                floor((1f - vs.max()) * height).toInt().coerceIn(0, height),
+                ceil(us.max() * width).toInt().coerceIn(0, width),
+                ceil((1f - vs.min()) * height).toInt().coerceIn(0, height),
+            )
+        }
+    }
+
+    /**
+     * How to blank a picture in its own samples: how many there are per pixel, how many bits each
+     * takes, the value that stands for black (or, for a stencil mask, for unpainted), and the soft
+     * mask to blank along with it.
+     */
+    private class SamplePlan(val components: Int, val bits: Int, val fill: Int, val softMask: PDImageXObject?)
+
+    /**
+     * The plan for [image], or null for a picture whose samples cannot be edited that way: one
+     * whose filters this platform cannot decode, an indexed or other palette-like colour space,
+     * a colour-key or explicit mask, or a Decode array that remaps colours. With [opaque], the
+     * fill is the brightest value instead of black, for a soft mask.
+     */
+    private fun samplePlan(image: PDImageXObject, opaque: Boolean = false): SamplePlan? {
+        val dictionary = image.cosObject
+        val filters = image.stream.filters.orEmpty()
+        if (filters.any { it in IMAGE_FILTERS }) return null
+        val bits = image.bitsPerComponent
+        if (bits !in SAMPLE_BITS) return null
+        val max = (1 shl bits) - 1
+        if (dictionary.containsKey(COSName.MASK)) return null
+        val decode = image.decode
+        if (image.isStencil) {
+            if (bits != 1) return null
+            // With the default Decode, sample 0 paints; [1 0] turns that round.
+            val inverted = decode != null && decode.size() > 0 && (decode.getObject(0) as? COSNumber)?.floatValue() == 1f
+            return SamplePlan(1, 1, if (inverted) 0 else 1, null)
+        }
+        if (decode != null && decode.size() > 0) return null
+        val (components, black) = colourSamples(dictionary.getDictionaryObject(COSName.COLORSPACE), max) ?: return null
+        val softMask = (dictionary.getDictionaryObject(COSName.SMASK) as? COSStream)?.let { mask ->
+            val maskImage = PDImageXObject(PDStream(mask), null)
+            // The mask goes opaque where the picture goes black, so nothing under it shows through.
+            if (samplePlan(maskImage, opaque = true) == null) return null
+            maskImage
+        }
+        return SamplePlan(components, bits, if (opaque) max else black, softMask)
+    }
+
+    /** The samples per pixel of a colour space, and the sample value that is black at a sample [max]; null if not known here. */
+    private fun colourSamples(space: COSBase?, max: Int): Pair<Int, Int>? {
+        val name = when (space) {
+            is COSName -> space
+            is COSArray -> space.getObject(0) as? COSName
+            else -> null
+        }
+        return when (name) {
+            COSName.DEVICEGRAY, COSName.G, COSName.CALGRAY -> 1 to 0
+            COSName.DEVICERGB, COSName.RGB, COSName.CALRGB -> 3 to 0
+            COSName.DEVICECMYK, COSName.CMYK -> 4 to max
+            COSName.ICCBASED -> when (((space as? COSArray)?.getObject(1) as? COSDictionary)?.getInt(COSName.N)) {
+                1 -> 1 to 0
+                3 -> 3 to 0
+                4 -> 4 to max
+                else -> null
+            }
+            else -> null
+        }
+    }
+
+    /** [image] with the samples in [rects] set to the plan's fill, row by row, as a new Flate-compressed picture; null if not planned. */
+    private fun blankSamples(image: PDImageXObject, rects: List<IntArray>, opaque: Boolean = false): PDImageXObject? {
+        val plan = samplePlan(image, opaque) ?: return null
+        val width = image.width
+        val height = image.height
+        val softMask = plan.softMask?.let { mask ->
+            val maskRects = pixelRects(mask.width, mask.height) ?: return null
+            blankSamples(mask, maskRects, opaque = true) ?: return null
+        }
+        val stride = ((width.toLong() * plan.components * plan.bits + 7) / 8).toInt()
+        val row = ByteArray(stride)
+        val stream = PDStream(document)
+        image.createInputStream().use { input ->
+            stream.createOutputStream(COSName.FLATE_DECODE).use { out ->
+                for (y in 0 until height) {
+                    var read = 0
+                    while (read < stride) {
+                        val n = input.read(row, read, stride - read)
+                        if (n < 0) break
+                        read += n
+                    }
+                    // A stream that ends early is padded, as readers do when drawing it.
+                    if (read < stride) row.fill(0, read, stride)
+                    for (rect in rects) {
+                        if (y < rect[1] || y >= rect[3] || rect[0] >= rect[2]) continue
+                        fillSamples(row, rect[0] * plan.components, rect[2] * plan.components, plan.bits, plan.fill)
+                    }
+                    out.write(row)
+                }
+            }
+        }
+        val dictionary = stream.cosObject
+        image.cosObject.entrySet().forEach { (key, value) ->
+            if (key !in NOT_COPIED_IMAGE) dictionary.setItem(key, value)
+        }
+        if (softMask != null) dictionary.setItem(COSName.SMASK, softMask.cosObject)
+        return PDImageXObject(stream, null)
+    }
+
+    /** Sets samples [from] until [to] of a packed [row] to [value]. */
+    private fun fillSamples(row: ByteArray, from: Int, to: Int, bits: Int, value: Int) {
+        when (bits) {
+            8 -> row.fill(value.toByte(), from, to)
+            16 -> for (i in from until to) {
+                row[i * 2] = (value shr 8).toByte()
+                row[i * 2 + 1] = value.toByte()
+            }
+            else -> {
+                val perByte = 8 / bits
+                val mask = (1 shl bits) - 1
+                for (i in from until to) {
+                    val at = i / perByte
+                    val shift = 8 - bits * (i % perByte + 1)
+                    row[at] = ((row[at].toInt() and (mask shl shift).inv()) or (value shl shift)).toByte()
+                }
+            }
+        }
+    }
+
+    /** True when a [width] x [height] picture can be decoded to pixels and stored again without running out of memory. */
+    private fun fitsInMemory(width: Int, height: Int): Boolean {
+        val runtime = Runtime.getRuntime()
+        val free = runtime.maxMemory() - runtime.totalMemory() + runtime.freeMemory()
+        return width.toLong() * height * BYTES_PER_PIXEL < free / 2
+    }
+
+    /** [image] decoded to pixels, with those in [rects] painted black, stored as a new picture; null when that cannot be done. */
+    private fun blankPixels(image: PDImageXObject, rects: List<IntArray>): PDImageXObject? {
+        // A stencil mask has no pixels of its own, only the colour it is drawn with.
+        if (image.isStencil) return null
+        if (!fitsInMemory(image.width, image.height)) return null
+        val source = image.image
+        val width = source.width
+        val height = source.height
+        val pixels = IntArray(width * height)
+        source.getPixels(pixels, 0, width, 0, 0, width, height)
+        val jpeg = image.suffix == "jpg"
+        // JPEG pictures decode through BitmapFactory, not PdfBox's own sample reader the probe uses.
+        if (!jpeg && ChannelOrder.decodeSwaps) swapRedAndBlue(pixels)
+        for (rect in rects) {
+            val left = rect[0].coerceIn(0, width)
+            val right = rect[2].coerceIn(0, width)
+            for (row in rect[1].coerceIn(0, height) until rect[3].coerceIn(0, height)) pixels.fill(BLACK, row * width + left, row * width + right)
         }
         if (!jpeg && ChannelOrder.encodeSwaps) swapRedAndBlue(pixels)
         val blanked = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         blanked.setPixels(pixels, 0, width, 0, 0, width, height)
         // image.image has any mask applied as alpha, which the new picture stores again as its own mask.
-        if (jpeg) JPEGFactory.createFromImage(document, blanked, 0.92f)
+        return if (jpeg) JPEGFactory.createFromImage(document, blanked, 0.92f)
         else LosslessFactory.createFromImage(document, blanked)
-    } catch (_: Exception) {
-        null
-    } catch (_: OutOfMemoryError) {
-        // A picture too big to decode here is removed whole rather than kept.
-        null
     }
 
     private fun swapRedAndBlue(pixels: IntArray) {
@@ -683,15 +901,17 @@ internal class PageRedactor(
         return PDResources(copy)
     }
 
-    /** Takes the XObjects that were swapped for a new one out of the resources, unless something still draws them. */
+    /**
+     * Takes every picture or form that was swapped for a new one, on this page or inside a form
+     * on it, out of [done]'s resources, unless its stream still draws it by that name.
+     */
     private fun dropReplaced(done: Frame) {
-        if (done.replaced.isEmpty()) return
+        val xobjects = done.target.cosObject.getDictionaryObject(COSName.XOBJECT) as? COSDictionary ?: return
         val drawn = HashSet<COSName>()
         done.tokens.forEachIndexed { index, token ->
             if (token is Operator && token.name == "Do") (done.tokens.getOrNull(index - 1) as? COSName)?.let { drawn += it }
         }
-        val xobjects = done.target.cosObject.getDictionaryObject(COSName.XOBJECT) as? COSDictionary ?: return
-        done.replaced.filter { it !in drawn }.forEach { xobjects.removeItem(it) }
+        xobjects.keySet().filter { it !in drawn && xobjects.getDictionaryObject(it) in replacedObjects }.forEach { xobjects.removeItem(it) }
     }
 
     /** [properties] without the alternate text and expansion a tagged PDF may attach to marked content. */
@@ -714,6 +934,17 @@ internal class PageRedactor(
         const val GLYPH_ABOVE = 0.9f
 
         val NOT_COPIED = setOf(COSName.LENGTH, COSName.FILTER, COSName.DECODE_PARMS, COSName.RESOURCES, COSName.METADATA)
+        val NOT_COPIED_IMAGE = setOf(COSName.LENGTH, COSName.FILTER, COSName.DECODE_PARMS, COSName.SMASK, COSName.METADATA)
+
+        // Filters that are a picture format in themselves, not a way of packing samples.
+        val IMAGE_FILTERS = setOf(COSName.DCT_DECODE, COSName.JPX_DECODE, COSName.JBIG2_DECODE)
+        val SAMPLE_BITS = setOf(1, 2, 4, 8, 16)
+
+        // Picture kinds this platform has no decoder for.
+        val UNDECODABLE = setOf("jpx", "jb2")
+
+        // Decoding a picture to pixels and storing it again holds its pixels three times over.
+        const val BYTES_PER_PIXEL = 12L
         val ALTERNATE_TEXT = listOf(COSName.getPDFName("ActualText"), COSName.getPDFName("Alt"), COSName.getPDFName("E"))
 
         /**
