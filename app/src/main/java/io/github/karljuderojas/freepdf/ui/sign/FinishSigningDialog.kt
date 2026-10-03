@@ -34,6 +34,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import io.github.karljuderojas.freepdf.R
+import io.github.karljuderojas.freepdf.pdf.sign.CertificateInfo
 
 /** What Finish does besides recording the signer: see [FinishSigningDialog]. */
 data class FinishOptions(val lock: Boolean, val seal: Boolean, val share: Boolean)
@@ -47,6 +48,7 @@ data class FinishOptions(val lock: Boolean, val seal: Boolean, val share: Boolea
 @Composable
 fun FinishSigningDialog(
     initialName: String,
+    certificate: CertificateInfo? = null,
     initialLock: Boolean = true,
     onDismiss: () -> Unit,
     onFinish: (name: String, consentText: String, options: FinishOptions) -> Unit,
@@ -93,7 +95,11 @@ fun FinishSigningDialog(
                     Column {
                         Text(stringResource(R.string.finish_seal), style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            stringResource(if (lock) R.string.finish_seal_detail else R.string.finish_seal_needs_lock),
+                            when {
+                                !lock -> stringResource(R.string.finish_seal_needs_lock)
+                                certificate == null -> stringResource(R.string.finish_seal_detail)
+                                else -> stringResource(R.string.finish_seal_detail_imported, certificate.name, certificate.issuer)
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

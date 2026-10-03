@@ -2,6 +2,7 @@ package io.github.karljuderojas.freepdf.pdf.sign
 
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.math.BigInteger
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -12,6 +13,16 @@ import javax.security.auth.x500.X500Principal
 
 /** A private key plus its certificate chain, used to apply a PKCS#7 signature. */
 class SigningIdentity(val privateKey: PrivateKey, val chain: List<X509Certificate>) {
+
+    /** The name on the certificate, for showing which identity will sign. */
+    val name: String get() = SignatureVerifier.commonName(chain.first()) ?: chain.first().subjectX500Principal.name
+
+    /** Who issued the certificate, or null when the signer made it themselves. */
+    val issuer: String?
+        get() = chain.first().takeIf { it.issuerX500Principal != it.subjectX500Principal }
+            ?.let { SignatureVerifier.commonName(it.issuerX500Principal) }
+
+    val expires: Date get() = chain.first().notAfter
 
     companion object {
         private const val KEYSTORE = "AndroidKeyStore"
@@ -45,10 +56,22 @@ class SigningIdentity(val privateKey: PrivateKey, val chain: List<X509Certificat
             return SigningIdentity(key, chain)
         }
 
-        /** An identity from a user-supplied .p12/.pfx file, e.g. one issued by a trusted CA. */
+        /**
+         * An identity from a user-supplied .p12/.pfx file, e.g. one issued by a certificate
+         * authority, an employer or a national eID provider. Read with the bundled BouncyCastle,
+         * because older phones cannot open files made with current encryption (AES and PBKDF2).
+         * Throws [java.io.IOException] when the password is wrong.
+         */
         fun fromPkcs12(bytes: ByteArray, password: CharArray): SigningIdentity {
-            val keyStore = KeyStore.getInstance("PKCS12").apply { load(bytes.inputStream(), password) }
-            val alias = keyStore.aliases().toList().first { keyStore.isKeyEntry(it) }
+            val keyStore = runCatching {
+                KeyStore.getInstance("PKCS12", BouncyCastleProvider()).apply { load(bytes.inputStream(), password) }
+            }.getOrElse { bouncyCastleError ->
+                // Fall back to the platform's own reader before giving up.
+                runCatching { KeyStore.getInstance("PKCS12").apply { load(bytes.inputStream(), password) } }
+                    .getOrElse { throw bouncyCastleError }
+            }
+            val alias = keyStore.aliases().toList().firstOrNull { keyStore.isKeyEntry(it) }
+                ?: throw IllegalArgumentException("The file has no private key")
             val key = keyStore.getKey(alias, password) as PrivateKey
             val chain = keyStore.getCertificateChain(alias).map { it as X509Certificate }
             return SigningIdentity(key, chain)

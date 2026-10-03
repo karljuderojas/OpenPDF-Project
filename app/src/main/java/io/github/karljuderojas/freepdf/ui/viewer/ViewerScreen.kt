@@ -114,9 +114,14 @@ import io.github.karljuderojas.freepdf.settings.Tip
 import io.github.karljuderojas.freepdf.print.Printing
 import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.share.Sharing
+import io.github.karljuderojas.freepdf.pdf.sign.CertificateInfo
+import io.github.karljuderojas.freepdf.ui.sign.CertificateDialog
+import io.github.karljuderojas.freepdf.ui.sign.CertificatePasswordDialog
 import io.github.karljuderojas.freepdf.ui.rememberPdfPicker
 import io.github.karljuderojas.freepdf.ui.sign.FinishOptions
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
+import io.github.karljuderojas.freepdf.ui.sign.SignatureBanner
+import io.github.karljuderojas.freepdf.ui.sign.SignatureDetailsDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
@@ -192,6 +197,10 @@ sealed interface ViewerAction {
     data class SignField(val index: Int) : ViewerAction
     data class FinishSigning(val name: String, val consentText: String, val options: FinishOptions) : ViewerAction
 
+    /** Certificate actions. */
+    data object ImportCertificate : ViewerAction
+    data object RemoveCertificate : ViewerAction
+    data class SetTimestamps(val on: Boolean) : ViewerAction
     /** Placed stamps; see [StampLayer]. Moves are fractions of the page. */
     data class MoveStamp(val id: Long, val delta: Offset) : ViewerAction
     data class ResizeStamp(val id: Long, val factor: Float) : ViewerAction
@@ -220,6 +229,9 @@ fun ViewerScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val savedSignatures by viewModel.savedSignatures.collectAsStateWithLifecycle()
     val signerName by viewModel.signerName.collectAsStateWithLifecycle()
+    val certificate by viewModel.certificate.collectAsStateWithLifecycle()
+    val timestampsOn by viewModel.timestampsOn.collectAsStateWithLifecycle()
+    var certificateFile by remember { mutableStateOf<Uri?>(null) }
     val toolStyles by viewModel.toolStyles.collectAsStateWithLifecycle()
     val marks by viewModel.marks.collectAsStateWithLifecycle()
     val search by viewModel.search.collectAsStateWithLifecycle()
@@ -253,6 +265,9 @@ fun ViewerScreen(
     }
     val mergePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
         if (it != null) viewModel.merge(it)
+    }
+    val certificatePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
+        certificateFile = it
     }
     val extractPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) {
         if (it != null) viewModel.saveExtract(it) else viewModel.cancelExtract()
@@ -296,6 +311,8 @@ fun ViewerScreen(
         initialTool = initialTool,
         savedSignatures = savedSignatures,
         signerName = signerName,
+        certificate = certificate,
+        timestampsOn = timestampsOn,
         toolStyles = toolStyles,
         marks = marks,
         search = search,
@@ -373,6 +390,10 @@ fun ViewerScreen(
                 is ViewerAction.FillField -> viewModel.fillField(action.field, action.value)
                 is ViewerAction.SignField -> viewModel.signField(action.index)
                 is ViewerAction.FinishSigning -> viewModel.finishSigning(action.name, action.consentText, action.options)
+                // Some file managers label .p12 files as octet-stream, so allow any file.
+                ViewerAction.ImportCertificate -> certificatePicker.launch(arrayOf("application/x-pkcs12", "application/octet-stream", "*/*"))
+                ViewerAction.RemoveCertificate -> viewModel.removeCertificate()
+                is ViewerAction.SetTimestamps -> viewModel.setTimestamps(action.on)
                 is ViewerAction.MoveStamp -> viewModel.moveStamp(action.id, action.delta.x, action.delta.y)
                 is ViewerAction.ResizeStamp -> viewModel.resizeStamp(action.id, action.factor)
                 is ViewerAction.DeleteStamp -> viewModel.deleteStamp(action.id)
@@ -386,6 +407,15 @@ fun ViewerScreen(
         },
     )
 
+    certificateFile?.let { file ->
+        CertificatePasswordDialog(
+            onDismiss = { certificateFile = null },
+            onImport = { password ->
+                certificateFile = null
+                viewModel.importCertificate(file, password)
+            },
+        )
+    }
     shownInfo?.let { DocumentInfoDialog(it.name, it.info, onDismiss = { shownInfo = null }) }
 }
 
@@ -405,6 +435,10 @@ fun ViewerContent(
     initialSignField: Int? = null,
     savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
     signerName: String = "",
+    certificate: CertificateInfo? = null,
+    timestampsOn: Boolean = false,
+    initialShowCertificate: Boolean = false,
+    initialShowSignatures: Boolean = false,
     toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
     marks: List<Mark> = emptyList(),
     search: SearchResults = SearchResults(),
@@ -445,6 +479,8 @@ fun ViewerContent(
     var editingField by remember { mutableStateOf<FormField?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
+    var showCertificate by remember { mutableStateOf(initialShowCertificate) }
+    var showSignatures by remember { mutableStateOf(initialShowSignatures) }
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     // The place to sign Next field last went to, and the one waiting for the signature to be drawn.
@@ -788,6 +824,7 @@ fun ViewerContent(
                     ToolStrip(mode, selectedTool, onToolSelected = { label ->
                         val tool = SignTool.forLabel(label)
                         when {
+                            label == R.string.tool_certificate -> showCertificate = true
                             tool == null -> Unit
                             selectedTool == label -> selectedTool = null
                             else -> {
@@ -943,10 +980,29 @@ fun ViewerContent(
                     }
                 }
             }
+            // Over a signed PDF: who signed it and whether it changed since.
+            if (mode == ViewerMode.Read && ready != null && ready.signatures.isNotEmpty()) {
+                SignatureBanner(ready.signatures, onClick = { showSignatures = true }, modifier = Modifier.align(Alignment.TopCenter))
+            }
             if (tip != null && ready != null) {
                 TipCard(tip, onTipDismissed, Modifier.align(Alignment.BottomCenter).padding(16.dp))
             }
         }
+    }
+
+    if (showSignatures && ready != null) {
+        SignatureDetailsDialog(ready.signatures, onDismiss = { showSignatures = false })
+    }
+
+    if (showCertificate) {
+        CertificateDialog(
+            certificate = certificate,
+            timestampsOn = timestampsOn,
+            onImport = { onAction(ViewerAction.ImportCertificate) },
+            onRemove = { onAction(ViewerAction.RemoveCertificate) },
+            onTimestampsChange = { onAction(ViewerAction.SetTimestamps(it)) },
+            onDismiss = { showCertificate = false },
+        )
     }
 
     if (goingToPage) {
@@ -1039,6 +1095,7 @@ fun ViewerContent(
     if (finishing) {
         FinishSigningDialog(
             initialName = signerName,
+            certificate = certificate,
             onDismiss = { finishing = false },
             onFinish = { name, consentText, options ->
                 finishing = false

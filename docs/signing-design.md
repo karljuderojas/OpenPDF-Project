@@ -67,9 +67,9 @@ Where the key comes from:
 
 DocuSeal's self-hosted install creates its own CA chain. That isn't trusted by Adobe either, so this is the same trade-off.
 
-### 4. Trusted timestamp (RFC 3161), later
-DocuSeal lets admins set a timestamp server URL with a fallback. FreePDF will do the same:
-- An optional setting holds the server URL, with a free default such as freetsa.org and a fallback.
+### 4. Trusted timestamp (RFC 3161)
+Code: `pdf/sign/TimestampClient.kt`. DocuSeal lets admins set a timestamp server URL with a fallback. FreePDF does the same:
+- A switch under Sign → Certificate, off by default because it is the only part of signing that uses the network. It asks freetsa.org, then DigiCert's free public server.
 - When it's set, the CMS signature gets an unsigned timestamp attribute. This proves *when* the file was signed, independent of the phone's clock.
 - It needs a network call at signing time and is skipped with a notice when offline.
 - More space must be reserved in the signature placeholder, as DocuSeal does.
@@ -78,10 +78,12 @@ DocuSeal lets admins set a timestamp server URL with a fallback. FreePDF will do
 Embed the certificate chain and revocation data (a DSS dictionary) so signatures can still be checked after certificates expire. Open-source DocuSeal leaves this as a stub. It's low priority until imported CA certificates are common among our users.
 
 ### 6. Verify
+Code: `pdf/sign/SignatureVerifier.kt`, `ui/sign/SignatureBanner.kt`.
+
 When a signed PDF is opened, show a slim banner: "Signed by K. Rojas · not changed since signing", or "Changed after signing". Tapping it lists each signature with:
 - whether the byte-range digest matches;
 - whether the signature covers the whole file, or unsigned changes were added after it (DocuSeal's verifier flags this);
-- the certificate chain and whether it is trusted;
+- the certificate chain and whether it is trusted. "Trusted" means it chains to a root in the phone's system store; Adobe's trust list is not available offline, so a certificate Acrobat trusts may show as "not recognised" here, and the app says so;
 - the signing time and any timestamp.
 
 ## Legal footing (not legal advice)
@@ -93,9 +95,9 @@ The ESIGN Act and UETA in the US, and eIDAS in the EU, recognise electronic sign
 1. Visual signing: capture a signature, place it, flatten it (`SignatureStamper`). **First release.**
 2. Guided field walk using AcroForm fields, then text-based field detection.
 3. Audit trail and audit page.
-4. Device-certificate digital signature and the Verify banner. **First release**, per the UX decision.
-5. Importing a .p12 certificate.
-6. RFC 3161 timestamps, then LTV.
+4. Device-certificate digital signature and the Verify banner. **Done.**
+5. Importing a .p12 certificate. **Done.**
+6. RFC 3161 timestamps (**done**), then LTV.
 
 ## Later: collecting signatures from others
 
