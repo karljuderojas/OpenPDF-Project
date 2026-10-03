@@ -68,12 +68,15 @@ import io.github.karljuderojas.freepdf.pdf.render.PageSize
 /**
  * Pages mode: every page as a thumbnail. Tap a page to select it, tap the circles to select
  * several, and hold a page then drag it to move it. The tool strip acts on the selection.
+ * [failedEdits] is [ViewerState.Ready.failedPageEdits]: a dropped page is shown in its new place
+ * until the move lands, and goes back where it was when the move fails instead.
  */
 @Composable
 fun PageGrid(
     pageSizes: List<PageSize>,
     revision: Int,
     selectedPages: Set<Int>,
+    failedEdits: Int = 0,
     onPageTapped: (Int) -> Unit,
     onSelectionToggled: (Int) -> Unit,
     onPageMoved: (from: Int, to: Int) -> Unit,
@@ -83,8 +86,8 @@ fun PageGrid(
     val gridState = rememberLazyGridState()
     LaunchedEffect(Unit) { gridState.scrollToItem(selectedPages.minOrNull() ?: 0) }
     val onMoved by rememberUpdatedState(onPageMoved)
-    // A fresh order after every edit; a drop is shown in its new place until the edit lands.
-    val drag = remember(revision, pageSizes.size) { PageDrag(gridState, revision, pageSizes.size) }
+    // A fresh order after every edit, landed or failed; a drop is shown in its new place until then.
+    val drag = remember(revision, failedEdits, pageSizes.size) { PageDrag(gridState, revision, pageSizes.size) }
 
     // Holding a page near the top or bottom edge scrolls the grid, so it can travel any distance.
     val edgePx = with(LocalDensity.current) { 64.dp.toPx() }

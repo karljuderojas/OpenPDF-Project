@@ -600,6 +600,15 @@ class ScreenshotTest {
     @Test
     fun viewerSignFields() = capture("viewer_sign_fields") { viewer(ViewerMode.Sign, signing, signField = 0) }
 
+    // Next field tapped again: the second place is the current one now, drawn stronger than the first.
+    @Test
+    fun viewerSignFieldsNext() {
+        show { viewer(ViewerMode.Sign, signing, signField = 0) }
+        composeRule.onNodeWithText("Next field").performClick()
+        composeRule.waitForIdle()
+        captureRoot("viewer_sign_fields_next")
+    }
+
     // Both places tapped: each holds the signature, fitted to it and still movable; the last one is selected.
     @Test
     fun viewerSignFieldsDone() = capture("viewer_sign_fields_done") {
