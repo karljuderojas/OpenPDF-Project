@@ -12,13 +12,19 @@ import java.io.OutputStream
  */
 object SignedCopy {
 
-    /** What the audit page says the record does and does not prove, for a seal by [identity]. */
-    fun notes(identity: SigningIdentity?): List<String> = buildList {
+    /**
+     * What the audit page says the record does and does not prove, for a seal by [identity] and
+     * signatures that are [locked] into the page or left editable.
+     */
+    fun notes(identity: SigningIdentity?, locked: Boolean = true): List<String> = buildList {
         add(
             "This record was made on the signer's own device by FreePDF. The signer's identity was not " +
                 "checked by email, phone or ID.",
         )
         add("Original SHA-256 is the fingerprint of the file before it was signed.")
+        if (!locked) {
+            add("The signer chose to keep the signatures editable, so they can still be moved or removed in a PDF app.")
+        }
         val issuer = identity?.issuer
         when {
             identity == null -> Unit
@@ -37,8 +43,10 @@ object SignedCopy {
     /**
      * Writes [source] plus the audit page for [trail] to [output]. When [identity] is given, the
      * result is signed by it in [signerName]'s name, with a trusted timestamp if [timestamps] is
-     * given and reachable. [scratch] is a file this may overwrite. A locked [source] opens with
-     * [password] and the copy stays locked with it. Returns whether the signature got a timestamp.
+     * given and reachable. With [lock], signatures placed as annotations are drawn into their
+     * pages first (see [SignatureAnnotation]). [scratch] is a file this may overwrite. A locked
+     * [source] opens with [password] and the copy stays locked with it. Returns whether the
+     * signature got a timestamp.
      */
     fun write(
         source: File,
@@ -48,10 +56,12 @@ object SignedCopy {
         output: OutputStream,
         scratch: File,
         password: String = "",
+        lock: Boolean = true,
         timestamps: TimestampClient? = null,
     ): Boolean {
         PDDocument.load(source, password).use { document ->
-            AuditPageWriter.append(document, trail, notes(identity))
+            if (lock) SignatureAnnotation.lock(document)
+            AuditPageWriter.append(document, trail, notes(identity, locked = lock))
             PdfDocuments.keepProtection(document, password)
             document.save(scratch)
         }

@@ -36,11 +36,11 @@ import io.github.karljuderojas.freepdf.pdf.edit.Splitting
 
 /**
  * Asks which pages to save as a new PDF, typed like "1-3, 5" and starting with the selected
- * page. [onExtract] gets the zero-based pages; the open document is not changed.
+ * pages. [onExtract] gets the zero-based pages; the open document is not changed.
  */
 @Composable
-fun ExtractPagesDialog(pageCount: Int, selectedPage: Int, onDismiss: () -> Unit, onExtract: (List<Int>) -> Unit) {
-    var text by rememberSaveable { mutableStateOf(PageRanges.format(listOf(selectedPage))) }
+fun ExtractPagesDialog(pageCount: Int, selectedPages: List<Int>, onDismiss: () -> Unit, onExtract: (List<Int>) -> Unit) {
+    var text by rememberSaveable { mutableStateOf(PageRanges.format(selectedPages)) }
     val pages = PageRanges.parse(text, pageCount)
     val showError = pages == null && text.isNotBlank()
 

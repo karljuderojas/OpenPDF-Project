@@ -60,6 +60,8 @@
     <string name="tool_insert">Insert blank</string>
     <string name="tool_extract">Extract</string>
     <string name="tool_merge">Merge</string>
+    <string name="tool_select_all">Select all</string>
+    <string name="tool_share_selected">Share selected</string>
     <string name="tool_split">Split</string>
     <string name="tool_password">Password</string>
     <string name="tool_print">Print</string>
@@ -102,6 +104,16 @@
     <string name="edit_failed">That change could not be made to this PDF.</string>
     <string name="cannot_delete_last_page">A PDF needs at least one page.</string>
     <string name="delete_page_title">Delete page %1$d?</string>
+    <plurals name="delete_pages_title">
+        <item quantity="one">Delete %1$d page?</item>
+        <item quantity="other">Delete %1$d pages?</item>
+    </plurals>
+    <plurals name="pages_selected">
+        <item quantity="one">%1$d page selected</item>
+        <item quantity="other">%1$d pages selected</item>
+    </plurals>
+    <string name="clear_selection">Clear selection</string>
+    <string name="select_page">Select page %1$d</string>
     <string name="delete_page_body">You can undo this until you leave the PDF.</string>
     <string name="unsaved_title">Save changes?</string>
     <string name="unsaved_body">This PDF has changes that are not saved yet.</string>
@@ -146,7 +158,13 @@
     <string name="finish_seal_detail">Anyone can then see if the file changes after you sign. Other apps may call the certificate not verified, because it was made on this phone.</string>
     <string name="finish_consent">I agree to sign this document electronically, and my electronic signature is as binding as my handwritten one.</string>
     <string name="finish_record">A signing certificate page with your name, the time and the file\'s fingerprint is added at the end. The signed copy is saved separately, so the original stays as it is.</string>
-    <string name="finish_confirm">Sign and save</string>
+    <string name="finish_lock">Lock signatures (recommended)</string>
+    <string name="finish_lock_detail">They become part of the page and can\'t be moved or removed. Best for sending.</string>
+    <string name="finish_editable">Keep signatures editable</string>
+    <string name="finish_editable_detail">They stay separate marks that can still be moved or deleted later in a PDF app.</string>
+    <string name="finish_seal_needs_lock">Only for locked signatures, because moving one later would break the seal.</string>
+    <string name="finish_save">Save</string>
+    <string name="finish_save_share">Save &amp; share</string>
     <string name="sign_failed">Could not finish signing.</string>
     <string name="signed_copy_saved">Signed copy saved</string>
     <string name="finish_seal_detail_imported">Signed with your certificate for %1$s, issued by %2$s. Anyone can then see if the file changes after you sign.</string>
@@ -370,7 +388,7 @@
     <string name="tip_read_zoom">Pinch to zoom. Double-tap to go back to the full page.</string>
     <string name="tip_annotate">Pick a tool, then mark the page. Pick it again to scroll with one finger.</string>
     <string name="tip_sign">Pick Signature, then tap where you want to sign. You draw it once; it is saved on this phone.</string>
-    <string name="tip_pages">Tap a page to select it, then pick what to do with it.</string>
+    <string name="tip_pages">Tap a page to select it, or tap the circles to pick several. Hold a page and drag it to move it.</string>
     <string name="tip_edit">Add text or a picture, then drag it into place. Done writes it into the PDF.</string>
     <string name="tip_got_it">Got it</string>
     <string name="settings_tips">Tips</string>

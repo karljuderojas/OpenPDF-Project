@@ -56,6 +56,7 @@ import io.github.karljuderojas.freepdf.pdf.sign.DocumentHash
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureMethod
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureReport
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStamper
+import io.github.karljuderojas.freepdf.pdf.sign.SignatureAnnotation
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureVerifier
 import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
@@ -65,6 +66,7 @@ import io.github.karljuderojas.freepdf.pdf.sign.TimestampClient
 import io.github.karljuderojas.freepdf.pdf.sign.info
 import io.github.karljuderojas.freepdf.print.Printing
 import io.github.karljuderojas.freepdf.share.Sharing
+import io.github.karljuderojas.freepdf.ui.sign.FinishOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -179,6 +181,8 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     /** The finished signed copy, in the cache, waiting for the user to pick where it goes. */
     private var pendingSignedCopy: File? = null
 
+    /** Whether Finish asked to share the signed copy once it is saved. */
+    private var shareSignedCopy = false
     /** Pages to extract, or the parts to split into, waiting for the user to pick where they go. */
     private var pendingExtract: List<Int>? = null
     private var pendingSplit: List<List<Int>>? = null
@@ -338,14 +342,15 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         current.renderRegion(index, fullWidthPx, region)
     }
 
-    fun rotatePage(index: Int) = edit { PageEditor.rotate(it, index, 90) }
+    fun rotatePages(pages: Set<Int>) = edit { PageEditor.rotate(it, pages, 90) }
 
-    fun deletePage(index: Int) {
-        if ((_state.value as? ViewerState.Ready)?.pageSizes?.size == 1) {
+    fun deletePages(pages: Set<Int>) {
+        val pageCount = (_state.value as? ViewerState.Ready)?.pageSizes?.size ?: return
+        if (pages.size >= pageCount) {
             _effects.trySend(ViewerEffect.Message(R.string.cannot_delete_last_page))
             return
         }
-        edit { PageEditor.delete(it, index) }
+        edit { PageEditor.delete(it, pages) }
     }
 
     fun insertBlankPage(afterIndex: Int) = edit { document ->
@@ -356,6 +361,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun movePage(from: Int, to: Int) = edit { PageEditor.move(it, from, to) }
+
+    /** Moves the selected pages [by] places together, as one undo step. */
+    fun shiftPages(pages: Set<Int>, by: Int) = edit { PageEditor.shift(it, pages, by) }
 
     /** Appends every page of [other] to the end of the open document. */
     fun merge(other: Uri) = edit { document ->
@@ -567,7 +575,8 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         val toPdf = displayMapper(document, stamp.page)
         val box = stamp.box
         when (val content = stamp.content) {
-            is StampContent.Signature -> SignatureStamper.stamp(
+            // An annotation until Finish draws it into the page, unless the signer keeps it editable.
+            is StampContent.Signature -> SignatureAnnotation.add(
                 document, stamp.page, content.image, toPdf(StampGeometry.signatureAnchor(box)),
                 maxWidth = box.width * size.widthPt, maxHeight = box.height * size.heightPt,
             )
@@ -643,12 +652,13 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Builds the signed copy: everything placed so far, a signing certificate page naming
-     * [name] with the [consentText] they agreed to, and, if [seal], a digital signature from the
-     * imported certificate or else a key made in this phone's Keystore, timestamped if the user
-     * turned that on. The user then picks where to save it.
+     * Builds the signed copy: everything placed so far, with signatures locked into the page if
+     * [FinishOptions.lock], a signing certificate page naming [name] with the [consentText] they
+     * agreed to, and, if [FinishOptions.seal], a digital signature from the imported certificate or
+     * else a key made in this phone's Keystore, timestamped if the user turned that on. The user
+     * then picks where to save it, and shares it too if [FinishOptions.share].
      */
-    fun finishSigning(name: String, consentText: String, seal: Boolean) {
+    fun finishSigning(name: String, consentText: String, options: FinishOptions) {
         val uri = openedUri ?: return
         // Queued ahead of the signed copy on the lock, so everything placed is in it.
         commitStamps()
@@ -681,22 +691,23 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                             ),
                         )
                         // One device key per name, so its certificate always names whoever is signing.
-                        val identity = if (seal) {
+                        val identity = if (options.seal) {
                             certificates.imported()
                                 ?: SigningIdentity.deviceIdentity(name, "freepdf-signing-" + DocumentHash.sha256(name.toByteArray()).take(16))
                         } else {
                             null
                         }
-                        val timestamps = TimestampClient().takeIf { seal && certificates.timestampsOn }
+                        val timestamps = TimestampClient().takeIf { options.seal && certificates.timestampsOn }
                         val out = File(context.cacheDir, "signed/${UUID.randomUUID()}.pdf").apply { parentFile?.mkdirs() }
                         val timestamped = out.outputStream().use { output ->
                             SignedCopy.write(
                                 current.workingFile, trail, name, identity, output, File(out.path + ".tmp"),
-                                password = current.password, timestamps = timestamps,
+                                password = current.password, lock = options.lock, timestamps = timestamps,
                             )
                         }
                         pendingSignedCopy?.delete()
                         pendingSignedCopy = out
+                        shareSignedCopy = options.share
                         SignedCopy.suggestedName(documentName) to (timestamps != null && !timestamped)
                     }
                 }
@@ -716,13 +727,17 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         val copy = pendingSignedCopy ?: return
         pendingSignedCopy = null
         viewModelScope.launch {
-            val saved = runCatching {
+            val result = runCatching {
                 withContext(Dispatchers.IO) {
                     val output = context.contentResolver.openOutputStream(target, "wt") ?: error("Cannot write $target")
                     output.use { out -> copy.inputStream().use { it.copyTo(out) } }
+                    // Shared under the name it was saved as, from a copy the share sheet can read.
+                    val shared = if (shareSignedCopy) copy.copyTo(Sharing.sharedCopy(context, displayName(target)), overwrite = true) else null
                     copy.delete()
+                    shared
                 }
-            }.isSuccess
+            }
+            val saved = result.isSuccess
             if (saved) {
                 runCatching {
                     context.contentResolver.takePersistableUriPermission(
@@ -731,6 +746,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 open(target)
                 _effects.send(ViewerEffect.Message(R.string.signed_copy_saved))
+                result.getOrNull()?.let { _effects.send(ViewerEffect.Share(it)) }
             } else {
                 _effects.send(ViewerEffect.Message(R.string.save_failed))
             }
