@@ -90,6 +90,7 @@ sealed interface ViewerAction {
     data class Move(val from: Int, val to: Int) : ViewerAction
     data object Merge : ViewerAction
     data object Share : ViewerAction
+    data object ShowInfo : ViewerAction
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
     data class Stroke(val page: Int, val tool: AnnotateTool, val points: List<Offset>) : ViewerAction
@@ -115,6 +116,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
     val resources = LocalResources.current
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    var shownInfo by remember { mutableStateOf<ViewerEffect.ShowInfo?>(null) }
 
     val saveAsPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) {
         if (it != null) viewModel.saveAs(it) else viewModel.cancelSaveAs()
@@ -134,6 +136,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 ViewerEffect.Close -> onBack()
                 is ViewerEffect.Share -> Sharing.shareFile(context, effect.file)
                 is ViewerEffect.SaveSigned -> signedCopyPicker.launch(effect.suggestedName)
+                is ViewerEffect.ShowInfo -> shownInfo = effect
             }
         }
     }
@@ -156,6 +159,7 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
                 ViewerAction.Merge -> mergePicker.launch(arrayOf("application/pdf"))
                 ViewerAction.Share -> viewModel.share()
+                ViewerAction.ShowInfo -> viewModel.documentInfo()
                 is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.tool.rgb)
                 is ViewerAction.Box -> when (action.tool) {
                     AnnotateTool.Highlight -> Annotator.TextMarkup.Highlight
@@ -180,6 +184,8 @@ fun ViewerScreen(uri: Uri, onBack: () -> Unit, viewModel: ViewerViewModel = view
             }
         },
     )
+
+    shownInfo?.let { DocumentInfoDialog(it.name, it.info, onDismiss = { shownInfo = null }) }
 }
 
 /** Stateless viewer UI, so it can be previewed and screenshot-tested without a real PDF. */
@@ -336,7 +342,10 @@ fun ViewerContent(
                     })
                 }
                 else -> ToolStrip(mode, selectedTool = null, onToolSelected = {
-                    if (it == R.string.tool_share) onAction(ViewerAction.Share)
+                    when (it) {
+                        R.string.tool_share -> onAction(ViewerAction.Share)
+                        R.string.tool_info -> onAction(ViewerAction.ShowInfo)
+                    }
                 })
             }
         },

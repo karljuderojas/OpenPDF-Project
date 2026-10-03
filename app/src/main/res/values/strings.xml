@@ -99,4 +99,25 @@
     <string name="forget_recent">Remove from recent</string>
     <string name="share_title">Share %1$s</string>
     <string name="share_failed">Could not prepare this PDF for sharing.</string>
+    <string name="info_failed">Could not read the details of this PDF.</string>
+    <string name="info_close">Close</string>
+    <string name="info_title">Title</string>
+    <string name="info_author">Author</string>
+    <string name="info_subject">Subject</string>
+    <string name="info_keywords">Keywords</string>
+    <string name="info_creator">Made with</string>
+    <string name="info_producer">PDF made by</string>
+    <string name="info_created">Created</string>
+    <string name="info_modified">Modified</string>
+    <string name="info_pages">Pages</string>
+    <string name="info_page_size">Page size</string>
+    <string name="info_mixed_sizes">Mixed sizes</string>
+    <string name="info_file_size">File size</string>
+    <string name="info_pdf_version">PDF version</string>
+    <string name="info_protected">Password protected</string>
+    <string name="info_form">Form fields</string>
+    <string name="info_signatures">Digital signatures</string>
+    <string name="info_yes">Yes</string>
+    <string name="info_no">No</string>
+    <string name="info_none">None</string>
 </resources>

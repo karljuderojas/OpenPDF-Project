@@ -20,11 +20,13 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.DocumentEntry
+import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
+import io.github.karljuderojas.freepdf.ui.viewer.DocumentInfoDialog
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerContent
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerMode
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerState
@@ -190,6 +192,31 @@ class ScreenshotTest {
 
     @Test
     fun viewerMore() = capture("viewer_more") { viewer(ViewerMode.More) }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerDocumentInfo() {
+        fun at(day: Int, hour: Int, minute: Int) =
+            Calendar.getInstance().apply { set(2026, Calendar.SEPTEMBER, day, hour, minute, 0) }.toInstant()
+        val info = DocumentInfo(
+            title = "Service Agreement",
+            author = "Dana Whitfield",
+            creator = "Microsoft Word",
+            producer = "Microsoft Word for Microsoft 365",
+            created = at(28, 9, 30),
+            modified = at(30, 16, 5),
+            pageCount = 2,
+            pageSize = PageSize(612f, 792f),
+            pdfVersion = "1.7",
+            fileSizeBytes = 84_000,
+        )
+        show {
+            viewer(ViewerMode.More)
+            DocumentInfoDialog("Service Agreement.pdf", info, onDismiss = {})
+        }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_document_info.png")
+    }
 
     // 3 Oct 2026, 15:00 on the test machine's clock, so Today and Yesterday group the same way everywhere.
     private val now = Calendar.getInstance().apply { set(2026, Calendar.OCTOBER, 3, 15, 0, 0) }.timeInMillis

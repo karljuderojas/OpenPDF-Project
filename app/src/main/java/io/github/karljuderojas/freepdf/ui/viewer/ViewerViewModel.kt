@@ -25,6 +25,7 @@ import io.github.karljuderojas.freepdf.pdf.edit.EditSession
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
 import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import io.github.karljuderojas.freepdf.pdf.edit.PdfText
+import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.render.PdfRenderer
 import io.github.karljuderojas.freepdf.pdf.sign.AuditEvent
@@ -82,6 +83,9 @@ sealed interface ViewerEffect {
 
     /** Ask where to save the signed copy; see [ViewerViewModel.saveSignedCopy]. */
     data class SaveSigned(val suggestedName: String) : ViewerEffect
+
+    /** Show [info] about the open PDF, titled with its file [name]. */
+    data class ShowInfo(val name: String, val info: DocumentInfo) : ViewerEffect
 }
 
 class ViewerViewModel(application: Application) : AndroidViewModel(application) {
@@ -372,6 +376,22 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             }
             copy.onSuccess { _effects.send(ViewerEffect.Share(it)) }
                 .onFailure { _effects.send(ViewerEffect.Message(R.string.share_failed)) }
+        }
+    }
+
+    /** Reads the details of the PDF as it is now, unsaved changes included, for Document info. */
+    fun documentInfo() {
+        val uri = openedUri ?: return
+        viewModelScope.launch {
+            val shown: Result<ViewerEffect> = runCatching {
+                lock.withLock {
+                    withContext(Dispatchers.IO) {
+                        val current = session ?: error("Nothing is open")
+                        ViewerEffect.ShowInfo(displayName(uri), DocumentInfo.read(current.workingFile))
+                    }
+                }
+            }
+            _effects.send(shown.getOrElse { ViewerEffect.Message(R.string.info_failed) })
         }
     }
 
