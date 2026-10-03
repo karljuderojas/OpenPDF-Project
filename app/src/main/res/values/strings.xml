@@ -74,6 +74,27 @@
     <string name="selection_strike">Strike</string>
     <string name="selection_copy">Copy</string>
     <string name="copied">Copied</string>
+    <string name="tool_comments">Comments</string>
+    <string name="comments_title">Comments and marks (%1$d)</string>
+    <string name="comments_empty">No marks yet. Highlights, drawings and notes show up here.</string>
+    <string name="comments_page">Page %1$d</string>
+    <string name="comment_title">Comment</string>
+    <string name="comment_hint">Type a comment</string>
+    <string name="mark_add_comment">Comment</string>
+    <string name="mark_edit_comment">Edit comment</string>
+    <string name="mark_drawing">Drawing</string>
+    <string name="mark_rectangle">Rectangle</string>
+    <string name="mark_ellipse">Ellipse</string>
+    <string name="mark_other">Mark</string>
+    <string name="mark_edit_text">Edit text</string>
+    <string name="text_box_title">Add a text box</string>
+    <string name="stamp_approved">Approved</string>
+    <string name="stamp_not_approved">Not approved</string>
+    <string name="stamp_draft">Draft</string>
+    <string name="stamp_final">Final</string>
+    <string name="stamp_confidential">Confidential</string>
+    <string name="stamp_for_comment">For comment</string>
+    <string name="stamp_void">Void</string>
     <string name="style_colour">Colour %1$d</string>
     <string name="style_size">Size %1$d</string>
     <string name="cancel">Cancel</string>
@@ -93,7 +114,6 @@
     </plurals>
     <string name="clear_selection">Clear selection</string>
     <string name="select_page">Select page %1$d</string>
-    <string name="pages_hint">Tap the circles to pick several pages. Hold a page and drag it to move it.</string>
     <string name="delete_page_body">You can undo this until you leave the PDF.</string>
     <string name="unsaved_title">Save changes?</string>
     <string name="unsaved_body">This PDF has changes that are not saved yet.</string>
@@ -292,4 +312,16 @@
     <string name="settings_version">%1$s %2$s</string>
     <string name="settings_about_detail">Free and open source under the Apache 2.0 license. No ads, no account, and your files never leave this phone.</string>
     <string name="settings_source_code">Source code</string>
+    <!-- Tips -->
+    <string name="tip_read_zoom">Pinch to zoom. Double-tap to go back to the full page.</string>
+    <string name="tip_annotate">Pick a tool, then mark the page. Pick it again to scroll with one finger.</string>
+    <string name="tip_sign">Pick Signature, then tap where you want to sign. You draw it once; it is saved on this phone.</string>
+    <string name="tip_pages">Tap a page to select it, or tap the circles to pick several. Hold a page and drag it to move it.</string>
+    <string name="tip_got_it">Got it</string>
+    <string name="settings_tips">Tips</string>
+    <string name="settings_show_tips">Show tips</string>
+    <string name="settings_show_tips_detail">Short hints the first time you use a feature.</string>
+    <string name="settings_reset_tips">Show all tips again</string>
+    <string name="settings_reset_tips_detail">Each hint appears once more when its feature comes up.</string>
+    <string name="settings_reset_tips_done">Tips will show again</string>
 </resources>

@@ -13,7 +13,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.material3.Surface
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
@@ -28,9 +31,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
+import io.github.karljuderojas.freepdf.pdf.annotate.Stamps
 
 /** A tool's colour and line thickness in PDF points (0 for tools without a thickness). */
 data class ToolStyle(val color: Color, val width: Float) {
@@ -49,6 +54,9 @@ internal val InkColors = listOf(
 
 internal val PenWidths = listOf(1f, 2f, 4f, 8f)
 internal val LineWidths = listOf(1f, 2f, 3f)
+
+/** Text box font sizes, in points. */
+internal val FontSizes = listOf(10f, 12f, 16f, 24f)
 
 /**
  * Above the Annotate tool strip while a tool is chosen: its colours, then its sizes. The choice
@@ -87,6 +95,47 @@ fun StyleBar(tool: AnnotateTool, style: ToolStyle, onStyleChange: (ToolStyle) ->
         }
     }
 }
+
+/** Above the tool strip while Stamp is chosen: which stamp a tap places, each in its own colour. */
+@Composable
+fun StampBar(selected: Stamps.Kind, onSelect: (Stamps.Kind) -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("stamp-bar")
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Stamps.Kind.entries.forEach { kind ->
+                val color = Color(kind.color.r, kind.color.g, kind.color.b)
+                FilterChip(
+                    selected = kind == selected,
+                    onClick = { onSelect(kind) },
+                    label = { Text(stringResource(kind.labelRes).uppercase(), color = color, fontWeight = FontWeight.Bold) },
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true, selected = kind == selected, borderColor = color, selectedBorderColor = color,
+                        borderWidth = 1.5.dp, selectedBorderWidth = 2.5.dp,
+                    ),
+                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = color.copy(alpha = 0.12f)),
+                )
+            }
+        }
+    }
+}
+
+/** The stamp's name in the app's language; the PDF itself keeps the English label. */
+val Stamps.Kind.labelRes: Int
+    get() = when (this) {
+        Stamps.Kind.Approved -> R.string.stamp_approved
+        Stamps.Kind.NotApproved -> R.string.stamp_not_approved
+        Stamps.Kind.Draft -> R.string.stamp_draft
+        Stamps.Kind.Final -> R.string.stamp_final
+        Stamps.Kind.Confidential -> R.string.stamp_confidential
+        Stamps.Kind.ForComment -> R.string.stamp_for_comment
+        Stamps.Kind.Void -> R.string.stamp_void
+    }
 
 /** A 32dp round target with a ring when selected. */
 @Composable

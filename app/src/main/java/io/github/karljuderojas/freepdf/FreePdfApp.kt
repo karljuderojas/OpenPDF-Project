@@ -5,6 +5,7 @@ import android.content.Context
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import io.github.karljuderojas.freepdf.files.Documents
 import io.github.karljuderojas.freepdf.settings.AppSettings
+import io.github.karljuderojas.freepdf.settings.Tips
 
 class FreePdfApp : Application() {
 
@@ -13,6 +14,9 @@ class FreePdfApp : Application() {
 
     /** Choices from the Settings tab. */
     val settings by lazy { AppSettings(getSharedPreferences("settings", Context.MODE_PRIVATE)) }
+
+    /** Which one-time tips were shown. */
+    val tips by lazy { Tips(getSharedPreferences("tips", Context.MODE_PRIVATE)) }
 
     override fun onCreate() {
         super.onCreate()

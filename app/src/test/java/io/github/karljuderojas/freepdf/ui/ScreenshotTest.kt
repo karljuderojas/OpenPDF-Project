@@ -34,6 +34,8 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.DocumentEntry
+import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
+import io.github.karljuderojas.freepdf.pdf.annotate.Mark
 import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
 import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
 import io.github.karljuderojas.freepdf.pdf.render.PageBox
@@ -126,6 +128,9 @@ class ScreenshotTest {
                 onClearHistory = {},
                 version = "0.1.0",
                 onSourceCode = {},
+                showTips = true,
+                onShowTips = {},
+                onResetTips = {},
                 modifier = it,
             )
         }
@@ -314,7 +319,49 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerAnnotateTip() = capture("viewer_annotate_tip") { viewer(ViewerMode.Annotate, tip = R.string.tip_annotate) }
+
+    @Test
+    fun viewerMarkSelected() {
+        show { viewer(ViewerMode.Read, marks = sampleMarks) }
+        // Tap the highlight over "Northwind Studio": it gets an outline and the edit bar replaces the mode bar.
+        val highlight = sampleMarks.first()
+        composeRule.onNodeWithTag("mark-layer-0").performTouchInput {
+            click(Offset((highlight.left + highlight.right) / 2 * width, (highlight.top + highlight.bottom) / 2 * height))
+        }
+        composeRule.waitForIdle()
+        captureRoot("viewer_mark_selected")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerComments() {
+        show { viewer(ViewerMode.Annotate, marks = sampleMarks) }
+        composeRule.onNodeWithText("Comments").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        // The sheet is its own window, so capture the whole screen.
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_comments.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerAnnotateTextBox() {
+        show { viewer(ViewerMode.Annotate, tool = R.string.tool_text_box) }
+        // The dialog's text field keeps Compose from going idle, as in viewerAnnotateNote.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("annotation-layer-0").performTouchInput { click(Offset(300f, 1000f)) }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_annotate_text_box.png")
+    }
+
+    @Test
+    fun viewerAnnotateStamp() = capture("viewer_annotate_stamp") { viewer(ViewerMode.Annotate, tool = R.string.tool_stamp) }
+
+    @Test
     fun viewerSign() = capture("viewer_sign") { viewer(ViewerMode.Sign) }
+
+    @Test
+    fun viewerSignTip() = capture("viewer_sign_tip") { viewer(ViewerMode.Sign, tip = R.string.tip_sign) }
 
     @Test
     fun viewerSignPlacing() = capture("viewer_sign_placing") {
@@ -467,6 +514,9 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_delete_several.png")
     }
 
+    @Test
+    fun viewerPagesTip() = capture("viewer_pages_tip") { viewer(ViewerMode.Pages, sixPages, tip = R.string.tip_pages) }
+
     /** Page 3 held and dragged up over page 2, before it is let go. */
     @Test
     fun viewerPagesDragging() {
@@ -561,6 +611,48 @@ class ScreenshotTest {
         PDDocument.load(stream).use { document -> List(document.numberOfPages) { PageText.words(document, it) } }
     }
 
+    /** A highlight with a comment, a pen drawing and a note, as Marks.list would report them. */
+    private val sampleMarks: List<Mark> by lazy {
+        val words = sampleWords[0]
+        val from = wordIndex(0, "Northwind")
+        val highlighted = words.subList(from, from + 2)
+        val modified = Calendar.getInstance().apply { set(2026, Calendar.OCTOBER, 3, 14, 20, 0) }.timeInMillis
+        listOf(
+            Mark(
+                page = 0, index = 0, kind = Mark.Kind.Highlight,
+                left = highlighted.first().left, top = highlighted.first().top,
+                right = highlighted.last().right, bottom = highlighted.last().bottom,
+                color = Annotator.Rgb.Yellow, width = 1f, comment = "Should this be Northwind Studio Ltd?",
+                markedText = "Northwind Studio", author = "Dana", modified = modified,
+            ),
+            Mark(
+                page = 0, index = 1, kind = Mark.Kind.Ink, left = 0.55f, top = 0.47f, right = 0.8f, bottom = 0.52f,
+                color = Annotator.Rgb.Blue, width = 2f, comment = "", markedText = "", author = null, modified = modified,
+            ),
+            Mark(
+                page = 1, index = 0, kind = Mark.Kind.Note, left = 0.7f, top = 0.2f, right = 0.733f, bottom = 0.225f,
+                color = Annotator.Rgb.Yellow, width = 1f, comment = "Both parties sign here.", markedText = "",
+                author = "Dana", modified = modified,
+            ),
+        )
+    }
+
+    /** [page] with the sample marks painted on, as PDFium would show them. */
+    private fun withMarks(page: Bitmap, index: Int, marks: List<Mark>): Bitmap {
+        val copy = page.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = android.graphics.Canvas(copy)
+        marks.filter { it.page == index }.forEach { mark ->
+            val c = mark.color ?: return@forEach
+            val paint = android.graphics.Paint().apply {
+                color = android.graphics.Color.argb(if (mark.kind == Mark.Kind.Highlight) 110 else 255, (c.r * 255).toInt(), (c.g * 255).toInt(), (c.b * 255).toInt())
+                style = if (mark.kind == Mark.Kind.Ink) android.graphics.Paint.Style.STROKE else android.graphics.Paint.Style.FILL
+                strokeWidth = 4f
+            }
+            canvas.drawRect(mark.left * copy.width, mark.top * copy.height, mark.right * copy.width, mark.bottom * copy.height, paint)
+        }
+        return copy
+    }
+
     private fun wordIndex(page: Int, text: String) = sampleWords[page].indexOfFirst { it.text == text }.also { check(it >= 0) { "No $text" } }
 
     /** The middle of a word, in pixels of the node tagged [tag], which covers the page. */
@@ -603,8 +695,10 @@ class ScreenshotTest {
         savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
         signerName: String = "",
         toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
+        marks: List<Mark> = emptyList(),
         search: SearchResults = SearchResults(),
         searchQuery: String? = null,
+        tip: Int? = null,
         stamps: List<PlacedStamp> = emptyList(),
         selectedStamp: Long? = null,
         onAction: (ViewerAction) -> Unit = {},
@@ -612,7 +706,7 @@ class ScreenshotTest {
         ViewerContent(
             state = state,
             onBack = {},
-            loadPage = { index, width -> scaled(samplePages[index % samplePages.size], width) },
+            loadPage = { index, width -> scaled(withMarks(samplePages[index % samplePages.size], index, marks), width) },
             loadWords = { sampleWords[it % sampleWords.size] },
             loadRegion = { index, fullWidth, region -> largePages[index]?.let { cropped(it, fullWidth, region) } },
             initialMode = mode,
@@ -622,8 +716,10 @@ class ScreenshotTest {
             savedSignatures = savedSignatures,
             signerName = signerName,
             toolStyles = toolStyles,
+            marks = marks,
             search = search,
             initialSearchQuery = searchQuery,
+            tip = tip,
             stamps = stamps,
             initialSelectedStamp = selectedStamp,
             onAction = onAction,
