@@ -1,12 +1,14 @@
 package io.github.karljuderojas.freepdf.files
 
 import android.content.SharedPreferences
+import android.net.Uri
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 
 /** A PDF the user has opened. [uri] is kept as a string so it can be stored and compared. */
 data class DocumentEntry(val uri: String, val name: String, val openedAt: Long)
@@ -72,11 +74,29 @@ class Documents(private val prefs: SharedPreferences, private val clock: () -> L
         prefs.edit().putString(KEY, array.toString()).apply()
     }
 
-    private companion object {
-        const val KEY = "recent"
-        const val MAX_RECENT = 50
+    companion object {
+        private const val KEY = "recent"
+        private const val MAX_RECENT = 50
 
         // The viewer's switcher lists every open file, so the oldest drop off past this.
-        const val MAX_OPEN = 8
+        private const val MAX_OPEN = 8
+
+        /**
+         * True if the app can open [uri] again after a restart, so it is worth keeping in the
+         * history: a content:// document it holds a lasting read grant for ([hasPersistedRead]),
+         * or a file of its own under [filesDir]. Other file:// URIs, such as a PDF handed over by
+         * another app or one in the cache, usually no longer open later, so they stay out.
+         */
+        fun lasting(uri: Uri, filesDir: File, hasPersistedRead: () -> Boolean): Boolean = when (uri.scheme) {
+            "content" -> hasPersistedRead()
+            "file" -> uri.path?.let { isUnder(File(it), filesDir) } ?: false
+            else -> false
+        }
+
+        private fun isUnder(file: File, dir: File): Boolean {
+            val root = runCatching { dir.canonicalFile }.getOrDefault(dir.absoluteFile)
+            val path = runCatching { file.canonicalFile }.getOrDefault(file.absoluteFile)
+            return path.startsWith(root) && path != root
+        }
     }
 }
