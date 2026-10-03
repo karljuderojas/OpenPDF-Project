@@ -251,10 +251,10 @@ fun ViewerContent(
     // Selected text, and the lines of a selection waiting for its note to be typed.
     var selection by remember { mutableStateOf<TextSelection?>(null) }
     var pendingTextNote by remember { mutableStateOf<Pair<Int, List<Rect>>?>(null) }
-    LaunchedEffect(mode, selectedTool, ready?.revision) { selection = null }
 
     val ready = state as? ViewerState.Ready
     val pageCount = ready?.pageSizes?.size ?: 0
+    LaunchedEffect(mode, selectedTool, ready?.revision) { selection = null }
     LaunchedEffect(pageCount) {
         if (pageCount > 0 && selectedPage >= pageCount) selectedPage = pageCount - 1
     }
