@@ -18,10 +18,11 @@ import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import io.github.karljuderojas.freepdf.R
+import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
-import io.github.karljuderojas.freepdf.ui.home.HomeScreen
+import io.github.karljuderojas.freepdf.ui.files.FilesContent
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerContent
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerMode
@@ -31,6 +32,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.util.Calendar
 
 /**
  * Renders each screen to a PNG. CI runs `recordRoborazziDebug` on every pull request and posts
@@ -51,7 +53,26 @@ class ScreenshotTest {
     private val sample = ViewerState.Ready(List(samplePages.size) { PageSize(612f, 792f) })
 
     @Test
-    fun home() = capture("home") { HomeScreen(onOpenPdf = {}) }
+    fun filesEmpty() = capture("files_empty") { files(open = emptyList(), recent = emptyList()) }
+
+    @Test
+    fun files() {
+        val hour = 60 * 60 * 1000L
+        val agreement = DocumentEntry("content://a", "Service Agreement.pdf", now - 1 * hour)
+        capture("files") {
+            files(
+                open = listOf(agreement, DocumentEntry("content://b", "Lease renewal 2027.pdf", now - 2 * hour)),
+                recent = listOf(
+                    agreement,
+                    DocumentEntry("content://c", "W-9 form.pdf", now - 5 * hour),
+                    DocumentEntry("content://d", "Bakery menu draft.pdf", now - 20 * hour),
+                    DocumentEntry("content://e", "Invoice 1042.pdf", now - 30 * hour),
+                    DocumentEntry("content://f", "Lease renewal 2027.pdf", now - 4 * 24 * hour),
+                    DocumentEntry("content://g", "Insurance claim.pdf", now - 9 * 24 * hour),
+                ),
+            )
+        }
+    }
 
     @Test
     fun viewerRead() = capture("viewer_read") { viewer(ViewerMode.Read) }
@@ -146,6 +167,14 @@ class ScreenshotTest {
 
     @Test
     fun viewerMore() = capture("viewer_more") { viewer(ViewerMode.More) }
+
+    // 3 Oct 2026, 15:00 on the test machine's clock, so Today and Yesterday group the same way everywhere.
+    private val now = Calendar.getInstance().apply { set(2026, Calendar.OCTOBER, 3, 15, 0, 0) }.timeInMillis
+
+    @Composable
+    private fun files(open: List<DocumentEntry>, recent: List<DocumentEntry>) {
+        FilesContent(open, recent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {}, now = now)
+    }
 
     @Composable
     private fun viewer(

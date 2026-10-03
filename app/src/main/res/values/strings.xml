@@ -78,4 +78,16 @@
     <string name="sign_hint_date">Tap where today\'s date goes.</string>
     <string name="sign_hint_text">Tap where you want to type text.</string>
     <string name="sign_hint_checkmark">Tap a box to tick it.</string>
+    <string name="files_title">Files</string>
+    <string name="open_file">Open file</string>
+    <string name="files_open_now">Open now</string>
+    <string name="files_today">Today</string>
+    <string name="files_yesterday">Yesterday</string>
+    <string name="files_earlier">Earlier</string>
+    <string name="files_empty_hint">PDFs you open appear here. Your history stays on this phone.</string>
+    <string name="close_document">Close %1$s</string>
+    <string name="more_actions">More actions for %1$s</string>
+    <string name="forget_recent">Remove from recent</string>
+    <string name="share_title">Share %1$s</string>
+    <string name="share_failed">Could not prepare this PDF for sharing.</string>
 </resources>

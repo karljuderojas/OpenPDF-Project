@@ -8,7 +8,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import io.github.karljuderojas.freepdf.ui.home.HomeScreen
+import io.github.karljuderojas.freepdf.ui.files.FilesScreen
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerScreen
 
 private const val HOME = "home"
@@ -30,7 +30,7 @@ fun FreePdfNavHost(incomingPdf: Uri?, onIncomingPdfHandled: () -> Unit) {
 
     NavHost(navController = navController, startDestination = HOME) {
         composable(HOME) {
-            HomeScreen(onOpenPdf = openPdf)
+            FilesScreen(onOpenPdf = openPdf)
         }
         composable(
             route = VIEWER,

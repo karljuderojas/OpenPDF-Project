@@ -1,6 +1,7 @@
 package io.github.karljuderojas.freepdf.ui.viewer
 
 import android.app.Application
+import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -12,6 +13,7 @@ import androidx.lifecycle.viewModelScope
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget
+import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
 import io.github.karljuderojas.freepdf.pdf.PdfRect
@@ -24,6 +26,7 @@ import io.github.karljuderojas.freepdf.pdf.render.PageSize
 import io.github.karljuderojas.freepdf.pdf.render.PdfRenderer
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStamper
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
+import io.github.karljuderojas.freepdf.share.Sharing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -59,6 +62,7 @@ sealed interface ViewerEffect {
     data class Message(@StringRes val text: Int) : ViewerEffect
     data class SaveAs(val suggestedName: String) : ViewerEffect
     data object Close : ViewerEffect
+    data class Share(val file: File) : ViewerEffect
 }
 
 class ViewerViewModel(application: Application) : AndroidViewModel(application) {
@@ -116,7 +120,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     reloadLocked()
                 }
-            }.getOrElse { ViewerState.Failed(it.message) }
+            }.onSuccess { remember(uri) }.getOrElse { ViewerState.Failed(it.message) }
         }
     }
 
@@ -220,6 +224,23 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         PageEditor.addCheckmark(document, page, displayMapper(document, page)(at))
     }
 
+    /** Shares the PDF as it is now, unsaved changes included, under the file's own name. */
+    fun share() {
+        val uri = openedUri ?: return
+        viewModelScope.launch {
+            val copy = runCatching {
+                lock.withLock {
+                    withContext(Dispatchers.IO) {
+                        val current = session ?: error("Nothing is open")
+                        Sharing.sharedCopy(context, displayName(uri)).also { current.workingFile.copyTo(it, overwrite = true) }
+                    }
+                }
+            }
+            copy.onSuccess { _effects.send(ViewerEffect.Share(it)) }
+                .onFailure { _effects.send(ViewerEffect.Message(R.string.share_failed)) }
+        }
+    }
+
     fun undo() {
         viewModelScope.launch {
             lock.withLock {
@@ -246,6 +267,12 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             if (saved) {
                 // Later saves go to the new copy, which the user can write to.
                 openedUri = target
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        target, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                    )
+                }
+                remember(target)
                 finishSave()
             } else {
                 closeAfterSave = false
@@ -311,6 +338,14 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         val next = PdfRenderer.open(context, Uri.fromFile(current.workingFile))
         renderer = next
         return ViewerState.Ready(next.pageSizes, revision, current.canUndo, current.hasUnsavedChanges)
+    }
+
+    /** Lists [uri] in the Files tab; in the history too if the app can reopen it later. */
+    private suspend fun remember(uri: Uri) {
+        val name = withContext(Dispatchers.IO) { displayName(uri) }
+        val lasting = uri.scheme == "file" ||
+            context.contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
+        getApplication<FreePdfApp>().documents.opened(uri.toString(), name, remember = lasting)
     }
 
     private fun displayName(uri: Uri): String {
