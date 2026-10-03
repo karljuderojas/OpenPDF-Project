@@ -294,11 +294,11 @@ class ScreenshotTest {
     @Test
     fun viewerPasswordAdd() {
         show { viewer(ViewerMode.More) }
-        composeRule.onNodeWithText("Password").performClick()
-        // Let the dialog open before the clock stops.
-        composeRule.waitForIdle()
-        // Typing focuses the fields, whose blinking cursor never lets Compose go idle.
+        // The dialog's fields never let Compose go idle, so drive the clock by hand, giving the
+        // dialog a moment to open before typing.
         composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Password").performClick()
+        composeRule.mainClock.advanceTimeBy(500)
         composeRule.onNodeWithTag("new-password-field").performTextInput("lease2026")
         composeRule.onNodeWithTag("confirm-password-field").performTextInput("lease2025")
         composeRule.mainClock.advanceTimeBy(1_000)
