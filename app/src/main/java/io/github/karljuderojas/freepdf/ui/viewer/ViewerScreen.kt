@@ -97,6 +97,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
+import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
 import io.github.karljuderojas.freepdf.pdf.annotate.Stamps
@@ -111,6 +112,7 @@ import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.pdf.sign.CertificateInfo
 import io.github.karljuderojas.freepdf.ui.sign.CertificateDialog
 import io.github.karljuderojas.freepdf.ui.sign.CertificatePasswordDialog
+import io.github.karljuderojas.freepdf.ui.rememberPdfPicker
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignatureBanner
 import io.github.karljuderojas.freepdf.ui.sign.SignatureDetailsDialog
@@ -124,7 +126,10 @@ sealed interface ViewerAction {
     data object Undo : ViewerAction
     data object Redo : ViewerAction
     data object Save : ViewerAction
-    data object SaveAndClose : ViewerAction
+
+    /** Saves, then runs [then] once the save lands: back out, or on to another open document. */
+    data class SaveAndLeave(val then: () -> Unit) : ViewerAction
+
     data class Rotate(val page: Int) : ViewerAction
     data class Delete(val page: Int) : ViewerAction
     data class InsertBlank(val afterPage: Int) : ViewerAction
@@ -189,13 +194,17 @@ sealed interface ViewerAction {
     data object CommitStamps : ViewerAction
 }
 
-/** Opens [uri] in [initialMode] (Read unless a Home shortcut or the Tools tab asked otherwise). */
+/**
+ * Opens [uri] in [initialMode] (Read unless a Home shortcut or the Tools tab asked otherwise).
+ * [onSwitchTo] replaces this viewer with another PDF, from the open-documents switcher.
+ */
 @Composable
 fun ViewerScreen(
     uri: Uri,
     onBack: () -> Unit,
     initialMode: ViewerMode = ViewerMode.Read,
     initialTool: Int? = null,
+    onSwitchTo: (Uri) -> Unit = {},
     viewModel: ViewerViewModel = viewModel(),
 ) {
     LaunchedEffect(uri) { viewModel.open(uri) }
@@ -219,6 +228,12 @@ fun ViewerScreen(
     fun launchMessage(@StringRes text: Int) {
         scope.launch { snackbarHostState.showSnackbar(resources.getString(text)) }
     }
+    val documents = (context.applicationContext as FreePdfApp).documents
+    val openDocuments by documents.open.collectAsStateWithLifecycle()
+    val pickAnother = rememberPdfPicker(onSwitchTo)
+
+    // Where to go once a save before leaving lands: back, or to another document.
+    var afterSave by remember { mutableStateOf(onBack) }
 
     // The tip for the mode just entered, if it was not shown before; see Tips for the rules.
     val tips = remember(context) { (context.applicationContext as FreePdfApp).tips }
@@ -251,7 +266,7 @@ fun ViewerScreen(
                     snackbarHostState.showSnackbar(resources.getQuantityString(effect.text, effect.count, effect.count))
                 }
                 is ViewerEffect.SaveAs -> saveAsPicker.launch(effect.suggestedName)
-                ViewerEffect.Close -> onBack()
+                ViewerEffect.Close -> afterSave()
                 is ViewerEffect.Share -> Sharing.shareFile(context, effect.file)
                 is ViewerEffect.ShareImages -> Sharing.shareImages(context, effect.files, effect.title)
                 is ViewerEffect.Print -> Printing.print(context, effect.file, effect.name, effect.pageCount)
@@ -280,6 +295,12 @@ fun ViewerScreen(
         search = search,
         stamps = stamps,
         snackbarHostState = snackbarHostState,
+        openDocuments = openDocuments,
+        currentUri = uri.toString(),
+        onSwitchTo = { onSwitchTo(Uri.parse(it.uri)) },
+        onCloseDocument = { documents.close(it.uri) },
+        onCloseAll = documents::closeAll,
+        onOpenAnother = pickAnother,
         pageColors = pageColors,
         onPageColors = settings::setPageColors,
         tip = tip?.text,
@@ -293,7 +314,10 @@ fun ViewerScreen(
                 ViewerAction.Undo -> viewModel.undo()
                 ViewerAction.Redo -> viewModel.redo()
                 ViewerAction.Save -> viewModel.save()
-                ViewerAction.SaveAndClose -> viewModel.save(thenClose = true)
+                is ViewerAction.SaveAndLeave -> {
+                    afterSave = action.then
+                    viewModel.save(thenClose = true)
+                }
                 is ViewerAction.Rotate -> viewModel.rotatePage(action.page)
                 is ViewerAction.Delete -> viewModel.deletePage(action.page)
                 is ViewerAction.InsertBlank -> viewModel.insertBlankPage(action.afterPage)
@@ -389,6 +413,12 @@ fun ViewerContent(
     stamps: List<PlacedStamp> = emptyList(),
     initialSelectedStamp: Long? = null,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
+    openDocuments: List<DocumentEntry> = emptyList(),
+    currentUri: String? = null,
+    onSwitchTo: (DocumentEntry) -> Unit = {},
+    onCloseDocument: (DocumentEntry) -> Unit = {},
+    onCloseAll: () -> Unit = {},
+    onOpenAnother: () -> Unit = {},
     pageColors: PageColors = PageColors.Normal,
     onPageColors: (PageColors) -> Unit = {},
     @StringRes tip: Int? = null,
@@ -404,7 +434,9 @@ fun ViewerContent(
     var confirmDelete by remember { mutableStateOf(false) }
     var extracting by remember { mutableStateOf(false) }
     var splitting by remember { mutableStateOf(false) }
-    var confirmLeave by remember { mutableStateOf(false) }
+    // What to do once the reader settles unsaved changes; non-null while the dialog shows.
+    var leaveThen by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var showSwitcher by rememberSaveable { mutableStateOf(false) }
     var pendingNote by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var pendingTextBox by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var stampKind by rememberSaveable { mutableStateOf(Stamps.Kind.Approved) }
@@ -465,8 +497,8 @@ fun ViewerContent(
         if (isReady) currentOnModeEntered(mode)
     }
 
-    fun leave() {
-        if (ready?.hasUnsavedChanges == true) confirmLeave = true else onBack()
+    fun leave(then: () -> Unit = onBack) {
+        if (ready?.hasUnsavedChanges == true) leaveThen = then else then()
     }
 
     fun onPagesTool(tool: Int) {
@@ -599,6 +631,9 @@ fun ViewerContent(
                         }
                         if (ready?.hasUnsavedChanges == true) {
                             TextButton(onClick = { onAction(ViewerAction.Save) }) { Text(stringResource(R.string.save)) }
+                        }
+                        if (openDocuments.isNotEmpty()) {
+                            OpenDocumentsButton(openDocuments.size, onClick = { showSwitcher = true })
                         }
                         if (ready != null) PageColorsButton(pageColors, onPageColors)
                     } else {
@@ -994,6 +1029,34 @@ fun ViewerContent(
         )
     }
 
+    if (showSwitcher) {
+        OpenDocumentsSheet(
+            documents = openDocuments,
+            currentUri = currentUri,
+            onDismiss = { showSwitcher = false },
+            onSwitchTo = { entry ->
+                showSwitcher = false
+                if (entry.uri != currentUri) leave { onSwitchTo(entry) }
+            },
+            onClose = { entry ->
+                if (entry.uri == currentUri) {
+                    showSwitcher = false
+                    leave { onCloseDocument(entry); onBack() }
+                } else {
+                    onCloseDocument(entry)
+                }
+            },
+            onCloseAll = {
+                showSwitcher = false
+                leave { onCloseAll(); onBack() }
+            },
+            onOpenAnother = {
+                showSwitcher = false
+                leave(onOpenAnother)
+            },
+        )
+    }
+
     pendingTextBox?.let { (page, at) ->
         TextEntryDialog(
             title = R.string.text_box_title,
@@ -1023,23 +1086,23 @@ fun ViewerContent(
         )
     }
 
-    if (confirmLeave) {
+    leaveThen?.let { then ->
         AlertDialog(
-            onDismissRequest = { confirmLeave = false },
+            onDismissRequest = { leaveThen = null },
             title = { Text(stringResource(R.string.unsaved_title)) },
             text = { Text(stringResource(R.string.unsaved_body)) },
             confirmButton = {
                 TextButton(onClick = {
-                    confirmLeave = false
-                    onAction(ViewerAction.SaveAndClose)
+                    leaveThen = null
+                    onAction(ViewerAction.SaveAndLeave(then))
                 }) { Text(stringResource(R.string.save)) }
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { confirmLeave = false }) { Text(stringResource(R.string.cancel)) }
+                    TextButton(onClick = { leaveThen = null }) { Text(stringResource(R.string.cancel)) }
                     TextButton(onClick = {
-                        confirmLeave = false
-                        onBack()
+                        leaveThen = null
+                        then()
                     }) { Text(stringResource(R.string.discard)) }
                 }
             },

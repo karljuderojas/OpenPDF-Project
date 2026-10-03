@@ -344,6 +344,12 @@
     <string name="settings_version">%1$s %2$s</string>
     <string name="settings_about_detail">Free and open source under the Apache 2.0 license. No ads, no account, and your files never leave this phone.</string>
     <string name="settings_source_code">Source code</string>
+    <!-- Open-documents switcher -->
+    <string name="open_documents_switch">Open documents: %1$d, switch</string>
+    <string name="open_documents_title">Open documents · %1$d</string>
+    <string name="open_documents_viewing">Viewing</string>
+    <string name="open_documents_close_all">Close all</string>
+    <string name="open_documents_open_another">Open another</string>
     <!-- Reading modes -->
     <string name="page_colors">Page colors</string>
     <string name="page_colors_normal">Normal</string>
