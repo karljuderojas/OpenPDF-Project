@@ -26,6 +26,7 @@ import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.Documents
 import io.github.karljuderojas.freepdf.files.SafeWrite
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
+import io.github.karljuderojas.freepdf.pdf.DisplayRect
 import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
@@ -43,6 +44,9 @@ import io.github.karljuderojas.freepdf.pdf.edit.PdfText
 import io.github.karljuderojas.freepdf.pdf.form.FormField
 import io.github.karljuderojas.freepdf.pdf.form.FormFiller
 import io.github.karljuderojas.freepdf.pdf.edit.Splitting
+import io.github.karljuderojas.freepdf.pdf.links.LinkTarget
+import io.github.karljuderojas.freepdf.pdf.links.PageLink
+import io.github.karljuderojas.freepdf.pdf.links.PageLinks
 import io.github.karljuderojas.freepdf.pdf.edit.TextEditing
 import io.github.karljuderojas.freepdf.pdf.edit.WatermarkStyle
 import io.github.karljuderojas.freepdf.pdf.edit.Watermarks
@@ -135,6 +139,8 @@ sealed interface ViewerState {
         val signatures: List<SignatureReport> = emptyList(),
         val failedPageEdits: Int = 0,
         val redactionsSaved: Int = 0,
+        /** The links the PDF has, which Read mode makes tappable. */
+        val links: List<PageLink> = emptyList(),
     ) : ViewerState
 
     /** The PDF is password protected; [wrongPassword] after a password that did not open it. */
@@ -496,6 +502,9 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
     fun cropPages(pages: Set<Int>, margins: CropMargins?) = edit(movesPages = true) {
         if (margins == null) PageCrop.reset(it, pages) else PageCrop.crop(it, pages, margins)
     }
+
+    /** Adds a link over [box] on [page] (fractions of the page as shown) that leads to [target]. */
+    fun addLink(page: Int, box: DisplayRect, target: LinkTarget) = edit { PageLinks.add(it, page, box, target) }
 
     fun deletePages(pages: Set<Int>) {
         val pageCount = (_state.value as? ViewerState.Ready)?.pageSizes?.size ?: return
@@ -1460,10 +1469,13 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
         // A form that PdfBox cannot read just offers nothing to fill. The signatures placed so far
         // are read from the pages too, so they follow the pages they are on through moves,
         // deletions, rotations and undo.
-        val (formFields, placedSignatures) = withContext(Dispatchers.IO) {
+        val (formFields, placedSignatures, links) = withContext(Dispatchers.IO) {
             runCatching {
-                PDDocument.load(current.workingFile, current.password).use { FormFiller.fields(it) to SignatureAnnotation.placed(it) }
-            }.getOrDefault(emptyList<FormField>() to emptyList())
+                PDDocument.load(current.workingFile, current.password).use {
+                    // A link PdfBox cannot read just means no links, not no form fields or signatures.
+                    Triple(FormFiller.fields(it), SignatureAnnotation.placed(it), runCatching { PageLinks.read(it) }.getOrDefault(emptyList()))
+                }
+            }.getOrDefault(Triple(emptyList<FormField>(), emptyList<SignatureAnnotation.Placed>(), emptyList<PageLink>()))
         }
         val outline = runCatching { next.outline() }.getOrDefault(emptyList())
         // Likewise, a document whose text cannot be read just has no places to sign.
@@ -1475,6 +1487,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
             next.pageSizes, revision, current.canUndo, current.canRedo, current.hasUnsavedChanges, hasSignature, outline,
             isProtected = current.password.isNotEmpty(), formFields = formFields, signFields = places, signedFields = signed,
             signatures = signatures, failedPageEdits = failedPageEdits, redactionsSaved = redactionsSaved,
+            links = links,
         )
     }
 
