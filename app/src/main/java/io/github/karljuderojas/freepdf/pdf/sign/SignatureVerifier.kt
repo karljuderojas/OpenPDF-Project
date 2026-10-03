@@ -43,33 +43,50 @@ import javax.security.auth.x500.X500Principal
  */
 class SignatureVerifier(private val trustAnchors: Set<X509Certificate> = systemTrustAnchors()) {
 
-    /** As [verify] for bytes, but reads the whole file into memory only when it has signatures. */
-    fun verify(file: File): List<SignatureReport> {
-        val signed = runCatching { PDDocument.load(file).use { it.signatureDictionaries.isNotEmpty() } }.getOrDefault(false)
-        return if (signed) verify(file.readBytes()) else emptyList()
+    /**
+     * As [verify] for bytes, but reads the whole file into memory only when it has signatures.
+     * [password] opens a protected PDF; without it a locked file reports no signatures.
+     */
+    fun verify(file: File, password: String = ""): List<SignatureReport> {
+        val signed = runCatching { PDDocument.load(file, password).use { it.signatureDictionaries.isNotEmpty() } }.getOrDefault(false)
+        return if (signed) verify(file.readBytes(), password) else emptyList()
     }
 
-    /** Every signature in [bytes], oldest first. Empty when the file has none or is not a PDF. */
-    fun verify(bytes: ByteArray): List<SignatureReport> {
+    /**
+     * Every signature in [bytes], oldest first. Empty when the file has none or is not a PDF.
+     * A signature dictionary that cannot even be read (a broken /ByteRange, say) is reported as
+     * malformed rather than thrown, so one bad signature never stops the document opening.
+     */
+    fun verify(bytes: ByteArray, password: String = ""): List<SignatureReport> {
         val signatures = runCatching {
-            PDDocument.load(bytes).use { document ->
+            PDDocument.load(bytes, password).use { document ->
                 document.signatureDictionaries.map { it to runCatching { it.getContents(bytes) }.getOrNull() }
             }
         }.getOrElse { return emptyList() }
-        val sorted = signatures.sortedBy { (signature, _) -> signature.byteRange.let { it.getOrNull(2)?.plus(it[3]) ?: 0 } }
-        return sorted.map { (signature, contents) -> check(signature, contents, bytes) }
+        val sorted = signatures.sortedBy { (signature, _) -> runCatching { signedEnd(signature.byteRange) }.getOrDefault(0L) }
+        return sorted.map { (signature, contents) ->
+            runCatching { check(signature, contents, bytes) }.getOrElse { malformed(signature) }
+        }
     }
+
+    private fun malformed(signature: PDSignature) = runCatching { base(signature) }
+        .getOrElse { SignatureReport(null, null, null, null, null, SignatureReport.Kind.Unsupported) }
+        .copy(integrity = SignatureReport.Integrity.Malformed)
+
+    private fun base(signature: PDSignature) = SignatureReport(
+        fieldName = signature.name,
+        claimedSigner = signature.name,
+        claimedTime = signature.signDate?.toInstant(),
+        reason = signature.reason,
+        location = signature.location,
+        kind = SignatureReport.Kind.forSubFilter(signature.subFilter),
+    )
+
+    private fun signedEnd(range: IntArray): Long = if (range.size == 4) range[2].toLong() + range[3] else 0L
 
     private fun check(signature: PDSignature, contents: ByteArray?, file: ByteArray): SignatureReport {
         val range = signature.byteRange
-        val base = SignatureReport(
-            fieldName = signature.name,
-            claimedSigner = signature.name,
-            claimedTime = signature.signDate?.toInstant(),
-            reason = signature.reason,
-            location = signature.location,
-            kind = SignatureReport.Kind.forSubFilter(signature.subFilter),
-        )
+        val base = base(signature)
         if (contents == null || range.size != 4 || !rangeIsWellFormed(range, file)) {
             return base.copy(integrity = SignatureReport.Integrity.Malformed)
         }
@@ -87,11 +104,13 @@ class SignatureVerifier(private val trustAnchors: Set<X509Certificate> = systemT
 
     /**
      * The byte range must start at 0 and its one gap must be exactly the /Contents hex string.
-     * Otherwise someone could leave other parts of the file unsigned.
+     * Otherwise someone could leave other parts of the file unsigned. Sums are done in Long so
+     * a hostile range cannot overflow past the checks.
      */
     private fun rangeIsWellFormed(range: IntArray, file: ByteArray): Boolean {
         if (range[0] != 0 || range[1] <= 0 || range[2] <= range[1] || range[3] < 0) return false
-        if (range[2] + range[3] > file.size) return false
+        if (range[1] >= file.size || range[2] > file.size) return false
+        if (range[2].toLong() + range[3] > file.size) return false
         if (file[range[1]] != '<'.code.toByte() || file[range[2] - 1] != '>'.code.toByte()) return false
         for (i in range[1] + 1 until range[2] - 1) {
             val c = file[i].toInt().toChar()
@@ -154,12 +173,17 @@ class SignatureVerifier(private val trustAnchors: Set<X509Certificate> = systemT
         )
     }
 
+    /**
+     * The signature's timestamp, if it carries one. A token that is present but cannot be read
+     * is reported as an invalid timestamp, not as no timestamp: a damaged or forged token must
+     * not quietly fall back to the signer's own clock.
+     */
     private fun timestampOf(signer: SignerInformation): TimestampReport? {
         val attribute: Attribute = signer.unsignedAttributes?.get(PKCSObjectIdentifiers.id_aa_signatureTimeStampToken) ?: return null
         return runCatching {
             val token = TimeStampToken(CMSSignedData(attribute.attrValues.getObjectAt(0).toASN1Primitive().encoded))
             checkToken(token, signer.signature)
-        }.getOrNull()
+        }.getOrElse { TimestampReport(time = Instant.EPOCH, authority = null, valid = false) }
     }
 
     /** A timestamp counts only if its imprint matches [stamped] and its own signature checks out. */

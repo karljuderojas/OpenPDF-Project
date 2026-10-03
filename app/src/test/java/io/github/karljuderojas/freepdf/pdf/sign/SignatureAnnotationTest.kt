@@ -9,7 +9,9 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationRubberStamp
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
+import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.edit.PageEditor
+import io.github.karljuderojas.freepdf.pdf.pdfToDisplay
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -62,6 +64,33 @@ class SignatureAnnotationTest {
             val rect = document.getPage(1).annotations.single().rectangle
             assertEquals(53.3f, rect.width, 0.1f)
             assertEquals(160f, rect.height, 0.1f)
+        }
+    }
+
+    @Test
+    fun placedSignaturesFollowTheirPageThroughDeletionAndRotation() {
+        sample().use { document ->
+            SignatureAnnotation.add(document, 1, signatureBitmap(), PdfPoint(200f, 150f), maxWidth = 160f, maxHeight = 56f)
+            SignatureAnnotation.add(document, 1, signatureBitmap(), PdfPoint(400f, 150f), maxWidth = 80f, maxHeight = 28f, initials = true)
+            // Only the full signature counts, at the centre of its box, as the page is shown.
+            val page = document.getPage(1)
+            val crop = page.cropBox.let { PdfRect(it.lowerLeftX, it.lowerLeftY, it.upperRightX, it.upperRightY) }
+            val (x, y) = pdfToDisplay(200f, 150f + 53.3f / 2, 0, crop)
+            val placed = SignatureAnnotation.placed(document).single()
+            assertEquals(1, placed.page)
+            assertEquals(x, placed.x, 0.001f)
+            assertEquals(y, placed.y, 0.001f)
+
+            // Deleting the page before it moves the signature to page 0; the log of taps would still say page 1.
+            PageEditor.delete(document, 0)
+            assertEquals(0, SignatureAnnotation.placed(document).single().page)
+
+            // Turning the page turns the signature with it, so it is reported where it now shows.
+            PageEditor.rotate(document, 0, 90)
+            val turned = SignatureAnnotation.placed(document).single()
+            val (tx, ty) = pdfToDisplay(200f, 150f + 53.3f / 2, 90, crop)
+            assertEquals(tx, turned.x, 0.001f)
+            assertEquals(ty, turned.y, 0.001f)
         }
     }
 
