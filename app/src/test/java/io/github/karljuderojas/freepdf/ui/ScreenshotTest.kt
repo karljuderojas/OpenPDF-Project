@@ -288,13 +288,16 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_delete.png")
     }
 
-    // The dialogs' text fields are not focused when they open, so Compose goes idle as usual.
+    // The dialogs' page fields keep Compose from going idle, so drive the clock by hand.
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerPagesExtract() {
         show { viewer(ViewerMode.Pages, selectedPage = 1) }
-        composeRule.onNodeWithText("Extract").performScrollTo().performClick()
+        composeRule.onNodeWithText("Extract").performScrollTo()
         composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Extract").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_extract.png")
     }
 
@@ -302,8 +305,11 @@ class ScreenshotTest {
     @Test
     fun viewerPagesSplit() {
         show { viewer(ViewerMode.Pages, selectedPage = 0) }
-        composeRule.onNodeWithText("Split").performScrollTo().performClick()
+        composeRule.onNodeWithText("Split").performScrollTo()
         composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Split").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_split.png")
     }
 
