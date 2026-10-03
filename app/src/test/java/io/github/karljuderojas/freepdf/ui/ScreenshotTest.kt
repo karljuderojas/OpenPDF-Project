@@ -388,6 +388,22 @@ class ScreenshotTest {
         captureRoot("viewer_mark_selected")
     }
 
+    @Test
+    fun viewerStampSelected() {
+        // A stamp this app placed can be recoloured, so its edit bar offers the colours too.
+        val stamp = Mark(
+            page = 0, index = 2, kind = Mark.Kind.Stamp, left = 0.3f, top = 0.62f, right = 0.55f, bottom = 0.67f,
+            color = Annotator.Rgb(0.13f, 0.55f, 0.25f), width = 1f, comment = "Approved", markedText = "", author = "Dana",
+            modified = sampleMarks.first().modified,
+        )
+        show { viewer(ViewerMode.Read, marks = sampleMarks + stamp) }
+        composeRule.onNodeWithTag("mark-layer-0").performTouchInput {
+            click(Offset((stamp.left + stamp.right) / 2 * width, (stamp.top + stamp.bottom) / 2 * height))
+        }
+        composeRule.waitForIdle()
+        captureRoot("viewer_stamp_selected")
+    }
+
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerComments() {

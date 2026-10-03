@@ -757,9 +757,8 @@ fun ViewerContent(
                 selectedMark != null -> MarkEditBar(
                     mark = selectedMark,
                     onStyle = { style ->
-                        val tool = selectedMark.kind.tool
                         val color = style.rgb.takeIf { style.color != selectedMark.displayColor }
-                        val width = style.width.takeIf { tool?.widths?.isNotEmpty() == true && it != selectedMark.width }
+                        val width = style.width.takeIf { selectedMark.kind.widths.isNotEmpty() && it != selectedMark.width }
                         // Tapping the swatch already in use changes nothing, so it costs no undo step.
                         if (color != null || width != null) {
                             onAction(ViewerAction.EditMark(selectedMark.page, selectedMark.index, color = color, width = width))
