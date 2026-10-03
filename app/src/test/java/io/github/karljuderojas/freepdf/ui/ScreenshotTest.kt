@@ -3,6 +3,7 @@ package io.github.karljuderojas.freepdf.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -121,14 +122,19 @@ class ScreenshotTest {
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerGoToPage() {
-        // Shown over the viewer directly: tapping "Page 1 of 2" opens the same dialog. Its page
-        // field can take focus, and a blinking cursor never lets Compose go idle, so the clock is
-        // driven by hand.
-        composeRule.mainClock.autoAdvance = false
+        // Shown over the viewer directly; tapping "Page 1 of 2" opens the same dialog. Its page
+        // field takes focus, and the blinking cursor never lets Compose go idle, so the dialog
+        // opens only after the clock is being driven by hand.
+        val open = mutableStateOf(false)
         show {
             viewer(ViewerMode.Read)
-            GoToPageDialog(pageCount = 2, onDismiss = {}, onGo = {})
+            if (open.value) GoToPageDialog(pageCount = 2, onDismiss = {}, onGo = {})
         }
+        composeRule.mainClock.autoAdvance = false
+        open.value = true
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_go_to_page.png")
+    }
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_go_to_page.png")
     }
