@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
@@ -52,6 +53,8 @@ class ScreenshotTest {
 
     private val samplePages = listOf(loadSample("page-1.png"), loadSample("page-2.png"))
     private val sample = ViewerState.Ready(List(samplePages.size) { PageSize(612f, 792f) })
+    // The two sample pages repeated, for the selection and drag screens.
+    private val sixPages = ViewerState.Ready(List(6) { PageSize(612f, 792f) })
 
     @Test
     fun filesEmpty() = capture("files_empty") { files(open = emptyList(), recent = emptyList()) }
@@ -189,6 +192,36 @@ class ScreenshotTest {
     }
 
     @Test
+    fun viewerPagesMultiSelect() = capture("viewer_pages_multi_select") {
+        viewer(ViewerMode.Pages, sixPages, selectedPages = setOf(0, 2, 3))
+    }
+
+    @Test
+    fun viewerPagesDeleteSeveral() {
+        show { viewer(ViewerMode.Pages, sixPages, selectedPages = setOf(0, 2, 3)) }
+        composeRule.onNodeWithText("Delete").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_delete_several.png")
+    }
+
+    /** Page 3 held and dragged up over page 2, before it is let go. */
+    @Test
+    fun viewerPagesDragging() {
+        show { viewer(ViewerMode.Pages, sixPages) }
+        val page3 = composeRule.onNodeWithText("Page 3")
+        page3.performTouchInput { down(center) }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        page3.performTouchInput {
+            repeat(10) {
+                moveBy(Offset(19.dp.toPx(), -20.dp.toPx()))
+                advanceEventTime(16)
+            }
+        }
+        composeRule.waitForIdle()
+        captureRoot("viewer_pages_dragging")
+    }
+
+    @Test
     fun viewerMore() = capture("viewer_more") { viewer(ViewerMode.More) }
 
     // 3 Oct 2026, 15:00 on the test machine's clock, so Today and Yesterday group the same way everywhere.
@@ -204,6 +237,7 @@ class ScreenshotTest {
         mode: ViewerMode,
         state: ViewerState = sample,
         selectedPage: Int = 0,
+        selectedPages: Set<Int> = setOf(selectedPage),
         tool: Int? = null,
         savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
         signerName: String = "",
@@ -211,9 +245,10 @@ class ScreenshotTest {
         ViewerContent(
             state = state,
             onBack = {},
-            loadPage = { index, width -> scaled(samplePages[index], width) },
+            loadPage = { index, width -> scaled(samplePages[index % samplePages.size], width) },
             initialMode = mode,
             initialSelectedPage = selectedPage,
+            initialSelectedPages = selectedPages,
             initialTool = tool,
             savedSignatures = savedSignatures,
             signerName = signerName,

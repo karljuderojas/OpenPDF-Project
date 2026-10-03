@@ -40,6 +40,7 @@
     <string name="tool_insert">Insert blank</string>
     <string name="tool_extract">Extract</string>
     <string name="tool_merge">Merge</string>
+    <string name="tool_select_all">Select all</string>
     <string name="tool_split">Split</string>
     <string name="tool_password">Password</string>
     <string name="tool_print">Print</string>
@@ -55,6 +56,17 @@
     <string name="edit_failed">That change could not be made to this PDF.</string>
     <string name="cannot_delete_last_page">A PDF needs at least one page.</string>
     <string name="delete_page_title">Delete page %1$d?</string>
+    <plurals name="delete_pages_title">
+        <item quantity="one">Delete %1$d page?</item>
+        <item quantity="other">Delete %1$d pages?</item>
+    </plurals>
+    <plurals name="pages_selected">
+        <item quantity="one">%1$d page selected</item>
+        <item quantity="other">%1$d pages selected</item>
+    </plurals>
+    <string name="clear_selection">Clear selection</string>
+    <string name="select_page">Select page %1$d</string>
+    <string name="pages_hint">Tap the circles to pick several pages. Hold a page and drag it to move it.</string>
     <string name="delete_page_body">You can undo this until you leave the PDF.</string>
     <string name="unsaved_title">Save changes?</string>
     <string name="unsaved_body">This PDF has changes that are not saved yet.</string>
