@@ -667,8 +667,21 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
         if (outcome == TextEditing.Outcome.OtherFont) _effects.trySend(ViewerEffect.Message(R.string.edit_text_other_font))
     }
 
-    fun shape(page: Int, start: Offset, end: Offset, style: ToolStyle) = mark { document ->
-        Annotator.shape(document, page, boxOf(document, page, start, end), color = style.rgb, lineWidth = style.width)
+    /** Draws [shape] dragged from [start] to [end]; a line or arrow runs that way, with an arrow's head at [end]. */
+    fun shape(page: Int, start: Offset, end: Offset, style: ToolStyle, shape: Annotator.Shape = Annotator.Shape.Rectangle) = mark { document ->
+        when (shape) {
+            Annotator.Shape.Rectangle, Annotator.Shape.Ellipse -> Annotator.shape(
+                document, page, boxOf(document, page, start, end),
+                ellipse = shape == Annotator.Shape.Ellipse, color = style.rgb, lineWidth = style.width,
+            )
+            Annotator.Shape.Line, Annotator.Shape.Arrow -> {
+                val toPdf = displayMapper(document, page)
+                Annotator.line(
+                    document, page, toPdf(start), toPdf(end),
+                    arrow = shape == Annotator.Shape.Arrow, color = style.rgb, lineWidth = style.width,
+                )
+            }
+        }
     }
 
     fun note(page: Int, at: Offset, text: String, style: ToolStyle) = mark { document ->

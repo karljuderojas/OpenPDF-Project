@@ -208,7 +208,15 @@ sealed interface ViewerAction {
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
     data class Stroke(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val points: List<Offset>) : ViewerAction
-    data class Box(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val start: Offset, val end: Offset) : ViewerAction
+    /** A drag with a box tool from [start] to [end]; [shape] is what the Shapes tool draws. */
+    data class Box(
+        val page: Int,
+        val tool: AnnotateTool,
+        val style: ToolStyle,
+        val start: Offset,
+        val end: Offset,
+        val shape: Annotator.Shape = Annotator.Shape.Rectangle,
+    ) : ViewerAction
     data class Note(val page: Int, val style: ToolStyle, val at: Offset, val text: String) : ViewerAction
     data class AddStamp(val page: Int, val at: Offset, val kind: Stamps.Kind) : ViewerAction
     data class AddTextBox(val page: Int, val style: ToolStyle, val at: Offset, val text: String) : ViewerAction
@@ -461,7 +469,7 @@ fun ViewerScreen(
                     if (kind != null) {
                         viewModel.markText(action.page, action.start, action.end, kind, action.style)
                     } else {
-                        viewModel.shape(action.page, action.start, action.end, action.style)
+                        viewModel.shape(action.page, action.start, action.end, action.style, action.shape)
                     }
                 }
                 is ViewerAction.Note -> viewModel.note(action.page, action.at, action.text, action.style)
@@ -536,6 +544,7 @@ fun ViewerContent(
     initialSelectedPage: Int = 0,
     initialSelectedPages: Set<Int> = setOf(initialSelectedPage),
     initialTool: Int? = null,
+    initialShape: Annotator.Shape = Annotator.Shape.Rectangle,
     initialSignField: Int? = null,
     initialRedactions: List<RedactBox> = emptyList(),
     initialConfirmRedact: Boolean = false,
@@ -621,6 +630,7 @@ fun ViewerContent(
     var pendingNote by rememberSaveable(stateSaver = PageOffsetSaver) { mutableStateOf<Pair<Int, Offset>?>(null) }
     var pendingTextBox by rememberSaveable(stateSaver = PageOffsetSaver) { mutableStateOf<Pair<Int, Offset>?>(null) }
     var stampKind by rememberSaveable { mutableStateOf(Stamps.Kind.Approved) }
+    var shapeKind by rememberSaveable { mutableStateOf(initialShape) }
     var pendingText by rememberSaveable(stateSaver = PageOffsetSaver) { mutableStateOf<Pair<Int, Offset>?>(null) }
     // The line Edit text found under the last tap: its page, where it was tapped, and its words.
     var editingLine by rememberSaveable(stateSaver = EditingLineSaver) { mutableStateOf<Triple<Int, Offset, String>?>(null) }
@@ -1078,6 +1088,7 @@ fun ViewerContent(
                 // Choosing the active Annotate tool again puts it down, so one finger scrolls again.
                 mode == ViewerMode.Annotate -> Column {
                     if (AnnotateTool.forLabel(selectedTool) == AnnotateTool.Stamp) StampBar(stampKind, onSelect = { stampKind = it })
+                    if (AnnotateTool.forLabel(selectedTool) == AnnotateTool.Shapes) ShapeBar(shapeKind, onSelect = { shapeKind = it })
                     AnnotateTool.forLabel(selectedTool)?.takeIf { it.hasStyle }?.let { tool ->
                         StyleBar(tool, styleOf(tool), onStyleChange = {
                             styles = styles + (tool to it)
@@ -1346,7 +1357,8 @@ fun ViewerContent(
                                 style = style,
                                 pageWidthPt = ready.pageSizes[page].widthPt,
                                 onStroke = { onAction(ViewerAction.Stroke(page, tool, style, it)) },
-                                onBox = { start, end -> onAction(ViewerAction.Box(page, tool, style, start, end)) },
+                                onBox = { start, end -> onAction(ViewerAction.Box(page, tool, style, start, end, shapeKind)) },
+                                shape = shapeKind,
                                 words = words,
                                 onLines = { onAction(ViewerAction.MarkLines(page, tool, style, it)) },
                                 onTap = { at ->

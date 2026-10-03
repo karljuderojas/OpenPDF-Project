@@ -2,6 +2,7 @@ package io.github.karljuderojas.freepdf.pdf.annotate
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLine
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationMarkup
 import io.github.karljuderojas.freepdf.pdf.PdfPoint
 import io.github.karljuderojas.freepdf.pdf.PdfRect
@@ -149,6 +150,66 @@ class MarksTest {
             Annotator.ink(document, 0, listOf(listOf(PdfPoint(10f, 10f), PdfPoint(50f, 60f))), lineWidth = 4f)
             val line = document.getPage(0).annotations.last() as PDAnnotationMarkup
             assertEquals(listOf(10f, 10f, 50f, 60f), line.inkList.single().toList())
+        }
+    }
+
+    /** A rectangle, an ellipse, a line and an arrow on page 1 of the sample, saved and reopened. */
+    private fun shaped(): PDDocument = sample().use { document ->
+        Annotator.shape(document, 0, PdfRect(72f, 600f, 200f, 680f), color = Annotator.Rgb.Red, lineWidth = 2f)
+        Annotator.shape(document, 0, PdfRect(250f, 600f, 400f, 680f), ellipse = true, color = Annotator.Rgb.Blue, lineWidth = 4f)
+        Annotator.line(document, 0, PdfPoint(72f, 500f), PdfPoint(300f, 520f), lineWidth = 1f)
+        Annotator.line(document, 0, PdfPoint(320f, 450f), PdfPoint(500f, 560f), arrow = true, color = Annotator.Rgb.Blue, lineWidth = 2f)
+        val bytes = ByteArrayOutputStream().also { document.save(it) }.toByteArray()
+        PDDocument.load(bytes)
+    }
+
+    @Test
+    fun everyShapeIsAStandardAnnotationOtherReadersCanDraw() {
+        shaped().use { document ->
+            val annotations = document.getPage(0).annotations
+            assertEquals(listOf("Square", "Circle", "Line", "Line"), annotations.map { it.subtype })
+            // Each carries its own appearance, which is what other viewers draw.
+            annotations.forEach { assertTrue(it.subtype, it.normalAppearanceStream != null) }
+            val line = annotations[2] as PDAnnotationLine
+            val arrow = annotations[3] as PDAnnotationLine
+            assertEquals(listOf(72f, 500f, 300f, 520f), line.line.toList())
+            assertEquals(PDAnnotationLine.LE_NONE, line.endPointEndingStyle)
+            assertEquals(listOf(320f, 450f, 500f, 560f), arrow.line.toList())
+            assertEquals(PDAnnotationLine.LE_NONE, arrow.startPointEndingStyle)
+            assertEquals(PDAnnotationLine.LE_OPEN_ARROW, arrow.endPointEndingStyle)
+            assertEquals(PDAnnotationLine.IT_LINE_ARROW, arrow.intent)
+            // The arrowhead fits inside the annotation's box, so no viewer clips it.
+            val box = arrow.rectangle
+            assertTrue(box.upperRightX >= 500f + 2f && box.upperRightY >= 560f + 2f)
+            assertTrue(box.lowerLeftX <= 320f && box.lowerLeftY <= 450f)
+        }
+    }
+
+    @Test
+    fun shapesAreListedByKindAndRestyleKeepsTheArrow() {
+        val (before, after) = shaped().use { document ->
+            val before = Marks.list(document)
+            Marks.edit(document, 0, 3, color = Annotator.Rgb.Red, width = 8f)
+            Marks.edit(document, 0, 2, color = Annotator.Rgb.Blue, width = 4f)
+            before to Marks.list(document)
+        }
+        assertEquals(listOf(Mark.Kind.Square, Mark.Kind.Circle, Mark.Kind.Line, Mark.Kind.Arrow), before.map { it.kind })
+        assertEquals(listOf(2f, 4f, 1f, 2f), before.map { it.width })
+        assertEquals(listOf(Mark.Kind.Square, Mark.Kind.Circle, Mark.Kind.Line, Mark.Kind.Arrow), after.map { it.kind })
+        assertEquals(8f, after[3].width)
+        assertEquals(Annotator.Rgb.Red, after[3].color)
+        assertEquals(4f, after[2].width)
+        assertEquals(Annotator.Rgb.Blue, after[2].color)
+        after.forEach { assertTrue(it.left < it.right && it.top < it.bottom) }
+    }
+
+    @Test
+    fun aTapOnAShapeFindsItForTheEraser() {
+        shaped().use { document ->
+            assertEquals(2, Marks.indexAt(document, 0, 180f, 510f))
+            assertEquals(3, Marks.indexAt(document, 0, 410f, 505f))
+            Marks.delete(document, 0, 3)
+            assertEquals(listOf(Mark.Kind.Square, Mark.Kind.Circle, Mark.Kind.Line), Marks.list(document).map { it.kind })
         }
     }
 
