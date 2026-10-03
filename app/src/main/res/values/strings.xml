@@ -554,4 +554,11 @@
         <item quantity="one">%1$d page</item>
         <item quantity="other">%1$d pages</item>
     </plurals>
+    <string name="pad_photo">Photo</string>
+    <string name="pad_title_photo_signature">Use a photo of your signature</string>
+    <string name="pad_title_photo_initials">Use a photo of your initials</string>
+    <string name="pad_photo_hint">Sign with a dark pen on plain white paper in good light, then take a photo that fills the frame. FreePDF removes the paper and keeps only the ink.</string>
+    <string name="pad_photo_crop_hint">Drag the corners around just your signature.</string>
+    <string name="pad_photo_none">No signature found in the box. Move the corners, or try a photo with more light.</string>
+    <string name="pad_photo_another">Use another photo</string>
 </resources>

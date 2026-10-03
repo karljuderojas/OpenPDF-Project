@@ -818,6 +818,30 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_pad_typed.png")
     }
 
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerSignPadPhoto() {
+        show { viewer(ViewerMode.Sign) }
+        composeRule.onNodeWithText("Signature").performClick()
+        composeRule.onNodeWithTag("pad-tab-photo").performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_sign_pad_photo.png")
+    }
+
+    // The Photo tab after a picture is chosen: the crop box, and the signature cut out of the paper.
+    @Test
+    fun signaturePhotoCropped() = capture("signature_photo_cropped") {
+        val photo = io.github.karljuderojas.freepdf.pdf.sign.SignaturePhotos.make()
+        val box = io.github.karljuderojas.freepdf.ui.create.CropBox(0.15f, 0.15f, 0.85f, 0.9f)
+        val cut = io.github.karljuderojas.freepdf.pdf.sign.SignatureCutout.extract(photo, 0xFF111111.toInt())
+        androidx.compose.material3.Surface(tonalElevation = 6.dp) {
+            io.github.karljuderojas.freepdf.ui.sign.SignaturePhotoContent(
+                hasPhoto = true, photo = photo, crop = box, onCrop = {}, result = cut, looked = true,
+                onTakePhoto = {}, onChoosePhoto = {}, onUseAnother = {}, modifier = Modifier.padding(20.dp),
+            )
+        }
+    }
+
     @Test
     fun viewerSignPlacingTyped() {
         val typeface = ResourcesCompat.getFont(RuntimeEnvironment.getApplication(), R.font.dancing_script)!!
