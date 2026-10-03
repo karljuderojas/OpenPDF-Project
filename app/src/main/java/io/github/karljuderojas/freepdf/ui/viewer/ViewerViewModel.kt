@@ -428,7 +428,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                     withContext(Dispatchers.IO) {
                         val current = session ?: error("Nothing is open")
                         val output = context.contentResolver.openOutputStream(target, "wt") ?: error("Cannot write $target")
-                        output.use { Splitting.writePart(current.workingFile, pages, it) }
+                        output.use { Splitting.writePart(current.workingFile, pages, it, current.password) }
                     }
                 }
             }.isSuccess
@@ -469,7 +469,7 @@ class ViewerViewModel(application: Application) : AndroidViewModel(application) 
                             val file = DocumentsContract.createDocument(resolver, folder, "application/pdf", Splitting.partName(name, i + 1))
                                 ?: error("Cannot create a file in $tree")
                             val output = resolver.openOutputStream(file, "wt") ?: error("Cannot write $file")
-                            output.use { Splitting.writePart(current.workingFile, pages, it) }
+                            output.use { Splitting.writePart(current.workingFile, pages, it, current.password) }
                         }
                     }
                 }
