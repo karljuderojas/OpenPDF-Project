@@ -22,10 +22,14 @@ object Splitting {
         return listOf((0..lastOfFirst).toList(), (lastOfFirst + 1 until pageCount).toList())
     }
 
-    /** Writes a new PDF holding only [pages] of [source] to [output]. [source] is not changed. */
-    fun writePart(source: File, pages: List<Int>, output: OutputStream) {
-        PDDocument.load(source).use { document ->
+    /**
+     * Writes a new PDF holding only [pages] of [source] to [output]. [source] is not changed. A
+     * locked [source] opens with [password], and the new PDF stays locked with it.
+     */
+    fun writePart(source: File, pages: List<Int>, output: OutputStream, password: String = "") {
+        PDDocument.load(source, password).use { document ->
             PageEditor.keepOnly(document, pages)
+            PdfDocuments.keepProtection(document, password)
             document.save(output)
         }
     }

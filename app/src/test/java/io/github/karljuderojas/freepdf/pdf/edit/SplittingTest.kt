@@ -3,6 +3,8 @@ package io.github.karljuderojas.freepdf.pdf.edit
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
+import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -78,6 +80,22 @@ class SplittingTest {
             assertTrue(isAgreement(document, 0) && isAgreement(document, 1))
         }
         PDDocument.load(source).use { assertEquals(5, it.numberOfPages) }
+    }
+
+    @Test
+    fun partsOfALockedPdfStayLockedWithItsPassword() {
+        val five = fivePages()
+        val source = File(five.parentFile, "locked.pdf")
+        PDDocument.load(five).use { document ->
+            document.protect(StandardProtectionPolicy("owner-secret", "open sesame", AccessPermission()).apply { encryptionKeyLength = 128 })
+            document.save(source)
+        }
+        val bytes = ByteArrayOutputStream().also { Splitting.writePart(source, listOf(1, 2), it, "open sesame") }.toByteArray()
+        assertTrue(runCatching { PDDocument.load(bytes).close() }.isFailure)
+        PDDocument.load(bytes, "open sesame").use {
+            assertTrue(it.isEncrypted)
+            assertEquals(2, it.numberOfPages)
+        }
     }
 
     @Test
