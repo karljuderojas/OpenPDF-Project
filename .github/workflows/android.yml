@@ -17,7 +17,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - name: Build, unit test and lint
         run: ./gradlew assembleDebug testDebugUnitTest lintDebug
+      # PRs still compile the app, but only main keeps an installable debug APK.
       - uses: actions/upload-artifact@v7
+        if: github.event_name == 'push'
         with:
           name: freepdf-debug-apk
           path: app/build/outputs/apk/debug/*.apk
@@ -77,15 +79,20 @@ jobs:
           else
             git worktree add --orphan -b screenshots ../shots
           fi
-          rm -rf "../shots/pr-$PR" && mkdir -p "../shots/pr-$PR"
-          cp app/build/outputs/roborazzi/*.png "../shots/pr-$PR/"
           cd ../shots
-          git add -A
-          git commit -m "Screenshots for PR #$PR at ${HEAD_SHA::7}" || true
-          for i in 1 2 3; do
-            git push origin screenshots && break
-            git fetch --depth 1 origin screenshots && git rebase FETCH_HEAD
+          # Other PRs push to this branch at the same time. On a rejected push, start again from the
+          # branch tip and redo only this PR's folder; rebasing shallow history replays a grafted
+          # commit that touches every pr-N folder and conflicts.
+          for i in 1 2 3 4 5; do
+            rm -rf "pr-$PR" && mkdir -p "pr-$PR"
+            cp "$GITHUB_WORKSPACE"/app/build/outputs/roborazzi/*.png "pr-$PR/"
+            git add -A
+            git commit -q -m "Screenshots for PR #$PR at ${HEAD_SHA::7}" || true
+            git push origin screenshots && pushed=1 && break
+            sleep $((i * 2))
+            git fetch --depth 1 origin screenshots && git reset -q --hard FETCH_HEAD
           done
+          [ -n "$pushed" ] || { echo "Could not push screenshots after 5 tries"; exit 1; }
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Post screenshots on the pull request
         env:
