@@ -1,10 +1,12 @@
 package io.github.karljuderojas.freepdf.pdf.sign
 
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.font.PDFont
+import com.tom_roush.pdfbox.pdmodel.font.PDType0Font
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -18,6 +20,10 @@ object AuditPageWriter {
     private val timeFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z").withZone(ZoneId.systemDefault())
     private const val MARGIN = 54f
     private const val LINE = 14f
+
+    // Helvetica only covers Western European letters. Names such as Łukasz or Владимир use
+    // PdfBox-Android's bundled Liberation Sans (Latin, Greek, Cyrillic), embedded in the file.
+    private const val UNICODE_FONT = "com/tom_roush/pdfbox/resources/ttf/LiberationSans-Regular.ttf"
 
     /** [notes] are printed at the end, e.g. what the record does and does not prove. */
     fun append(document: PDDocument, trail: AuditTrail, notes: List<String> = emptyList()) {
@@ -45,12 +51,16 @@ object AuditPageWriter {
                 add(Line("Notes", PDType1Font.HELVETICA_BOLD, 12f))
                 notes.forEach { add(Line(it, size = 9f)) }
             }
-        }.flatMap { it.wrapped(PDRectangle.LETTER.width - 2 * MARGIN) }
+        }
+        val unicode by lazy { PDType0Font.load(document, PDFBoxResourceLoader.getStream(UNICODE_FONT)) }
+        val printable = lines
+            .map { if (it.font.canEncode(it.text)) it else it.copy(font = unicode) }
+            .flatMap { it.wrapped(PDRectangle.LETTER.width - 2 * MARGIN) }
 
         var page = newPage(document)
         var stream = PDPageContentStream(document, page)
         var y = page.mediaBox.height - MARGIN
-        for (line in lines) {
+        for (line in printable) {
             if (y < MARGIN) {
                 stream.close()
                 page = newPage(document)
@@ -75,7 +85,12 @@ object AuditPageWriter {
 
         /** Splits on spaces to fit [width], after swapping characters the font cannot draw for "?". */
         fun wrapped(width: Float): List<Line> {
-            val safe = text.map { if (font.canEncode(it)) it else '?' }.joinToString("")
+            val safe = buildString {
+                text.codePoints().forEach { cp ->
+                    val c = String(Character.toChars(cp))
+                    append(if (font.canEncode(c)) c else "?")
+                }
+            }
             if (safe.isEmpty()) return listOf(this)
             val out = mutableListOf<Line>()
             var current = ""
@@ -95,5 +110,5 @@ object AuditPageWriter {
         private fun widthOf(s: String) = font.getStringWidth(s) / 1000f * size
     }
 
-    private fun PDFont.canEncode(c: Char): Boolean = runCatching { encode(c.toString()) }.isSuccess
+    private fun PDFont.canEncode(text: String): Boolean = runCatching { encode(text) }.isSuccess
 }

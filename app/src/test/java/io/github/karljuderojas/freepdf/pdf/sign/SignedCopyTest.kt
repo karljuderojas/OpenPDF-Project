@@ -94,6 +94,14 @@ class SignedCopyTest {
     }
 
     @Test
+    fun printsNamesBeyondWesternEuropeanLetters() {
+        val bytes = write(identity = null, name = "Łukasz Владимир Νίκος")
+        PDDocument.load(bytes).use { document ->
+            assertTrue(auditText(document).contains("Łukasz Владимир Νίκος"))
+        }
+    }
+
+    @Test
     fun namesTheSignedCopy() {
         assertEquals("Lease (signed).pdf", SignedCopy.suggestedName("Lease.pdf"))
         assertEquals("Scan (signed).pdf", SignedCopy.suggestedName("Scan.PDF"))
@@ -104,20 +112,20 @@ class SignedCopyTest {
     private fun auditText(document: PDDocument): String =
         PDFTextStripper().apply { startPage = 3; endPage = 3 }.getText(document).replace(Regex("\\s+"), " ")
 
-    private fun write(identity: SigningIdentity?): ByteArray {
+    private fun write(identity: SigningIdentity?, name: String = "Dana Whitfield"): ByteArray {
         val signedAt = Instant.parse("2026-10-03T15:04:00Z")
         val trail = AuditTrail(
             documentName = "agreement.pdf",
             originalSha256 = originalSha256,
             events = listOf(
-                AuditEvent(AuditEvent.Type.Opened, "Dana Whitfield", Instant.parse("2026-10-03T15:01:12Z")),
-                AuditEvent(AuditEvent.Type.Signed, "Dana Whitfield", Instant.parse("2026-10-03T15:02:40Z"), "signature on page 2"),
-                AuditEvent(AuditEvent.Type.FieldFilled, "Dana Whitfield", Instant.parse("2026-10-03T15:02:51Z"), "date on page 2"),
-                AuditEvent(AuditEvent.Type.Completed, "Dana Whitfield", signedAt),
+                AuditEvent(AuditEvent.Type.Opened, name, Instant.parse("2026-10-03T15:01:12Z")),
+                AuditEvent(AuditEvent.Type.Signed, name, Instant.parse("2026-10-03T15:02:40Z"), "signature on page 2"),
+                AuditEvent(AuditEvent.Type.FieldFilled, name, Instant.parse("2026-10-03T15:02:51Z"), "date on page 2"),
+                AuditEvent(AuditEvent.Type.Completed, name, signedAt),
             ),
         ).withSigner(
             SignerRecord(
-                name = "Dana Whitfield",
+                name = name,
                 email = null,
                 signedAt = signedAt,
                 method = SignatureMethod.Drawn,
@@ -128,7 +136,7 @@ class SignedCopyTest {
             ),
         )
         val output = ByteArrayOutputStream()
-        SignedCopy.write(source, trail, "Dana Whitfield", identity, output, File(dir, "scratch.pdf"))
+        SignedCopy.write(source, trail, name, identity, output, File(dir, "scratch.pdf"))
         return output.toByteArray()
     }
 
