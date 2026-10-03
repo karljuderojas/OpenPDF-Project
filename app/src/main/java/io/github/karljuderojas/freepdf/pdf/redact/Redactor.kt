@@ -4,15 +4,20 @@ import com.tom_roush.pdfbox.cos.COSArray
 import com.tom_roush.pdfbox.cos.COSBase
 import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSName
+import com.tom_roush.pdfbox.cos.COSObject
 import com.tom_roush.pdfbox.cos.COSStream
 import com.tom_roush.pdfbox.cos.COSString
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDEmbeddedFilesNameTreeNode
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.contentstream.operator.Operator
 import com.tom_roush.pdfbox.pdfparser.PDFStreamParser
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDResources
+import com.tom_roush.pdfbox.pdmodel.common.PDNameTreeNode
+import com.tom_roush.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification
 import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationFileAttachment
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationPopup
 import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineNode
 import io.github.karljuderojas.freepdf.pdf.PdfRect
@@ -44,8 +49,15 @@ object Redactor {
         val shapes: Int,
         val forms: Int,
         val annotations: Int,
-        /** Pictures that could not be blanked in part (too big to decode, or a stencil mask) and were removed whole. */
+        /** Pictures that could not be blanked in part (inline, too big to decode, or in a format with no decoder) and were removed whole. */
         val wholePictures: Int = 0,
+        /** Files attached to the PDF (embedded files and file-attachment notes anywhere in it) that were removed. */
+        val attachments: Int = 0,
+        /**
+         * True when a run of removed glyphs could not be read as letters, so the words were unknown
+         * and the title, author, bookmarks, metadata and alternate text were cleared instead of searched.
+         */
+        val metadataCleared: Boolean = false,
     ) {
         /** True when the marked areas held nothing to remove (blank space), though they are still painted black. */
         val foundNothing: Boolean get() = textCharacters + pictures + shapes + forms + annotations == 0
@@ -53,22 +65,25 @@ object Redactor {
 
     /**
      * Redacts [areas], given per zero-based page index in the page's own PDF space (unrotated,
-     * origin bottom-left; see PdfGeometry).
+     * origin bottom-left; see PdfGeometry). [onPage] hears, before each marked page is done,
+     * which one it is (from 1) of how many.
      */
-    fun redact(document: PDDocument, areas: Map<Int, List<PdfRect>>): Result {
+    fun redact(document: PDDocument, areas: Map<Int, List<PdfRect>>, onPage: (page: Int, of: Int) -> Unit = { _, _ -> }): Result {
         val marked = areas.filterValues { it.isNotEmpty() }.toSortedMap()
         require(marked.isNotEmpty()) { "Nothing is marked" }
         val fragments = LinkedHashSet<String>()
         val replaced = identitySet()
         val removedAnnotations = identitySet()
-        var unreadable = false
+        var unreadableRun = 0
         var characters = 0
         var pictures = 0
         var shapes = 0
         var forms = 0
         var wholePictures = 0
 
+        var done = 0
         for ((index, rects) in marked) {
+            onPage(++done, marked.size)
             val page = document.getPage(index)
             val redactor = PageRedactor(document, page, rects)
             redactor.run()
@@ -79,10 +94,11 @@ object Redactor {
             wholePictures += redactor.stats.wholePictures
             fragments += redactor.fragments
             replaced += redactor.replacedObjects
-            unreadable = unreadable || redactor.unreadableText
+            unreadableRun = maxOf(unreadableRun, redactor.unreadableRun)
 
             val (kept, removed) = page.annotations.partition { annotation ->
-                val box = annotation.rectangle
+                // A /Rect that cannot be read is taken as touching the area: the annotation goes, and the save does not fail.
+                val box = runCatching { annotation.rectangle }.getOrElse { return@partition false }
                 box == null || rects.none {
                     box.lowerLeftX < it.right && box.upperRightX > it.left && box.lowerLeftY < it.top && box.upperRightY > it.bottom
                 }
@@ -102,9 +118,118 @@ object Redactor {
         val annotations = removedAnnotations.size
         if (removedAnnotations.isNotEmpty()) removeAnnotationLeftovers(document, removedAnnotations)
         if (replaced.isNotEmpty()) dropUnusedOriginals(document, replaced)
+        val attachments = removeAttachments(document, removedAnnotations)
+        // One unreadable glyph is a bullet or a symbol; a run of them is a word that cannot be searched for.
+        val unreadable = unreadableRun >= MIN_FRAGMENT
         scrubMetadata(document, fragments.filter { it.replace(SPACES, "").length >= MIN_FRAGMENT }, unreadable)
-        return Result(marked.size, characters, pictures, shapes, forms, annotations, wholePictures)
+        return Result(marked.size, characters, pictures, shapes, forms, annotations, wholePictures, attachments, unreadable)
     }
+
+    /**
+     * Without changing [document], the zero-based pages among [areas] on which a picture under an
+     * area would have to be removed whole by [redact], because it cannot be blanked in part here.
+     */
+    fun check(document: PDDocument, areas: Map<Int, List<PdfRect>>): List<Int> =
+        areas.filterValues { it.isNotEmpty() }.toSortedMap().filter { (index, rects) ->
+            val redactor = PageRedactor(document, document.getPage(index), rects, probe = true)
+            // A page that cannot be replayed is reported when the copy is written, not here.
+            runCatching { redactor.run() }
+            redactor.stats.wholePictures > 0
+        }.keys.toList()
+
+    /**
+     * Takes every attached file out of the document: the embedded files in its name tree,
+     * associated files (PDF/A-3, electronic invoices) on the catalog and the pages, and
+     * file-attachment notes on any page. An attachment is a whole second document that the marks
+     * cannot reach into. Returns how many went.
+     *
+     * The file's bytes go, not just the ways of reaching them: a file specification keeps its
+     * name but loses its embedded stream (/EF, /RF), and a file-attachment note loses its /FS,
+     * since a note dropped from a page's /Annots is still reachable through its popup's
+     * /Parent, a reply's /IRT or a structure tree's OBJR, and a specification taken out of the
+     * name tree may be shared by an /AF on a picture or a structure element, a GoToE action or a
+     * collection. Besides the places above, everything reachable from the trailer is searched
+     * for specifications and notes, and [removed] (notes taken off marked pages) as well.
+     */
+    private fun removeAttachments(document: PDDocument, removed: Set<COSBase>): Int {
+        val files = identitySet()
+        var unknown = 0
+        val catalog = document.documentCatalog
+        val associated = COSName.getPDFName("AF")
+
+        fun fileSpecsIn(array: COSArray?) {
+            for (i in 0 until (array?.size() ?: 0)) array?.getObject(i)?.let { files += it }
+        }
+
+        (catalog.cosObject.getDictionaryObject(COSName.NAMES) as? COSDictionary)?.let { names ->
+            val tree = names.getDictionaryObject(COSName.EMBEDDED_FILES)
+            if (tree != null) {
+                val read = runCatching {
+                    PDEmbeddedFilesNameTreeNode(tree as COSDictionary).let { node -> allNames(node).forEach { files += it.cosObject } }
+                }
+                if (read.isFailure) unknown++
+                names.removeItem(COSName.EMBEDDED_FILES)
+                if (names.size() == 0) catalog.cosObject.removeItem(COSName.NAMES)
+            }
+        }
+        fileSpecsIn(catalog.cosObject.getDictionaryObject(associated) as? COSArray)
+        catalog.cosObject.removeItem(associated)
+
+        val notes = identitySet()
+        for (page in document.pages) {
+            fileSpecsIn(page.cosObject.getDictionaryObject(associated) as? COSArray)
+            page.cosObject.removeItem(associated)
+            val (kept, gone) = page.annotations.partition { it !is PDAnnotationFileAttachment }
+            if (gone.isEmpty()) continue
+            page.annotations = kept
+            gone.forEach { notes += it.cosObject }
+        }
+        removed.forEach { if (it is COSDictionary && it.getCOSName(COSName.SUBTYPE) == FILE_ATTACHMENT) notes += it }
+        for (node in reachableDictionaries(document)) {
+            if (node.containsKey(EF) || node.containsKey(RF)) files += node
+            if (node.getCOSName(COSName.SUBTYPE) == FILE_ATTACHMENT && node.containsKey(FS)) notes += node
+        }
+
+        for (note in notes) {
+            val dictionary = note as? COSDictionary ?: continue
+            dictionary.getDictionaryObject(FS)?.let { files += it }
+            dictionary.removeItem(FS)
+        }
+        for (file in files) {
+            val dictionary = file as? COSDictionary ?: continue
+            dictionary.removeItem(EF)
+            dictionary.removeItem(RF)
+        }
+        return files.size + unknown
+    }
+
+    /** Every dictionary (streams included) reachable from the trailer of [document], without going into any stream's data. */
+    private fun reachableDictionaries(document: PDDocument): List<COSDictionary> {
+        val seen = identitySet()
+        val found = ArrayList<COSDictionary>()
+        val pending = ArrayDeque<COSBase>()
+        pending += document.document.trailer
+        while (pending.isNotEmpty()) {
+            val node = pending.removeLast()
+            when (node) {
+                is COSObject -> node.`object`?.let { pending += it }
+                is COSDictionary -> {
+                    if (!seen.add(node)) continue
+                    found += node
+                    node.entrySet().forEach { (_, value) -> if (value != null) pending += value }
+                }
+                is COSArray -> {
+                    if (!seen.add(node)) continue
+                    for (i in 0 until node.size()) node.get(i)?.let { pending += it }
+                }
+                else -> Unit
+            }
+        }
+        return found
+    }
+
+    private fun allNames(node: PDNameTreeNode<PDComplexFileSpecification>): List<PDComplexFileSpecification> =
+        node.names?.values.orEmpty().toList() + node.kids.orEmpty().flatMap { allNames(it) }
 
     /** "Lease.pdf" becomes "Lease (redacted).pdf". */
     fun suggestedName(original: String): String {
@@ -238,8 +363,9 @@ object Redactor {
 
     /**
      * Takes the removed words out of the document's metadata. Matching ignores case and spaces, since
-     * removed text often has no spaces in it. When some removed glyphs could not be read as
-     * letters ([unreadable]), the words are not known, so the title, subject, keywords and XMP go anyway.
+     * removed text often has no spaces in it. When a run of removed glyphs could not be read as
+     * letters ([unreadable]), the words are not known, so the title, subject, keywords, XMP,
+     * bookmark titles and alternate text go anyway.
      */
     private fun scrubMetadata(document: PDDocument, fragments: List<String>, unreadable: Boolean) {
         if (fragments.isEmpty() && !unreadable) return
@@ -309,6 +435,12 @@ object Redactor {
     private const val MAX_PARENTS = 16
     private const val REMOVED = "[removed]"
     private val SPACES = Regex("\\s+")
+    private val FILE_ATTACHMENT = COSName.getPDFName("FileAttachment")
+
+    // A file specification's embedded and related files, and the specification a file-attachment note carries.
+    private val EF = COSName.getPDFName("EF")
+    private val RF = COSName.getPDFName("RF")
+    private val FS = COSName.getPDFName("FS")
 
     private fun identitySet(): MutableSet<COSBase> = Collections.newSetFromMap(IdentityHashMap())
 

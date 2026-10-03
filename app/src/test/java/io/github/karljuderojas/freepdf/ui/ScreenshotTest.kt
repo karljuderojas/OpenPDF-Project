@@ -2,6 +2,7 @@ package io.github.karljuderojas.freepdf.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
@@ -27,6 +28,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -87,9 +90,12 @@ import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
 import io.github.karljuderojas.freepdf.ui.home.HomeContent
 import io.github.karljuderojas.freepdf.ui.settings.SettingsContent
 import io.github.karljuderojas.freepdf.ui.tools.ToolsContent
+import io.github.karljuderojas.freepdf.ui.create.DiscardPagesDialog
 import io.github.karljuderojas.freepdf.ui.create.ImagesToPdfContent
 import io.github.karljuderojas.freepdf.ui.create.ScannerContent
+import io.github.karljuderojas.freepdf.ui.create.moved
 import io.github.karljuderojas.freepdf.ui.create.thumbKey
+import io.github.karljuderojas.freepdf.pdf.scan.Corner
 import io.github.karljuderojas.freepdf.pdf.scan.PageDetector
 import io.github.karljuderojas.freepdf.pdf.scan.PerspectiveWarp
 import io.github.karljuderojas.freepdf.pdf.scan.Quad
@@ -100,6 +106,7 @@ import io.github.karljuderojas.freepdf.pdf.scan.SyntheticPhoto
 import io.github.karljuderojas.freepdf.pdf.create.PageFit
 import androidx.compose.ui.graphics.asImageBitmap
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
+import io.github.karljuderojas.freepdf.ui.viewer.AddLinkDialog
 import io.github.karljuderojas.freepdf.ui.viewer.DocumentInfoDialog
 import io.github.karljuderojas.freepdf.ui.viewer.AnnotateTool
 import io.github.karljuderojas.freepdf.ui.viewer.ToolStyle
@@ -108,12 +115,15 @@ import io.github.karljuderojas.freepdf.ui.viewer.SearchResults
 import io.github.karljuderojas.freepdf.ui.viewer.TextMatch
 import io.github.karljuderojas.freepdf.ui.viewer.PlacedStamp
 import io.github.karljuderojas.freepdf.ui.viewer.RedactBox
+import io.github.karljuderojas.freepdf.ui.viewer.RedactCheck
+import io.github.karljuderojas.freepdf.ui.viewer.RedactProgress
 import io.github.karljuderojas.freepdf.ui.viewer.StampContent
 import io.github.karljuderojas.freepdf.ui.viewer.StampGeometry
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerAction
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerContent
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerMode
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerState
+import io.github.karljuderojas.freepdf.ui.viewer.WatermarkDialog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -238,6 +248,26 @@ class ScreenshotTest {
         ImagesToPdfContent(photos, thumbs, PageFit.Picture, 2, false, {}, { _, _ -> }, {}, {}, {}, {})
     }
 
+    // One picture the phone could not decode: its row says so, and Create waits until it is removed.
+    @Test
+    fun imagesToPdfUnreadable() {
+        val start = listOf("content://a", "content://b", "content://c")
+        val thumbs = mapOf("content://a" to samplePages[0].asImageBitmap(), "content://c" to samplePages[1].asImageBitmap())
+        show {
+            var photos by remember { mutableStateOf(start) }
+            ImagesToPdfContent(photos, thumbs, PageFit.A4, null, false, {}, { from, to -> photos = photos.moved(from, to) }, {}, {}, {}, {}, unreadable = setOf("content://b"))
+        }
+        composeRule.onNodeWithTag("images-create").assertIsNotEnabled()
+        composeRule.onNodeWithText("Page 2 could not be read").assertExists()
+        captureRoot("images_to_pdf_unreadable")
+        // The mark follows the picture when it is moved, not the slot it was in.
+        composeRule.onNodeWithContentDescription("Move page 2 earlier").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Page 1 could not be read").assertExists()
+        composeRule.onNodeWithText("Page 2 could not be read").assertDoesNotExist()
+        composeRule.onNodeWithTag("images-create").assertIsNotEnabled()
+    }
+
     // A skewed photo of the sample page on a desk, with the corners the app's own detector finds in it.
     private val deskPhoto by lazy { SyntheticPhoto.make(samplePages[0]) }
     private val detectedQuad by lazy { PageDetector.detect(deskPhoto) ?: Quad.inset(0.04f) }
@@ -267,6 +297,41 @@ class ScreenshotTest {
     fun scannerAdjustEdges() = capture("scanner_adjust_edges") {
         val pages = listOf(ScanPage(1, "a", detectedQuad))
         ScannerContent(pages, emptyMap(), ScanFilter.Color, 0, true, deskPhoto.asImageBitmap(), false, null, false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {})
+    }
+
+    // Corners dragged into a bow tie: the hint turns into a warning and Done waits.
+    @Test
+    fun scannerAdjustTwisted() {
+        val bowTie = Quad(Corner(0.1f, 0.1f), Corner(0.9f, 0.9f), Corner(0.9f, 0.1f), Corner(0.1f, 0.9f))
+        val pages = listOf(ScanPage(1, "a", bowTie))
+        show {
+            ScannerContent(pages, emptyMap(), ScanFilter.Color, 0, true, deskPhoto.asImageBitmap(), false, null, false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {})
+        }
+        composeRule.onNodeWithTag("scan-adjust-done").assertIsNotEnabled()
+        composeRule.onNodeWithTag("scan-adjust-hint").assertTextContains("The corners cross", substring = true)
+        captureRoot("scanner_adjust_twisted")
+    }
+
+    @Test
+    fun scannerAdjustDoneIsEnabledForAProperPage() {
+        val pages = listOf(ScanPage(1, "a", detectedQuad))
+        show {
+            ScannerContent(pages, emptyMap(), ScanFilter.Color, 0, true, deskPhoto.asImageBitmap(), false, null, false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {})
+        }
+        composeRule.onNodeWithTag("scan-adjust-done").assertIsEnabled()
+    }
+
+    // Back with pages that were never saved asks first.
+    @Test
+    fun scannerDiscard() {
+        val pages = listOf(ScanPage(1, "a", detectedQuad), ScanPage(2, "b", detectedQuad), ScanPage(3, "c", detectedQuad))
+        show {
+            ScannerContent(pages, scanThumbs(pages, ScanFilter.Color), ScanFilter.Color, null, false, null, false, null, false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {})
+            DiscardPagesDialog(count = pages.size, onDiscard = {}, onDismiss = {})
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Discard 3 pages?").assertExists()
+        captureScreenRoboImage("build/outputs/roborazzi/scanner_discard.png")
     }
 
     @Test
@@ -1089,12 +1154,56 @@ class ScreenshotTest {
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerLinkOpen() {
-        val linked = sample.copy(links = listOf(PageLink(0, DisplayRect(0.1f, 0.1f, 0.6f, 0.15f), LinkTarget.Web("https://example.com/terms"))))
+        val linked = sample.copy(links = listOf(PageLink(0, 0, DisplayRect(0.1f, 0.1f, 0.6f, 0.15f), LinkTarget.Web("https://example.com/terms"))))
         show { viewer(ViewerMode.Read, linked) }
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("link-0-0").performClick()
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_link_open.png")
+    }
+
+    // The sample with a web link over its title and a page link over the first heading.
+    private val linked by lazy {
+        sample.copy(
+            links = listOf(
+                PageLink(0, 0, DisplayRect(0.1f, 0.1f, 0.6f, 0.15f), LinkTarget.Web("https://example.com/terms")),
+                PageLink(0, 1, DisplayRect(0.1f, 0.3f, 0.4f, 0.34f), LinkTarget.Page(1)),
+            ),
+        )
+    }
+
+    // In Edit's Add link, the links a page already has are outlined.
+    @Test
+    fun viewerEditLinks() = capture("viewer_edit_links") { viewer(ViewerMode.Edit, linked, tool = R.string.tool_add_link) }
+
+    // A tap on one of them offers to change where it leads, or to remove it.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerEditLinkChange() {
+        show { viewer(ViewerMode.Edit, linked, tool = R.string.tool_add_link) }
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithTag("edit-link-0-0").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_edit_link_change.png")
+    }
+
+    // The link dialog with "Page in this PDF" chosen, for a page the PDF no longer has (6 of 2),
+    // so the page field shows its error and Change is off. Opened like viewerGoToPage.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerLinkToPage() {
+        val open = mutableStateOf(false)
+        show {
+            viewer(ViewerMode.Edit, linked, tool = R.string.tool_add_link)
+            if (open.value) AddLinkDialog(pageCount = 2, onDismiss = {}, onAdd = {}, existing = LinkTarget.Page(5), onRemove = {})
+        }
+        composeRule.mainClock.autoAdvance = false
+        open.value = true
+        composeRule.mainClock.advanceTimeBy(500)
+        shadowOf(Looper.getMainLooper()).idle()
+        composeRule.mainClock.advanceTimeBy(500)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_link_to_page.png")
     }
 
     @Test
@@ -1208,15 +1317,53 @@ class ScreenshotTest {
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerRedactConfirm() {
-        show { viewer(ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(), confirmRedact = true) }
+        // The marked pages have been checked and nothing on them has to go whole.
+        show {
+            viewer(
+                ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(), confirmRedact = true,
+                redactCheck = RedactCheck(sampleRedactions(), emptyList()),
+            )
+        }
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_redact_confirm.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerRedactConfirmWholePicture() {
+        // A picture under a mark on page 1 cannot be partly cleared: the dialog says so before anything is saved.
+        show {
+            viewer(
+                ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(), confirmRedact = true,
+                redactCheck = RedactCheck(sampleRedactions(), listOf(0)),
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("redact-whole-pictures").assertExists()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_redact_confirm_whole_picture.png")
+    }
+
+    // The redacted copy is being written; the spinner never lets Compose go idle, so drive the clock.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerRedactProgress() {
+        var progress by mutableStateOf<RedactProgress?>(null)
+        show { viewer(ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(), redactProgress = progress) }
+        composeRule.mainClock.autoAdvance = false
+        progress = RedactProgress(2, 5)
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_redact_progress.png")
     }
 
     @Test
     fun viewerRedactApplyAsksThenSendsTheMarks() {
         val actions = mutableListOf<ViewerAction>()
-        show { viewer(ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(), onAction = { actions += it }) }
+        show {
+            viewer(
+                ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(),
+                redactCheck = RedactCheck(sampleRedactions(), emptyList()), onAction = { actions += it },
+            )
+        }
         composeRule.onNodeWithText("Apply").performClick()
         composeRule.waitForIdle()
         // Nothing is sent until the dialog is confirmed.
@@ -1225,6 +1372,18 @@ class ScreenshotTest {
         composeRule.waitForIdle()
         val redact = actions.filterIsInstance<ViewerAction.Redact>().single()
         assertEquals(sampleRedactions(), redact.boxes)
+    }
+
+    @Test
+    fun viewerRedactApplyWaitsForTheCheck() {
+        // Until the marked pages have been looked at, the copy cannot be confirmed, only cancelled.
+        val actions = mutableListOf<ViewerAction>()
+        show { viewer(ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions(), onAction = { actions += it }) }
+        composeRule.onNodeWithText("Apply").performClick()
+        composeRule.waitForIdle()
+        assertEquals(sampleRedactions(), actions.filterIsInstance<ViewerAction.CheckRedaction>().single().boxes)
+        composeRule.onNodeWithText("Save redacted copy").assertIsNotEnabled()
+        composeRule.onNodeWithText("Checking the marked pages…").assertExists()
     }
 
     @Test
@@ -1314,6 +1473,65 @@ class ScreenshotTest {
         composeRule.onNodeWithText("Split").performClick()
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_split_every.png")
+    }
+
+    // Picture mode has no text field, so the dialog could be tapped; it is shown directly over the
+    // viewer with the picture already chosen, as viewerSignFinishEditable shows its dialog.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesWatermarkPicture() {
+        var open by mutableStateOf(false)
+        show {
+            viewer(ViewerMode.Pages, sixPages, selectedPage = 1)
+            if (open) {
+                WatermarkDialog(
+                    pageCount = 6, selectedPages = listOf(1), pageAspect = 612f / 792f,
+                    image = Uri.parse("content://media/picker/0/com.android.providers.media.photopicker/media/1"),
+                    onChooseImage = {}, onDismiss = {}, onWatermark = { _, _, _, _ -> }, onRemove = {},
+                    initialPicture = true,
+                )
+            }
+        }
+        composeRule.mainClock.autoAdvance = false
+        open = true
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_watermark_picture.png")
+    }
+
+    // Text the fonts cannot show: the field is in error and Add is disabled. The text field never
+    // lets Compose go idle, so the dialog opens only once the clock is driven by hand.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesWatermarkUnsupportedText() {
+        var open by mutableStateOf(false)
+        show {
+            viewer(ViewerMode.Pages, sixPages, selectedPage = 1)
+            if (open) {
+                WatermarkDialog(
+                    pageCount = 6, selectedPages = listOf(1), pageAspect = 612f / 792f, image = null,
+                    onChooseImage = {}, onDismiss = {}, onWatermark = { _, _, _, _ -> }, onRemove = {},
+                    initialText = "\u6a5f\u5bc6",
+                )
+            }
+        }
+        composeRule.mainClock.autoAdvance = false
+        open = true
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_watermark_unsupported_text.png")
+    }
+
+    // One page: the rows for choosing selected or all pages are left out.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesCropSinglePage() {
+        show { viewer(ViewerMode.Pages, ViewerState.Ready(listOf(PageSize(612f, 792f))), selectedPage = 0) }
+        composeRule.onNodeWithText("Crop").performScrollTo()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Crop").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("crop-bottom").performSemanticsAction(SemanticsActions.SetProgress) { it(0.15f) }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_crop_single_page.png")
     }
 
     @Test
@@ -1653,6 +1871,8 @@ class ScreenshotTest {
         selectedStamp: Long? = null,
         redactions: List<RedactBox> = emptyList(),
         confirmRedact: Boolean = false,
+        redactCheck: RedactCheck? = null,
+        redactProgress: RedactProgress? = null,
         onAction: (ViewerAction) -> Unit = {},
         pages: List<Bitmap> = samplePages,
         signField: Int? = null,
@@ -1668,6 +1888,15 @@ class ScreenshotTest {
                 val words = sampleWords[page % sampleWords.size]
                 words.nearest(at, aspect = 792f / 612f, reach = 0.05f)?.let { i ->
                     val line = words.filter { it.line == words[i].line }
+                    EditableLine(
+                        line.joinToString(" ") { it.text },
+                        DisplayRect(line.minOf { it.left }, line.minOf { it.top }, line.maxOf { it.right }, line.maxOf { it.bottom }),
+                    )
+                }
+            },
+            loadEditableLines = { page ->
+                if (pages !== samplePages) emptyList()
+                else sampleWords[page % sampleWords.size].groupBy { it.line }.values.map { line ->
                     EditableLine(
                         line.joinToString(" ") { it.text },
                         DisplayRect(line.minOf { it.left }, line.minOf { it.top }, line.maxOf { it.right }, line.maxOf { it.bottom }),
@@ -1705,6 +1934,8 @@ class ScreenshotTest {
             initialSelectedStamp = selectedStamp,
             initialRedactions = redactions,
             initialConfirmRedact = confirmRedact,
+            redactCheck = redactCheck,
+            redactProgress = redactProgress,
             onAction = onAction,
         )
     }

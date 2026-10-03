@@ -152,7 +152,7 @@
     <string name="sign_hint_date">Tap where today\'s date goes. Drag it to move it.</string>
     <string name="sign_hint_text">Tap where you want to type text. Drag it to move it.</string>
     <string name="sign_hint_checkmark">Tap a box to tick it. Drag the tick to move it.</string>
-    <string name="edit_hint_link">Drag a box over the words or area that should be a link.</string>
+    <string name="edit_hint_link">Drag a box over the words or area that should be a link. Tap a link to change or remove it.</string>
     <string name="link_description">Link</string>
     <string name="link_open_title">Open this link?</string>
     <string name="link_open">Open</string>
@@ -165,7 +165,10 @@
     <string name="link_page_label">Page number</string>
     <string name="link_page_help">1 to %1$d</string>
     <string name="link_add">Add</string>
-    <string name="edit_hint_edit_text">Tap a line of text to change its words. It keeps its font, size and colour where the PDF allows.</string>
+    <string name="link_change_title">Change link</string>
+    <string name="link_change">Change</string>
+    <string name="link_remove">Remove</string>
+    <string name="edit_hint_edit_text">Tap a line of text to change its words. It keeps its font, size and colour where the PDF allows. To take words out for good, use Redact.</string>
     <string name="edit_text_title">Edit text</string>
     <string name="edit_text_hint">The words of this line</string>
     <string name="edit_text_none">No editable text there. Scanned pages are pictures, so they have no text to change.</string>
@@ -285,7 +288,10 @@
     <string name="watermark_size">Size</string>
     <string name="watermark_angle_value">%1$d°</string>
     <string name="watermark_color">Colour</string>
-    <string name="watermark_note">It is drawn on top of the page. Use Undo to take it off.</string>
+    <string name="watermark_note">It is drawn on top of the page. Remove watermarks takes off the ones added with this app, now or after saving.</string>
+    <string name="watermark_unsupported_text">Only Latin, Greek and Cyrillic letters can be used.</string>
+    <string name="watermark_remove">Remove watermarks</string>
+    <string name="watermark_none_to_remove">These pages have no watermark added with this app.</string>
     <string name="watermark_apply">Add</string>
     <string name="watermark_apply_selected">Selected pages (%1$s)</string>
     <string name="watermark_apply_all">All %1$d pages</string>
@@ -303,6 +309,7 @@
     <string name="crop_apply_selected">Selected pages (%1$s)</string>
     <string name="crop_apply_all">All %1$d pages</string>
     <string name="crop_reset">Show whole page</string>
+    <string name="crop_nothing_to_reset">These pages are not cropped.</string>
     <string name="extract_title">Extract pages</string>
     <string name="extract_body">Saves the pages you choose as a new PDF. This one stays as it is.</string>
     <string name="extract_pages_label">Pages</string>
@@ -504,10 +511,23 @@
         <item quantity="other">Permanently remove what is under %d areas?</item>
     </plurals>
     <string name="redact_confirm_body">FreePDF saves a new copy with the text, pictures and drawings under each marked area removed from the file, not just covered, and paints the area black. This cannot be undone in the copy. The PDF you have open stays as it is.</string>
+    <string name="redact_confirm_limits">Drawings that touch a mark are removed whole, and any files attached to the PDF are left out of the copy. Everything outside the marks stays as it is.</string>
+    <string name="redact_confirm_checking">Checking the marked pages…</string>
+    <plurals name="redact_confirm_whole_pictures">
+        <item quantity="one">A picture under a mark on page %1$s cannot be partly cleared and will be removed whole.</item>
+        <item quantity="other">Pictures under marks on pages %1$s cannot be partly cleared and will be removed whole.</item>
+    </plurals>
     <string name="redact_confirm_action">Save redacted copy</string>
+    <string name="redact_progress_title">Redacting</string>
+    <string name="redact_progress_page">Redacting page %1$d of %2$d…</string>
     <string name="redact_saved">Saved the redacted copy.</string>
     <string name="redact_saved_blank">Saved the redacted copy. No text, pictures or drawings were found under the marked areas, so they were painted black.</string>
-    <string name="redact_saved_whole_pictures">Saved the redacted copy. A picture under a marked area could not be edited, so it was removed whole.</string>
+    <string name="redact_saved_whole_pictures">Saved the redacted copy. A picture under a marked area could not be partly cleared, so it was removed whole.</string>
+    <plurals name="redact_saved_attachments">
+        <item quantity="one">The file attached to the PDF was left out of the copy.</item>
+        <item quantity="other">The %1$d files attached to the PDF were left out of the copy.</item>
+    </plurals>
+    <string name="redact_saved_metadata_cleared">Some removed text could not be read as words, so the title, author, bookmarks and metadata were cleared too.</string>
     <string name="redact_failed">Could not save the redacted copy.</string>
     <string name="tool_about_redact">Permanently remove text, pictures and drawings from a copy, and paint over them.</string>
     <string name="tool_synonyms_redact">black out, blackout, censor, remove, hide, erase, private, sensitive, confidential</string>
@@ -531,6 +551,8 @@
     <string name="images_making">Making page %1$d of %2$d…</string>
     <string name="images_failed">Could not make the PDF. Check that there is room on your phone and try again.</string>
     <string name="images_default_name">Images</string>
+    <string name="images_unreadable">Page %1$d could not be read</string>
+    <string name="images_unreadable_remove">Remove the pictures that could not be read, then create the PDF.</string>
     <plurals name="images_count">
         <item quantity="one">%1$d picture</item>
         <item quantity="other">%1$d pictures</item>
@@ -557,6 +579,12 @@
     <string name="scan_no_camera">No camera app was found on this phone.</string>
     <string name="scan_photo_failed">Could not use that photo.</string>
     <string name="scan_default_name">Scan</string>
+    <string name="scan_adjust_unusable">The corners cross or the outline is too small. Drag them so they go round the page.</string>
+    <string name="scan_discard_body">The pages are not saved as a PDF yet. Leaving the scanner throws the photos away.</string>
+    <plurals name="scan_discard_title">
+        <item quantity="one">Discard %1$d page?</item>
+        <item quantity="other">Discard %1$d pages?</item>
+    </plurals>
     <plurals name="scan_page_count">
         <item quantity="one">%1$d page</item>
         <item quantity="other">%1$d pages</item>

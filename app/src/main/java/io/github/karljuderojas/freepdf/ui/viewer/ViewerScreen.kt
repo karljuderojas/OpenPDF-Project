@@ -85,6 +85,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -139,6 +140,7 @@ import io.github.karljuderojas.freepdf.ui.rememberPdfPicker
 import io.github.karljuderojas.freepdf.ui.sign.FinishOptions
 import io.github.karljuderojas.freepdf.ui.sign.FinishProgressDialog
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
+import io.github.karljuderojas.freepdf.ui.sign.ProgressDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignatureBanner
 import io.github.karljuderojas.freepdf.ui.sign.SignatureDetailsDialog
 import io.github.karljuderojas.freepdf.ui.sign.SignaturePadDialog
@@ -170,10 +172,15 @@ sealed interface ViewerAction {
     data class Rotate(val pages: Set<Int>) : ViewerAction
     /** Stamps [pages] with [text], or with the picture at [image] when that is given. */
     data class Watermark(val pages: Set<Int>, val text: String, val image: Uri?, val style: WatermarkStyle) : ViewerAction
+    /** Takes the watermarks added with this app off [pages]. */
+    data class RemoveWatermarks(val pages: Set<Int>) : ViewerAction
     /** Trims [pages] by [margins], or shows them in full again when [margins] is null. */
     data class Crop(val pages: Set<Int>, val margins: CropMargins?) : ViewerAction
     /** Adds a link over [box], an area of [page] as shown, leading to [target]. */
     data class AddLink(val page: Int, val box: DisplayRect, val target: LinkTarget) : ViewerAction
+    /** Points the link at [index] in [page]'s annotations (see PageLink.index) at [target] instead. */
+    data class ChangeLink(val page: Int, val index: Int, val target: LinkTarget) : ViewerAction
+    data class RemoveLink(val page: Int, val index: Int) : ViewerAction
     data class Delete(val pages: Set<Int>) : ViewerAction
     data class InsertBlank(val afterPage: Int) : ViewerAction
     data class Move(val from: Int, val to: Int) : ViewerAction
@@ -186,6 +193,9 @@ sealed interface ViewerAction {
 
     /** Saves a copy with everything under [boxes] removed and painted black; the open PDF is left as it is. */
     data class Redact(val boxes: List<RedactBox>) : ViewerAction
+
+    /** Looks over what [boxes] mark before the user confirms a redaction; see [RedactCheck]. */
+    data class CheckRedaction(val boxes: List<RedactBox>) : ViewerAction
     data object ShowInfo : ViewerAction
     data object Print : ViewerAction
     data class Search(val query: String) : ViewerAction
@@ -278,6 +288,8 @@ fun ViewerScreen(
     val certificate by viewModel.certificate.collectAsStateWithLifecycle()
     val timestampsOn by viewModel.timestampsOn.collectAsStateWithLifecycle()
     val finishStep by viewModel.finishing.collectAsStateWithLifecycle()
+    val redactProgress by viewModel.redacting.collectAsStateWithLifecycle()
+    val redactCheck by viewModel.redactCheck.collectAsStateWithLifecycle()
     var certificateFile by remember { mutableStateOf<Uri?>(null) }
     val toolStyles by viewModel.toolStyles.collectAsStateWithLifecycle()
     val marks by viewModel.marks.collectAsStateWithLifecycle()
@@ -339,6 +351,7 @@ fun ViewerScreen(
         viewModel.effects.collect { effect ->
             when (effect) {
                 is ViewerEffect.Message -> launch { snackbarHostState.showSnackbar(resources.getString(effect.text)) }
+                is ViewerEffect.Text -> launch { snackbarHostState.showSnackbar(effect.text) }
                 is ViewerEffect.CountMessage -> launch {
                     snackbarHostState.showSnackbar(resources.getQuantityString(effect.text, effect.count, effect.count))
                 }
@@ -362,6 +375,7 @@ fun ViewerScreen(
         loadPage = viewModel::page,
         loadWords = viewModel::words,
         findLine = viewModel::editableLine,
+        loadEditableLines = viewModel::editableLines,
         loadRegion = viewModel::pageRegion,
         initialMode = initialMode,
         initialTool = initialTool,
@@ -370,6 +384,8 @@ fun ViewerScreen(
         certificate = certificate,
         timestampsOn = timestampsOn,
         finishStep = finishStep,
+        redactCheck = redactCheck,
+        redactProgress = redactProgress,
         toolStyles = toolStyles,
         marks = marks,
         search = search,
@@ -418,8 +434,11 @@ fun ViewerScreen(
                 }
                 is ViewerAction.Rotate -> viewModel.rotatePages(action.pages)
                 is ViewerAction.Watermark -> viewModel.watermark(action.pages, action.text, action.image, action.style)
+                is ViewerAction.RemoveWatermarks -> viewModel.removeWatermarks(action.pages)
                 is ViewerAction.Crop -> viewModel.cropPages(action.pages, action.margins)
                 is ViewerAction.AddLink -> viewModel.addLink(action.page, action.box, action.target)
+                is ViewerAction.ChangeLink -> viewModel.changeLink(action.page, action.index, action.target)
+                is ViewerAction.RemoveLink -> viewModel.removeLink(action.page, action.index)
                 is ViewerAction.Delete -> viewModel.deletePages(action.pages)
                 is ViewerAction.InsertBlank -> viewModel.insertBlankPage(action.afterPage)
                 is ViewerAction.Move -> viewModel.movePage(action.from, action.to)
@@ -429,6 +448,7 @@ fun ViewerScreen(
                 is ViewerAction.Extract -> viewModel.extract(action.pages)
                 is ViewerAction.Split -> viewModel.split(action.parts)
                 is ViewerAction.Redact -> viewModel.redact(action.boxes)
+                is ViewerAction.CheckRedaction -> viewModel.checkRedaction(action.boxes)
                 ViewerAction.ShowInfo -> viewModel.documentInfo()
                 ViewerAction.Print -> viewModel.print()
                 is ViewerAction.Search -> viewModel.search(action.query)
@@ -508,6 +528,7 @@ fun ViewerContent(
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
     loadWords: suspend (page: Int) -> List<PageWord> = { emptyList() },
     findLine: suspend (page: Int, at: Offset) -> TextEditing.EditableLine? = { _, _ -> null },
+    loadEditableLines: suspend (page: Int) -> List<TextEditing.EditableLine> = { emptyList() },
     loadRegion: LoadRegion = { _, _, _ -> null },
     initialMode: ViewerMode = ViewerMode.Read,
     initialSelectedPage: Int = 0,
@@ -521,6 +542,8 @@ fun ViewerContent(
     certificate: CertificateInfo? = null,
     timestampsOn: Boolean = false,
     finishStep: SignedCopy.Step? = null,
+    redactCheck: RedactCheck? = null,
+    redactProgress: RedactProgress? = null,
     initialShowCertificate: Boolean = false,
     initialShowSignatures: Boolean = false,
     toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
@@ -578,6 +601,8 @@ fun ViewerContent(
     // The address a tapped link leads to, while asking whether to open it; and the box just dragged for a new link.
     var openingLink by rememberSaveable { mutableStateOf<String?>(null) }
     var newLinkBox by rememberSaveable(stateSaver = PageBoxSaver) { mutableStateOf<Pair<Int, DisplayRect>?>(null) }
+    // The link tapped in Edit's Add link, by page and place in its annotations, while asking what to do with it.
+    var pickedLink by rememberSaveable { mutableStateOf<Pair<Int, Int>?>(null) }
     val linkContext = LocalContext.current
     val linkResources = LocalResources.current
     var watermarking by rememberSaveable { mutableStateOf(false) }
@@ -1173,6 +1198,15 @@ fun ViewerContent(
                         val words by produceState(emptyList<PageWord>(), page, ready.revision) { value = loadWords(page) }
                         // Text can be selected while reading, or in Annotate before a tool is picked.
                         if (mode == ViewerMode.Read || (mode == ViewerMode.Annotate && tool == null)) {
+                            // Links open only while reading. Their layer wraps the other two, so a
+                            // long press under a link still selects the words and a tap on a mark still picks it.
+                            val pageLinks = if (mode == ViewerMode.Read) ready.links.filter { it.page == page } else emptyList()
+                            LinkLayer(page, pageLinks, onOpen = { link ->
+                                when (val target = link.target) {
+                                    is LinkTarget.Web -> openingLink = target.uri
+                                    is LinkTarget.Page -> scope.launch { listState.animateScrollToItem(rowOf(target.index.coerceIn(0, pageCount - 1), columns)) }
+                                }
+                            }) {
                             MarkTapLayer(page, marks, selectedMark, onSelect = { pickedMark = it?.let { m -> m.page to m.index } }) {
                             TextSelectionLayer(
                                 page = page,
@@ -1194,23 +1228,19 @@ fun ViewerContent(
                                 },
                             )
                             }
-                        }
-                        if (mode == ViewerMode.Read) {
-                            val onPage = ready.links.filter { it.page == page }
-                            if (onPage.isNotEmpty()) {
-                                LinkLayer(page, onPage) { link ->
-                                    when (val target = link.target) {
-                                        is LinkTarget.Web -> openingLink = target.uri
-                                        is LinkTarget.Page -> scope.launch { listState.animateScrollToItem(rowOf(target.index.coerceIn(0, pageCount - 1), columns)) }
-                                    }
-                                }
                             }
                         }
                         if (mode == ViewerMode.Edit && selectedTool == R.string.tool_add_link) {
-                            LinkBoxLayer(page) { box -> newLinkBox = page to box }
+                            LinkBoxLayer(
+                                page, ready.links.filter { it.page == page },
+                                onBox = { box -> newLinkBox = page to box },
+                                onPick = { pickedLink = it.page to it.index },
+                            )
                         }
                         if (editsText) {
-                            EditTextLayer(page, words) { at ->
+                            // Outlined are the lines Edit text can change, which are not all of the page's words.
+                            val editableLines by produceState(emptyList<TextEditing.EditableLine>(), page, ready.revision) { value = loadEditableLines(page) }
+                            EditTextLayer(page, editableLines) { at ->
                                 scope.launch {
                                     val line = findLine(page, at)
                                     if (line == null) snackbarHostState.showSnackbar(noEditableText)
@@ -1368,9 +1398,15 @@ fun ViewerContent(
         )
     }
 
+    // The confirmation needs a look at the marked pages first, made once per set of marks (and
+    // again after the process was killed, when the view model has forgotten it).
+    LaunchedEffect(confirmRedact, redactions, redactCheck) {
+        if (confirmRedact && redactions.isNotEmpty() && redactCheck?.boxes != redactions) onAction(ViewerAction.CheckRedaction(redactions))
+    }
     if (confirmRedact) {
         RedactConfirmDialog(
             count = redactions.size,
+            check = redactCheck?.takeIf { it.boxes == redactions },
             onDismiss = { confirmRedact = false },
             onConfirm = {
                 confirmRedact = false
@@ -1425,6 +1461,23 @@ fun ViewerContent(
         )
     }
 
+    // The link picked in Edit's Add link, if it is still there (it goes when the link is removed or undone).
+    pickedLink?.let { (page, index) -> ready?.links?.firstOrNull { it.page == page && it.index == index } }?.let { link ->
+        AddLinkDialog(
+            pageCount = pageCount,
+            existing = link.target,
+            onDismiss = { pickedLink = null },
+            onAdd = { target ->
+                pickedLink = null
+                onAction(ViewerAction.ChangeLink(link.page, link.index, target))
+            },
+            onRemove = {
+                pickedLink = null
+                onAction(ViewerAction.RemoveLink(link.page, link.index))
+            },
+        )
+    }
+
     if (watermarking) {
         WatermarkDialog(
             pageCount = pageCount,
@@ -1436,6 +1489,10 @@ fun ViewerContent(
             onWatermark = { pages, text, image, style ->
                 watermarking = false
                 onAction(ViewerAction.Watermark(pages, text, image, style))
+            },
+            onRemove = { pages ->
+                watermarking = false
+                onAction(ViewerAction.RemoveWatermarks(pages))
             },
         )
     }
@@ -1497,6 +1554,13 @@ fun ViewerContent(
     }
 
     finishStep?.let { FinishProgressDialog(it) }
+    redactProgress?.let {
+        ProgressDialog(
+            title = stringResource(R.string.redact_progress_title),
+            text = stringResource(R.string.redact_progress_page, it.page, it.of),
+            tag = "redact-progress",
+        )
+    }
 
     if (sharing && ready != null) {
         ShareSheet(
@@ -1861,7 +1925,8 @@ internal fun PageImage(
     }
     val colorFilter = remember(pageColors) { pageColors.matrix?.let { ColorFilter.colorMatrix(ColorMatrix(it)) } }
     Box(
-        modifier.aspectRatio(size.aspectRatio).background(pageColors.paper),
+        // Overlays (links, selections, marks) stay within the page even where their boxes reach past it.
+        modifier.aspectRatio(size.aspectRatio).clipToBounds().background(pageColors.paper),
         contentAlignment = Alignment.Center,
     ) {
         bitmap?.let {

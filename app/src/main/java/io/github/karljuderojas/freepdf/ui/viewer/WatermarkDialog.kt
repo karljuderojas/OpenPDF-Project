@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.edit.PageRanges
+import io.github.karljuderojas.freepdf.pdf.edit.PdfText
 import io.github.karljuderojas.freepdf.pdf.edit.WatermarkStyle
 import kotlin.math.roundToInt
 
@@ -70,7 +71,9 @@ private val suggestions = listOf("CONFIDENTIAL", "DRAFT", "COPY", "DO NOT COPY")
  * Asks what to stamp across the pages: text, or a picture from [image] (chosen with
  * [onChooseImage]), how strong, how big and at what angle, and whether for the selected pages or
  * all of them. A sketch of the page shows the text as it will come out. [onWatermark] gets the
- * zero-based pages, the text, the picture if that is what was chosen, and the look.
+ * zero-based pages, the text, the picture if that is what was chosen, and the look. [onRemove]
+ * gets the pages whose watermarks (the ones added with this app) should come off instead.
+ * [initialText] and [initialPicture] are what the dialog starts with.
  */
 @Composable
 fun WatermarkDialog(
@@ -81,9 +84,12 @@ fun WatermarkDialog(
     onChooseImage: () -> Unit,
     onDismiss: () -> Unit,
     onWatermark: (Set<Int>, String, Uri?, WatermarkStyle) -> Unit,
+    onRemove: (Set<Int>) -> Unit,
+    initialText: String = "CONFIDENTIAL",
+    initialPicture: Boolean = false,
 ) {
-    var picture by rememberSaveable { mutableStateOf(false) }
-    var text by rememberSaveable { mutableStateOf("CONFIDENTIAL") }
+    var picture by rememberSaveable { mutableStateOf(initialPicture) }
+    var text by rememberSaveable { mutableStateOf(initialText) }
     var opacity by rememberSaveable { mutableFloatStateOf(0.3f) }
     var angle by rememberSaveable { mutableFloatStateOf(45f) }
     var size by rememberSaveable { mutableFloatStateOf(0.7f) }
@@ -91,7 +97,9 @@ fun WatermarkDialog(
     var allPages by rememberSaveable { mutableStateOf(false) }
     val style = WatermarkStyle(opacity, angle.roundToInt().toFloat(), size, swatches[colorIndex].color)
     val pages = if (allPages) (0 until pageCount).toSet() else selectedPages.toSet()
-    val ready = if (picture) image != null else text.isNotBlank()
+    // The fonts at hand cover Latin, Greek and Cyrillic; other letters would come out as "?".
+    val textUnsupported = !picture && !PdfText.isLatinGreekOrCyrillic(text)
+    val ready = if (picture) image != null else text.isNotBlank() && !textUnsupported
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -117,6 +125,12 @@ fun WatermarkDialog(
                         onValueChange = { text = it.take(MAX_TEXT) },
                         label = { Text(stringResource(R.string.watermark_text_label)) },
                         singleLine = true,
+                        isError = textUnsupported,
+                        supportingText = if (textUnsupported) {
+                            { Text(stringResource(R.string.watermark_unsupported_text)) }
+                        } else {
+                            null
+                        },
                         modifier = Modifier.fillMaxWidth().testTag("watermark-text"),
                     )
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -152,6 +166,9 @@ fun WatermarkDialog(
                     ChoiceRow(allPages, stringResource(R.string.watermark_apply_all, pageCount), "watermark-all", Modifier) { allPages = true }
                 }
                 Text(stringResource(R.string.watermark_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = { onRemove(pages) }, modifier = Modifier.testTag("watermark-remove")) {
+                    Text(stringResource(R.string.watermark_remove))
+                }
             }
         },
         confirmButton = {

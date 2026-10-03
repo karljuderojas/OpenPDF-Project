@@ -1,6 +1,8 @@
 package io.github.karljuderojas.freepdf.pdf.edit
 
 import android.graphics.Bitmap
+import com.tom_roush.pdfbox.cos.COSArray
+import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
@@ -91,6 +93,7 @@ object PageEditor {
         val page = document.getPage(pageIndex)
         val font = PdfText.fontFor(document, text)
         val lines = PdfText.lines(PdfText.printable(text, font))
+        page.unshareContents()
         PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true, true).use { stream ->
             stream.uprightAt(page, at) {
                 beginText()
@@ -109,6 +112,7 @@ object PageEditor {
     /** Draws a checkmark whose bottom point sits at [at]. [size] is its height in points. */
     fun addCheckmark(document: PDDocument, pageIndex: Int, at: PdfPoint, size: Float = 10f) {
         val page = document.getPage(pageIndex)
+        page.unshareContents()
         PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true, true).use { stream ->
             stream.uprightAt(page, at) {
                 setLineWidth(size / 6)
@@ -134,12 +138,23 @@ object PageEditor {
         } else {
             JPEGFactory.createFromImage(document, image, JPEG_QUALITY)
         }
+        page.unshareContents()
         PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true, true).use { stream ->
             stream.uprightAt(page, at) { drawImage(xObject, 0f, 0f, width, height) }
         }
     }
 
     private const val JPEG_QUALITY = 0.85f
+
+    /**
+     * Gives the page its own /Contents array before a stream is appended to it. PdfBox appends to
+     * an existing array in place, and some generators share one array between identical pages,
+     * which would put what is drawn here on every one of them.
+     */
+    internal fun PDPage.unshareContents() {
+        val contents = cosObject.getDictionaryObject(COSName.CONTENTS) as? COSArray ?: return
+        cosObject.setItem(COSName.CONTENTS, COSArray().apply { addAll(contents) })
+    }
 
     /**
      * Runs [draw] with the origin at [at] and the axes turned so that what it draws is upright
