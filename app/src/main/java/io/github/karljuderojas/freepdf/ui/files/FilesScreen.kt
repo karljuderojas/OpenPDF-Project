@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
@@ -36,11 +37,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,8 +58,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.DocumentEntry
+import io.github.karljuderojas.freepdf.files.SafeWrite
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.rememberPdfPicker
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Calendar
 
 /** The Files tab: PDFs open now, recent history grouped by day, and Open file. */
@@ -66,6 +73,10 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
     val documents = (context.applicationContext as FreePdfApp).documents
     val open by documents.open.collectAsStateWithLifecycle()
     val recent by documents.recent.collectAsStateWithLifecycle()
+    val sessions = (context.applicationContext as FreePdfApp).sessions
+    val unsaved by sessions.unsaved.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    var closing by remember { mutableStateOf<DocumentEntry?>(null) }
 
     val openFile = rememberPdfPicker(onOpenPdf)
 
@@ -74,7 +85,9 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
         recent = recent,
         onOpenFile = openFile,
         onOpen = { onOpenPdf(Uri.parse(it.uri)) },
-        onClose = { documents.close(it.uri) },
+        unsaved = unsaved,
+        // Like the viewer, closing a document with unsaved changes asks first.
+        onClose = { if (it.uri in unsaved) closing = it else documents.close(it.uri) },
         onShare = { entry ->
             // The file may be gone or the grant revoked since it was last opened.
             runCatching { Sharing.shareUri(context, Uri.parse(entry.uri), entry.name) }
@@ -82,6 +95,61 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
         },
         onForget = { documents.forget(it.uri) },
         modifier = modifier,
+    )
+
+    closing?.let { entry ->
+        UnsavedCloseDialog(
+            onSave = {
+                closing = null
+                val session = sessions.get(entry.uri)
+                if (session == null) {
+                    documents.close(entry.uri)
+                } else if (session.stamps.isNotEmpty()) {
+                    // Stamps still being placed are written into the PDF by the viewer, so they
+                    // are not lost here: the document stays open to be finished there.
+                    Toast.makeText(context, R.string.save_open_to_finish, Toast.LENGTH_LONG).show()
+                } else {
+                    scope.launch {
+                        val saved = withContext(Dispatchers.IO) {
+                            runCatching {
+                                SafeWrite.write(context, session.uri, session.session.workingFile)
+                                session.session.markSaved()
+                            }.isSuccess
+                        }
+                        sessions.refresh()
+                        // A file that cannot be written here stays open; the viewer offers Save As.
+                        if (saved) {
+                            Toast.makeText(context, R.string.saved, Toast.LENGTH_SHORT).show()
+                            documents.close(entry.uri)
+                        } else {
+                            Toast.makeText(context, R.string.save_failed_open_to_save_a_copy, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            },
+            onDiscard = {
+                closing = null
+                documents.close(entry.uri)
+            },
+            onCancel = { closing = null },
+        )
+    }
+}
+
+/** The save-or-discard question the viewer asks, for closing a document from the Files tab. */
+@Composable
+fun UnsavedCloseDialog(onSave: () -> Unit, onDiscard: () -> Unit, onCancel: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text(stringResource(R.string.unsaved_title)) },
+        text = { Text(stringResource(R.string.unsaved_body)) },
+        confirmButton = { TextButton(onClick = onSave) { Text(stringResource(R.string.save)) } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
+                TextButton(onClick = onDiscard) { Text(stringResource(R.string.discard)) }
+            }
+        },
     )
 }
 
@@ -97,6 +165,7 @@ fun FilesContent(
     onShare: (DocumentEntry) -> Unit,
     onForget: (DocumentEntry) -> Unit,
     modifier: Modifier = Modifier,
+    unsaved: Set<String> = emptySet(),
     now: Long = System.currentTimeMillis(),
 ) {
     Scaffold(
@@ -127,7 +196,7 @@ fun FilesContent(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        items(open, key = { it.uri }) { OpenCard(it, onOpen, onClose) }
+                        items(open, key = { it.uri }) { OpenCard(it, it.uri in unsaved, onOpen, onClose) }
                     }
                 }
             }
@@ -182,17 +251,20 @@ internal fun PdfBadge(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun OpenCard(entry: DocumentEntry, onOpen: (DocumentEntry) -> Unit, onClose: (DocumentEntry) -> Unit) {
+private fun OpenCard(entry: DocumentEntry, unsaved: Boolean, onOpen: (DocumentEntry) -> Unit, onClose: (DocumentEntry) -> Unit) {
     Card(onClick = { onOpen(entry) }, modifier = Modifier.width(180.dp)) {
         Row(Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             PdfBadge(Modifier.size(32.dp))
-            Text(
-                entry.name,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(start = 10.dp),
-            )
+            Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                Text(entry.name, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (unsaved) {
+                    Text(
+                        stringResource(R.string.open_documents_unsaved),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
             IconButton(onClick = { onClose(entry) }) {
                 Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.close_document, entry.name))
             }
