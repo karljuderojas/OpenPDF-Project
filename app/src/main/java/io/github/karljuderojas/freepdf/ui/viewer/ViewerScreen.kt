@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
@@ -99,6 +100,7 @@ import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
+import io.github.karljuderojas.freepdf.pdf.form.FormField
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
 import io.github.karljuderojas.freepdf.pdf.annotate.Stamps
 import io.github.karljuderojas.freepdf.pdf.render.PageSize
@@ -177,6 +179,7 @@ sealed interface ViewerAction {
     data class AddDate(val page: Int, val at: Offset) : ViewerAction
     data class AddText(val page: Int, val at: Offset, val text: String) : ViewerAction
     data class AddCheckmark(val page: Int, val at: Offset) : ViewerAction
+    data class FillField(val field: FormField, val value: String?) : ViewerAction
     data class FinishSigning(val name: String, val consentText: String, val options: FinishOptions) : ViewerAction
 
     /** Placed stamps; see [StampLayer]. Moves are fractions of the page. */
@@ -184,6 +187,10 @@ sealed interface ViewerAction {
     data class ResizeStamp(val id: Long, val factor: Float) : ViewerAction
     data class DeleteStamp(val id: Long) : ViewerAction
     data object CommitStamps : ViewerAction
+
+    /** Edit actions. The screen opens the photo picker for [PickImage], then places the picture. */
+    data class AddEditText(val page: Int, val at: Offset, val text: String) : ViewerAction
+    data class PickImage(val page: Int) : ViewerAction
 }
 
 /**
@@ -242,6 +249,11 @@ fun ViewerScreen(
     }
     val splitFolderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) {
         if (it != null) viewModel.splitInto(it) else viewModel.cancelSplit()
+    }
+    // The page a picked image goes on, kept across the picker in case the activity is recreated.
+    var imagePage by rememberSaveable { mutableIntStateOf(0) }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) {
+        if (it != null) viewModel.addImage(imagePage, it)
     }
 
     LaunchedEffect(viewModel) {
@@ -347,11 +359,17 @@ fun ViewerScreen(
                 is ViewerAction.AddDate -> viewModel.addDate(action.page, action.at)
                 is ViewerAction.AddText -> viewModel.addText(action.page, action.at, action.text)
                 is ViewerAction.AddCheckmark -> viewModel.addCheckmark(action.page, action.at)
+                is ViewerAction.FillField -> viewModel.fillField(action.field, action.value)
                 is ViewerAction.FinishSigning -> viewModel.finishSigning(action.name, action.consentText, action.options)
                 is ViewerAction.MoveStamp -> viewModel.moveStamp(action.id, action.delta.x, action.delta.y)
                 is ViewerAction.ResizeStamp -> viewModel.resizeStamp(action.id, action.factor)
                 is ViewerAction.DeleteStamp -> viewModel.deleteStamp(action.id)
                 ViewerAction.CommitStamps -> viewModel.commitStamps()
+                is ViewerAction.AddEditText -> viewModel.addEditText(action.page, action.at, action.text)
+                is ViewerAction.PickImage -> {
+                    imagePage = action.page
+                    imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }
             }
         },
     )
@@ -408,6 +426,7 @@ fun ViewerContent(
     var pendingTextBox by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
     var stampKind by rememberSaveable { mutableStateOf(Stamps.Kind.Approved) }
     var pendingText by remember { mutableStateOf<Pair<Int, Offset>?>(null) }
+    var editingField by remember { mutableStateOf<FormField?>(null) }
     var padFor by remember { mutableStateOf<SignatureStore.Kind?>(null) }
     var finishing by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
@@ -498,7 +517,7 @@ fun ViewerContent(
     fun backToReading() {
         if (mode == ViewerMode.Pages) returnToPage = selectedPage
         // Done keeps what was placed: it is written into the PDF on the way out.
-        if (mode == ViewerMode.Sign && stamps.isNotEmpty()) onAction(ViewerAction.CommitStamps)
+        if ((mode == ViewerMode.Sign || mode == ViewerMode.Edit) && stamps.isNotEmpty()) onAction(ViewerAction.CommitStamps)
         selectedStamp = null
         mode = ViewerMode.Read
         selectedTool = null
@@ -667,12 +686,27 @@ fun ViewerContent(
                         }
                     })
                 }
+                mode == ViewerMode.Edit -> Column {
+                    if (selectedTool == R.string.tool_add_text) EditHint(R.string.edit_hint_text)
+                    ToolStrip(mode, selectedTool, onToolSelected = { label ->
+                        when {
+                            // Add image acts once: pick a picture and it lands on the page in view.
+                            label == R.string.tool_add_image -> {
+                                selectedTool = null
+                                onAction(ViewerAction.PickImage(currentPage))
+                            }
+                            selectedTool == label -> selectedTool = null
+                            else -> selectedTool = label
+                        }
+                    })
+                }
                 mode == ViewerMode.Sign -> Column {
                     SignTool.forLabel(selectedTool)?.let { tool ->
                         SignHint(
                             tool = tool,
                             savedImage = tool.signatureKind?.let { savedSignatures[it] },
                             onRedraw = { padFor = tool.signatureKind },
+                            hint = if (tool == SignTool.FillForm && ready.formFields.isEmpty()) R.string.sign_hint_no_fields else tool.hint,
                         )
                     }
                     ToolStrip(mode, selectedTool, onToolSelected = { label ->
@@ -727,7 +761,9 @@ fun ViewerContent(
                             val onPage = search.matches.withIndex().filter { it.value.page == page }
                             if (onPage.isNotEmpty()) SearchHighlights(onPage, currentMatch)
                         }
-                        val pageStamps = if (mode == ViewerMode.Sign) stamps.filter { it.page == page } else emptyList()
+                        val showsStamps = mode == ViewerMode.Sign || mode == ViewerMode.Edit
+                        val pageStamps = if (showsStamps) stamps.filter { it.page == page } else emptyList()
+                        val addsText = mode == ViewerMode.Edit && selectedTool == R.string.tool_add_text
                         val words by produceState(emptyList<PageWord>(), page, ready.revision) { value = loadWords(page) }
                         // Text can be selected while reading, or in Annotate before a tool is picked.
                         if (mode == ViewerMode.Read || (mode == ViewerMode.Annotate && tool == null)) {
@@ -753,12 +789,21 @@ fun ViewerContent(
                             )
                             }
                         }
-                        if (signTool != null || (selectedStamp != null && pageStamps.isNotEmpty())) {
+                        if (signTool == SignTool.FillForm) {
+                            FormFieldLayer(ready.formFields.filter { it.page == page }) { field ->
+                                when (val tap = formTap(field)) {
+                                    is FormTap.Set -> onAction(ViewerAction.FillField(field, tap.value))
+                                    FormTap.Ask -> editingField = field
+                                    FormTap.Nothing -> Unit
+                                }
+                            }
+                        } else if (signTool != null || addsText || (selectedStamp != null && pageStamps.isNotEmpty())) {
                             TapLayer(page) { at ->
                                 val kind = signTool?.signatureKind
                                 when {
                                     // The first tap away from a selected stamp only lets go of it.
                                     selectedStamp != null -> selectedStamp = null
+                                    addsText -> pendingText = page to at
                                     signTool == null -> Unit
                                     kind != null && savedSignatures[kind] == null -> padFor = kind
                                     kind != null -> onAction(ViewerAction.PlaceSignature(page, at, kind))
@@ -928,7 +973,18 @@ fun ViewerContent(
             onDismiss = { pendingText = null },
             onAdd = { text ->
                 pendingText = null
-                onAction(ViewerAction.AddText(page, at, text))
+                onAction(if (mode == ViewerMode.Edit) ViewerAction.AddEditText(page, at, text) else ViewerAction.AddText(page, at, text))
+            },
+        )
+    }
+
+    editingField?.let { field ->
+        FormFieldDialog(
+            field = field,
+            onDismiss = { editingField = null },
+            onSet = { value ->
+                editingField = null
+                if (value != field.value) onAction(ViewerAction.FillField(field, value))
             },
         )
     }
@@ -1251,5 +1307,6 @@ private val ViewerMode.tip: Tip?
         ViewerMode.Annotate -> Tip.Annotate
         ViewerMode.Sign -> Tip.Sign
         ViewerMode.Pages -> Tip.Pages
+        ViewerMode.Edit -> Tip.Edit
         else -> null
     }
