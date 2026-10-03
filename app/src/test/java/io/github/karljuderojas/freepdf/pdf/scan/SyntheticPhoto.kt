@@ -6,7 +6,7 @@ import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
 
-/** A made-up photo of [page] lying skewed on a dark wooden desk, and where its corners really are. */
+/** A made-up photo of [page] lying turned a few degrees on a dark wooden desk, in a letter page's proportions, and where its corners really are. */
 object SyntheticPhoto {
 
     const val WIDTH = 1200
@@ -14,10 +14,10 @@ object SyntheticPhoto {
 
     /** The page's corners in the photo, as fractions of it. */
     val corners = Quad(
-        Corner(240f / WIDTH, 90f / HEIGHT),
-        Corner(900f / WIDTH, 150f / HEIGHT),
-        Corner(960f / WIDTH, 820f / HEIGHT),
-        Corner(180f / WIDTH, 760f / HEIGHT),
+        Corner(377f / WIDTH, 88f / HEIGHT),
+        Corner(896f / WIDTH, 138f / HEIGHT),
+        Corner(824f / WIDTH, 812f / HEIGHT),
+        Corner(306f / WIDTH, 758f / HEIGHT),
     )
 
     fun make(page: Bitmap): Bitmap {

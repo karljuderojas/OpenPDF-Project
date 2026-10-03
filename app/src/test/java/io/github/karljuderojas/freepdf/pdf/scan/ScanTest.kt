@@ -70,7 +70,7 @@ class ScanTest {
         val flat = PerspectiveWarp.warp(photo, SyntheticPhoto.corners, 1600)
         assertFalse(flat.hasAlpha())
         assertTrue(maxOf(flat.width, flat.height) <= 1600)
-        // The sample is a letter page; the skewed corners are not exact, so allow some slack.
+        // The sample is a letter page and the photo keeps its proportions, give or take the slight skew.
         assertEquals(page.width.toFloat() / page.height, flat.width.toFloat() / flat.height, 0.08f)
         // The centre of the straightened page is page, not desk: light, not brown.
         val centre = flat.getPixel(flat.width / 2, flat.height / 2)
