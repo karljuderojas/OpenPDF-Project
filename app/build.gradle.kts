@@ -50,7 +50,19 @@ android {
     packaging {
         resources {
             // BouncyCastle (pulled in by PdfBox for signing) ships duplicate metadata.
-            excludes += setOf("META-INF/versions/9/OSGI-INF/MANIFEST.MF", "META-INF/{AL2.0,LGPL2.1}")
+            excludes += setOf("META-INF/versions/*/OSGI-INF/MANIFEST.MF", "META-INF/{AL2.0,LGPL2.1}")
+        }
+    }
+}
+
+// PdfBox-Android depends on BouncyCastle 1.72 (jdk15to18 jars) and Robolectric on 1.85 (jdk18on).
+// Mixed on one classpath, signing fails with NoSuchFieldError, and 1.72 has known CVEs, so
+// every configuration uses the current jdk18on release instead.
+configurations.configureEach {
+    resolutionStrategy.dependencySubstitution {
+        listOf("bcprov", "bcpkix", "bcutil").forEach { artifact ->
+            substitute(module("org.bouncycastle:$artifact-jdk15to18"))
+                .using(module("org.bouncycastle:$artifact-jdk18on:${libs.versions.bouncycastle.get()}"))
         }
     }
 }

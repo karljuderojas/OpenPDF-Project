@@ -11,6 +11,8 @@ coroutines = "1.11.0"
 pdfium = "2.0.3"
 # Editing, annotating and signing: Apache PDFBox port for Android, Apache-2.0.
 pdfbox = "2.0.27.0"
+# Replaces the BouncyCastle 1.72 that PdfBox-Android depends on; see app/build.gradle.kts.
+bouncycastle = "1.85"
 junit = "4.13.2"
 androidxTestJunit = "1.3.0"
 robolectric = "4.17"
