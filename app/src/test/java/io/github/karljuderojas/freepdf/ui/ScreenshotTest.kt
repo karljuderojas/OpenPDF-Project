@@ -7,6 +7,7 @@ import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.getValue
@@ -31,6 +32,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -105,12 +107,15 @@ import io.github.karljuderojas.freepdf.pdf.scan.ScanPage
 import io.github.karljuderojas.freepdf.pdf.scan.SyntheticPhoto
 import io.github.karljuderojas.freepdf.pdf.create.PageFit
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toPixelMap
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
 import io.github.karljuderojas.freepdf.ui.viewer.AddLinkDialog
 import io.github.karljuderojas.freepdf.ui.viewer.DocumentInfoDialog
 import io.github.karljuderojas.freepdf.ui.viewer.AnnotateTool
 import io.github.karljuderojas.freepdf.ui.viewer.ToolStyle
 import io.github.karljuderojas.freepdf.ui.viewer.GoToPageDialog
+import io.github.karljuderojas.freepdf.ui.viewer.PendingInk
+import io.github.karljuderojas.freepdf.ui.viewer.PendingStroke
 import io.github.karljuderojas.freepdf.ui.viewer.SearchResults
 import io.github.karljuderojas.freepdf.ui.viewer.TextMatch
 import io.github.karljuderojas.freepdf.ui.viewer.PlacedStamp
@@ -784,6 +789,43 @@ class ScreenshotTest {
             }
         }
         captureRoot("viewer_annotate_pen")
+    }
+
+    @Test
+    fun viewerAnnotatePenStaysAfterLift() {
+        // Saving a stroke into the PDF takes a while on a phone, and the page is only rendered
+        // again once that is done; here it never is. The stroke must stay where it was drawn
+        // after the finger lifts instead of vanishing until some later edit re-renders the page.
+        val pending = PendingInk()
+        var strokes = 0
+        show {
+            val ink by pending.strokes.collectAsState()
+            viewer(ViewerMode.Annotate, tool = R.string.tool_pen, pendingInk = ink, onAction = { action ->
+                if (action is ViewerAction.Stroke) {
+                    strokes++
+                    pending.add(action.page, action.points, action.style)
+                }
+            })
+        }
+        val path = (0..60).map { i ->
+            val t = i / 60f
+            Offset(160f + t * 520f, 960f - 70f * kotlin.math.sin(t * 12f) * (1f - t / 2))
+        }
+        composeRule.onNodeWithTag("annotation-layer-0").performTouchInput {
+            down(path.first())
+            path.drop(1).forEach { moveTo(it) }
+            up()
+        }
+        composeRule.waitForIdle()
+        assertEquals(1, strokes)
+        val pixels = composeRule.onNodeWithTag("pending-ink-0").captureToImage().toPixelMap()
+        val ink = AnnotateTool.Pen.defaultStyle.color
+        val inked = path.count { p ->
+            val c = pixels[p.x.toInt(), p.y.toInt()]
+            kotlin.math.abs(c.red - ink.red) < 0.1f && kotlin.math.abs(c.green - ink.green) < 0.1f && kotlin.math.abs(c.blue - ink.blue) < 0.1f
+        }
+        assertTrue("only $inked of ${path.size} points along the stroke are inked", inked > path.size * 3 / 4)
+        captureRoot("viewer_annotate_pen_lifted")
     }
 
     @Test
@@ -1858,6 +1900,7 @@ class ScreenshotTest {
         showSignatures: Boolean = false,
         toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
         marks: List<Mark> = emptyList(),
+        pendingInk: List<PendingStroke> = emptyList(),
         search: SearchResults = SearchResults(),
         searchQuery: String? = null,
         openDocuments: List<DocumentEntry> = emptyList(),
@@ -1920,6 +1963,7 @@ class ScreenshotTest {
             initialShowSignatures = showSignatures,
             toolStyles = toolStyles,
             marks = marks,
+            pendingInk = pendingInk,
             search = search,
             initialSearchQuery = searchQuery,
             openDocuments = openDocuments,

@@ -293,6 +293,7 @@ fun ViewerScreen(
     var certificateFile by remember { mutableStateOf<Uri?>(null) }
     val toolStyles by viewModel.toolStyles.collectAsStateWithLifecycle()
     val marks by viewModel.marks.collectAsStateWithLifecycle()
+    val pendingInk by viewModel.pendingStrokes.collectAsStateWithLifecycle()
     val search by viewModel.search.collectAsStateWithLifecycle()
     val stamps by viewModel.stamps.collectAsStateWithLifecycle()
     val resources = LocalResources.current
@@ -388,6 +389,7 @@ fun ViewerScreen(
         redactProgress = redactProgress,
         toolStyles = toolStyles,
         marks = marks,
+        pendingInk = pendingInk,
         search = search,
         stamps = stamps,
         snackbarHostState = snackbarHostState,
@@ -548,6 +550,7 @@ fun ViewerContent(
     initialShowSignatures: Boolean = false,
     toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
     marks: List<Mark> = emptyList(),
+    pendingInk: List<PendingStroke> = emptyList(),
     search: SearchResults = SearchResults(),
     initialSearchQuery: String? = null,
     stamps: List<PlacedStamp> = emptyList(),
@@ -1187,6 +1190,9 @@ fun ViewerContent(
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
                     val signTool = SignTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Sign }
                     PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState, pageColors, columns) { page ->
+                        // Pen strokes still being saved stay where they were drawn, in every mode.
+                        val inkOnPage = pendingInk.filter { it.page == page }
+                        if (inkOnPage.isNotEmpty()) PendingInkLayer(page, inkOnPage, ready.pageSizes[page].widthPt)
                         if (mode == ViewerMode.Read && searching) {
                             val onPage = search.matches.withIndex().filter { it.value.page == page }
                             if (onPage.isNotEmpty()) SearchHighlights(onPage, currentMatch)

@@ -168,18 +168,8 @@ fun AnnotationLayer(
             .onSizeChanged { size = it }
             .then(gestures),
     ) {
-        // Points to pixels at the page's current on-screen size; never thinner than a hairline.
-        val lineWidth = (style.width * size.width / pageWidthPt).coerceAtLeast(1.dp.toPx())
-        if (stroke.size > 1) {
-            val path = Path().apply {
-                moveTo(stroke[0].x, stroke[0].y)
-                stroke.drop(1).forEach { lineTo(it.x, it.y) }
-            }
-            drawPath(path, style.color, style = Stroke(lineWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
-        } else if (stroke.size == 1) {
-            // A finger that has not moved yet: the dot it would leave.
-            drawCircle(style.color, lineWidth / 2, stroke[0])
-        }
+        val lineWidth = penWidth(style, pageWidthPt)
+        drawPenStroke(stroke, style.color, lineWidth)
         snapped?.takeIf { it.last < words.size }?.let { range ->
             words.lineBoxes(range).forEach { line ->
                 val r = Rect(line.left * size.width, line.top * size.height, line.right * size.width, line.bottom * size.height)
@@ -194,6 +184,38 @@ fun AnnotationLayer(
             )
             drawMarkupPreview(tool, style, r, lineWidth)
         }
+    }
+}
+
+/**
+ * Draws the pen [strokes] on [page] that are saved, or being saved, but not yet in the rendered
+ * page under them, so a stroke stays where it was drawn after the finger lifts (see [PendingInk]).
+ * It takes no touches.
+ */
+@Composable
+fun PendingInkLayer(page: Int, strokes: List<PendingStroke>, pageWidthPt: Float, modifier: Modifier = Modifier) {
+    Canvas(modifier.fillMaxSize().testTag("pending-ink-$page")) {
+        strokes.forEach { stroke ->
+            val points = stroke.points.map { Offset(it.x * size.width, it.y * size.height) }
+            drawPenStroke(points, stroke.style.color, penWidth(stroke.style, pageWidthPt))
+        }
+    }
+}
+
+/** [style]'s line width in points, in pixels at the page's on-screen size; never thinner than a hairline. */
+private fun DrawScope.penWidth(style: ToolStyle, pageWidthPt: Float): Float =
+    (style.width * size.width / pageWidthPt).coerceAtLeast(1.dp.toPx())
+
+/** A pen line through [points] (pixels); a single point is the dot a finger that has not moved would leave. */
+private fun DrawScope.drawPenStroke(points: List<Offset>, color: Color, lineWidth: Float) {
+    if (points.size > 1) {
+        val path = Path().apply {
+            moveTo(points[0].x, points[0].y)
+            points.drop(1).forEach { lineTo(it.x, it.y) }
+        }
+        drawPath(path, color, style = Stroke(lineWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    } else if (points.size == 1) {
+        drawCircle(color, lineWidth / 2, points[0])
     }
 }
 
