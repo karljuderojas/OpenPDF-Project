@@ -52,7 +52,7 @@ The app shows no button for ⬜ items: each tool joins its mode's strip (`Viewer
 
 ## More
 - ✅ Share: send the current PDF, unsaved changes included, to any app through Android's share sheet; also from a Recent row's menu
-- ⬜ Print
+- ✅ Print: Android's print dialog, with any printer the phone knows and Save as PDF; prints unsaved changes too, and respects PDFs that turn printing off
 - ⬜ Password protect / remove password
 - ⬜ Document info
 
