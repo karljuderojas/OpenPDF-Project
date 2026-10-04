@@ -513,13 +513,17 @@
         <item quantity="one">%d area marked</item>
         <item quantity="other">%d areas marked</item>
     </plurals>
+    <string name="redact_fill">Box</string>
+    <string name="redact_fill_auto">Auto</string>
+    <string name="redact_fill_black">Black</string>
+    <string name="redact_fill_white">White</string>
     <string name="redact_remove_last">Remove last</string>
     <string name="redact_apply">Apply</string>
     <plurals name="redact_confirm_title">
         <item quantity="one">Permanently remove what is under %d area?</item>
         <item quantity="other">Permanently remove what is under %d areas?</item>
     </plurals>
-    <string name="redact_confirm_body">FreePDF saves a new copy with the text, pictures and drawings under each marked area removed from the file, not just covered, and paints the area black. This cannot be undone in the copy. The PDF you have open stays as it is.</string>
+    <string name="redact_confirm_body">FreePDF saves a new copy with the text, pictures and drawings under each marked area removed from the file, not just covered, and paints a black or white box over each area so it shows as redacted. This cannot be undone in the copy. The PDF you have open stays as it is.</string>
     <string name="redact_confirm_limits">Drawings that touch a mark are removed whole, and any files attached to the PDF are left out of the copy. Everything outside the marks stays as it is.</string>
     <string name="redact_confirm_checking">Checking the marked pages…</string>
     <plurals name="redact_confirm_whole_pictures">
@@ -530,7 +534,7 @@
     <string name="redact_progress_title">Redacting</string>
     <string name="redact_progress_page">Redacting page %1$d of %2$d…</string>
     <string name="redact_saved">Saved the redacted copy.</string>
-    <string name="redact_saved_blank">Saved the redacted copy. No text, pictures or drawings were found under the marked areas, so they were painted black.</string>
+    <string name="redact_saved_blank">Saved the redacted copy. No text, pictures or drawings were found under the marked areas, so they were only covered with boxes.</string>
     <string name="redact_saved_whole_pictures">Saved the redacted copy. A picture under a marked area could not be partly cleared, so it was removed whole.</string>
     <plurals name="redact_saved_attachments">
         <item quantity="one">The file attached to the PDF was left out of the copy.</item>

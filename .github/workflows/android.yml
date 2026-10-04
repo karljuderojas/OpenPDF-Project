@@ -83,7 +83,7 @@ jobs:
         run: |
           pdf=app/build/outputs/qa/redacted-example.pdf
           pdftoppm -png -f 1 -l 1 -scale-to 1080 -singlefile "$pdf" app/build/outputs/roborazzi/pdf_redacted_example
-          if pdftotext "$pdf" - | grep -q -e 6789 -e 04/12; then echo "Redacted text can still be extracted"; exit 1; fi
+          if pdftotext "$pdf" - | grep -q -e 6789 -e 04/12 -e 9876; then echo "Redacted text can still be extracted"; exit 1; fi
       # SignedCopyTest writes a signed copy of the sample agreement. Show its signing certificate
       # page, and have poppler check the digital signature independently of our own code.
       - name: Render the signing certificate page

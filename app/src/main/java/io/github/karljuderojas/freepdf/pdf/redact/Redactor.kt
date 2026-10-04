@@ -26,8 +26,9 @@ import java.util.IdentityHashMap
 
 /**
  * True redaction: the marked areas are permanently emptied of text, pictures and line art, then
- * painted black. Nothing is merely covered, so copying, searching or extracting text from the
- * saved file finds nothing under the black boxes.
+ * a black or white box (see [RedactFill]) is painted into the page content over each, so the
+ * reader can see something was taken out. Nothing is merely covered, so copying, searching or
+ * extracting text from the saved file finds nothing under the boxes.
  *
  * Per page, [PageRedactor] rewrites the content. Here, around it:
  * - notes, highlights, form fields and other annotations that touch an area are removed along
@@ -39,6 +40,9 @@ import java.util.IdentityHashMap
  * Call it on a copy of the document and save with PdfBox's own save, which writes the file out
  * afresh; an incremental save would keep the old content in the file.
  */
+/** The colour of the box painted over a redacted area: black on light pages, white on dark ones or for a cleaner look. */
+enum class RedactFill { Black, White }
+
 object Redactor {
 
     /** What was removed, for telling the user. */
@@ -59,16 +63,22 @@ object Redactor {
          */
         val metadataCleared: Boolean = false,
     ) {
-        /** True when the marked areas held nothing to remove (blank space), though they are still painted black. */
+        /** True when the marked areas held nothing to remove (blank space), though they still get their boxes. */
         val foundNothing: Boolean get() = textCharacters + pictures + shapes + forms + annotations == 0
     }
 
     /**
      * Redacts [areas], given per zero-based page index in the page's own PDF space (unrotated,
      * origin bottom-left; see PdfGeometry). [onPage] hears, before each marked page is done,
-     * which one it is (from 1) of how many.
+     * which one it is (from 1) of how many. [fills] gives, per page, the box colour of each area in
+     * the same order as [areas]; an area it does not name gets [RedactFill.Black].
      */
-    fun redact(document: PDDocument, areas: Map<Int, List<PdfRect>>, onPage: (page: Int, of: Int) -> Unit = { _, _ -> }): Result {
+    fun redact(
+        document: PDDocument,
+        areas: Map<Int, List<PdfRect>>,
+        fills: Map<Int, List<RedactFill>> = emptyMap(),
+        onPage: (page: Int, of: Int) -> Unit = { _, _ -> },
+    ): Result {
         val marked = areas.filterValues { it.isNotEmpty() }.toSortedMap()
         require(marked.isNotEmpty()) { "Nothing is marked" }
         val fragments = LinkedHashSet<String>()
@@ -108,10 +118,15 @@ object Redactor {
             page.cosObject.removeItem(COSName.THUMB)
             page.cosObject.removeItem(COSName.getPDFName("PieceInfo"))
 
+            // Page content, not an annotation, so the box cannot be taken off the saved copy.
+            val pageFills = fills[index].orEmpty()
             PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true, true).use { stream ->
-                stream.setNonStrokingColor(0f, 0f, 0f)
-                rects.forEach { stream.addRect(it.left, it.bottom, it.width, it.height) }
-                stream.fill()
+                rects.indices.groupBy { pageFills.getOrElse(it) { RedactFill.Black } }.forEach { (fill, indices) ->
+                    val grey = if (fill == RedactFill.White) 1f else 0f
+                    stream.setNonStrokingColor(grey, grey, grey)
+                    indices.map(rects::get).forEach { stream.addRect(it.left, it.bottom, it.width, it.height) }
+                    stream.fill()
+                }
             }
         }
 
