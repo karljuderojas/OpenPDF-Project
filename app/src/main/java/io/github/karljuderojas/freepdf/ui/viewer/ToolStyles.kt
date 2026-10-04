@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -136,31 +137,45 @@ fun StampBar(selected: Stamps.Kind, onSelect: (Stamps.Kind) -> Unit) {
     }
 }
 
-/** Above the tool strip while Shapes is chosen: what a drag draws, each with a small picture of it. */
+/**
+ * Above the tool strip while Shapes is chosen: what a drag draws, each with a small picture of
+ * it. Under [SHAPE_LABELS_MIN_WIDTH] the four chips with their names run past a phone's edge with
+ * nothing to show for it, so there the picture stands alone and the name is read out instead.
+ */
 @Composable
 fun ShapeBar(selected: Annotator.Shape, onSelect: (Annotator.Shape) -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("shape-bar")
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            val ink = MaterialTheme.colorScheme.onSurface
-            Annotator.Shape.entries.forEach { shape ->
-                FilterChip(
-                    selected = shape == selected,
-                    onClick = { onSelect(shape) },
-                    label = { Text(stringResource(shape.labelRes)) },
-                    leadingIcon = { Canvas(Modifier.size(18.dp)) { drawShapeIcon(shape, ink) } },
-                    modifier = Modifier.testTag("shape-${shape.name.lowercase()}"),
-                )
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val iconsOnly = maxWidth < SHAPE_LABELS_MIN_WIDTH
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("shape-bar")
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                val ink = MaterialTheme.colorScheme.onSurface
+                Annotator.Shape.entries.forEach { shape ->
+                    val name = stringResource(shape.labelRes)
+                    val picture: @Composable () -> Unit = { Canvas(Modifier.size(18.dp)) { drawShapeIcon(shape, ink) } }
+                    FilterChip(
+                        selected = shape == selected,
+                        onClick = { onSelect(shape) },
+                        label = { if (iconsOnly) picture() else Text(name) },
+                        leadingIcon = if (iconsOnly) null else picture,
+                        modifier = Modifier
+                            .testTag("shape-${shape.name.lowercase()}")
+                            .then(if (iconsOnly) Modifier.semantics { contentDescription = name } else Modifier),
+                    )
+                }
             }
         }
     }
 }
+
+/** The narrowest bar on which the shape chips fit with their names: wider than a 360 dp phone. */
+private val SHAPE_LABELS_MIN_WIDTH = 400.dp
 
 /** A small picture of [shape]: lines and arrows run corner to corner, up to the right. */
 private fun DrawScope.drawShapeIcon(shape: Annotator.Shape, ink: Color) {

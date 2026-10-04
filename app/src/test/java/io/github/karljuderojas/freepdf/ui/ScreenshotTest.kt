@@ -1030,6 +1030,19 @@ class ScreenshotTest {
         captureRoot("viewer_annotate_shape_arrow")
     }
 
+    // On a 360 dp phone the four shape chips show their pictures alone, so Arrow is never off the edge.
+    @Test
+    @Config(qualifiers = "w360dp-h780dp-xxhdpi")
+    fun viewerAnnotateShapeArrowNarrow() {
+        show { viewer(ViewerMode.Annotate, tool = R.string.tool_shapes) }
+        composeRule.onNodeWithTag("shape-arrow").performClick()
+        composeRule.onNodeWithTag("annotation-layer-0").performTouchInput {
+            down(Offset(120f, 900f))
+            for (i in 1..20) moveTo(Offset(120f + i * 30f, 900f - i * 12f))
+        }
+        captureRoot("viewer_annotate_shape_arrow_narrow")
+    }
+
     @Test
     fun viewerShapesDrawn() {
         // One of each shape on the page; tapping the arrow picks it, with its colours and sizes to change.
