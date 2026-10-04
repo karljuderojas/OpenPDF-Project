@@ -31,9 +31,10 @@ class PdfRenderer private constructor(
     /**
      * Renders [pageIndex] at [targetWidthPx] wide, keeping the page's aspect ratio. A very tall
      * page (a receipt, a long scroll) is rendered narrower so the bitmap stays within what the
-     * heap and the GPU can take; the zoom detail layer sharpens it where the user looks.
+     * heap and the GPU can take; the zoom detail layer sharpens it where the user looks. Without
+     * [annotations] only the page's own content is drawn, no notes, stamps or form fields.
      */
-    suspend fun renderPage(pageIndex: Int, targetWidthPx: Int): Bitmap {
+    suspend fun renderPage(pageIndex: Int, targetWidthPx: Int, annotations: Boolean = true): Bitmap {
         val size = pageSizes[pageIndex]
         var width = targetWidthPx.coerceAtLeast(1)
         var height = (width / size.aspectRatio).roundToInt().coerceAtLeast(1)
@@ -44,7 +45,7 @@ class PdfRenderer private constructor(
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val page = document.openPage(pageIndex) ?: error("Page $pageIndex could not be opened")
         page.use {
-            it.renderPageBitmap(bitmap, 0, 0, width, height, renderAnnot = true)
+            it.renderPageBitmap(bitmap, 0, 0, width, height, renderAnnot = annotations)
         }
         return bitmap
     }

@@ -394,6 +394,7 @@ fun ViewerScreen(
         state = state,
         onBack = onBack,
         loadPage = viewModel::page,
+        probePage = viewModel::pageWithoutAnnotations,
         loadWords = viewModel::words,
         findLine = viewModel::editableLine,
         loadEditableLines = viewModel::editableLines,
@@ -550,6 +551,8 @@ fun ViewerContent(
     state: ViewerState,
     onBack: () -> Unit,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
+    /** The page without its annotations, for Redact's Auto colour; what is left once the marked notes and stamps go. */
+    probePage: suspend (index: Int, widthPx: Int) -> Bitmap? = loadPage,
     loadWords: suspend (page: Int) -> List<PageWord> = { emptyList() },
     findLine: suspend (page: Int, at: Offset) -> TextEditing.EditableLine? = { _, _ -> null },
     loadEditableLines: suspend (page: Int) -> List<TextEditing.EditableLine> = { emptyList() },
@@ -1371,18 +1374,8 @@ fun ViewerContent(
                                 active = redacting,
                                 pageWidthPt = ready.pageSizes[page].widthPt,
                                 words = words,
-                                onBox = { rect ->
-                                    val chosen = redactFill
-                                    val box = RedactBox(page, rect, chosen ?: RedactFill.Black)
-                                    redactions = redactions + box
-                                    if (chosen == null) {
-                                        // Auto: look at the page under the mark. A mark removed or cleared meanwhile stays gone.
-                                        scope.launch {
-                                            val fill = contrastingFill(runCatching { loadPage(page, AUTO_FILL_WIDTH_PX) }.getOrNull(), rect)
-                                            if (fill != box.fill) redactions = redactions.map { if (it === box) box.copy(fill = fill) else it }
-                                        }
-                                    }
-                                },
+                                // With Auto (null) the colour is undecided until the effect below has looked at the page.
+                                onBox = { rect -> redactions = redactions + RedactBox(page, rect, redactFill) },
                             )
                         }
                         if (tool != null) {
@@ -1480,6 +1473,16 @@ fun ViewerContent(
         )
     }
 
+    // Auto: look at the page under each undecided mark, without the annotations the redaction
+    // removes. The marks stay undecided in saved state, so one still waiting when the screen is
+    // recreated is judged afresh rather than left black. A mark removed meanwhile stays gone.
+    val undecidedRedactions = redactions.filter { it.fill == null }
+    LaunchedEffect(undecidedRedactions) {
+        for (box in undecidedRedactions) {
+            val fill = contrastingFill(runCatching { probePage(box.page, AUTO_FILL_WIDTH_PX) }.getOrNull(), box.rect)
+            redactions = redactions.map { if (it.fill == null && it.page == box.page && it.rect == box.rect) it.copy(fill = fill) else it }
+        }
+    }
     // The confirmation needs a look at the marked pages first, made once per set of marks (and
     // again after the process was killed, when the view model has forgotten it).
     LaunchedEffect(confirmRedact, redactions, redactCheck) {

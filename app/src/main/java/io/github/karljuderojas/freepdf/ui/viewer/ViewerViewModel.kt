@@ -535,6 +535,17 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
     }
 
     /**
+     * Page [index] as [page] gives it but without its annotations: the page itself, which is what
+     * is left under a redaction once the notes and stamps touching it have gone. Not cached; it
+     * is wanted once per mark, at a small size.
+     */
+    suspend fun pageWithoutAnnotations(index: Int, widthPx: Int): Bitmap? = lock.withLock {
+        val current = renderer ?: return@withLock null
+        if (index >= current.pageCount) return@withLock null
+        runCatching { current.renderPage(index, widthPx, annotations = false) }.getOrElse { if (it is OutOfMemoryError) null else throw it }
+    }
+
+    /**
      * The part of page [index] in [region], rendered as if the page were [fullWidthPx] wide.
      * Not cached: it is only good for one zoom and scroll position, and it is at most a
      * screenful of pixels, so a zoomed screen never holds much more than two screenfuls.
@@ -1324,9 +1335,9 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
             }
         }
 
-    /** The box colour of each area [redactAreas] gives, in the same order. */
+    /** The box colour of each area [redactAreas] gives, in the same order; a mark Auto has not judged yet is black. */
     private fun redactFills(boxes: List<RedactBox>): Map<Int, List<RedactFill>> =
-        boxes.groupBy { it.page }.mapValues { (_, onPage) -> onPage.map { it.fill } }
+        boxes.groupBy { it.page }.mapValues { (_, onPage) -> onPage.map { it.fill ?: RedactFill.Black } }
 
     fun cancelRedaction() {
         pendingRedaction = null

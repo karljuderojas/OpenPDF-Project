@@ -39,18 +39,22 @@ import io.github.karljuderojas.freepdf.pdf.text.PageWord
 /**
  * An area marked for redaction on [page]. [rect] is in fractions of the displayed page (0..1
  * across and down, origin top-left), like every overlay, so it does not depend on zoom. [fill]
- * is the colour of the box painted over it in the redacted copy.
+ * is the colour of the box painted over it in the redacted copy; null while Auto has still to
+ * look at the page under it (see [contrastingFill]), which shows and applies as black meanwhile.
  */
-data class RedactBox(val page: Int, val rect: Rect, val fill: RedactFill = RedactFill.Black)
+data class RedactBox(val page: Int, val rect: Rect, val fill: RedactFill? = RedactFill.Black) {
+    /** The colour the box has for now: [fill], or black until Auto has decided. */
+    val shownFill: RedactFill get() = fill ?: RedactFill.Black
+}
 
-/** [boxes] as six floats each, for saved state: page, left, top, right, bottom, fill. */
+/** [boxes] as six floats each, for saved state: page, left, top, right, bottom, fill (-1 while undecided). */
 fun flattenRedactBoxes(boxes: List<RedactBox>): List<Float> =
-    boxes.flatMap { listOf(it.page.toFloat(), it.rect.left, it.rect.top, it.rect.right, it.rect.bottom, it.fill.ordinal.toFloat()) }
+    boxes.flatMap { listOf(it.page.toFloat(), it.rect.left, it.rect.top, it.rect.right, it.rect.bottom, it.fill?.ordinal?.toFloat() ?: -1f) }
 
-/** The boxes [flattenRedactBoxes] wrote. */
+/** The boxes [flattenRedactBoxes] wrote. An undecided fill stays undecided, so Auto looks again after a rotation. */
 fun unflattenRedactBoxes(flat: List<Float>): List<RedactBox> =
     flat.chunked(6).filter { it.size == 6 }.map { (page, left, top, right, bottom, fill) ->
-        RedactBox(page.toInt(), Rect(left, top, right, bottom), RedactFill.entries.getOrElse(fill.toInt()) { RedactFill.Black })
+        RedactBox(page.toInt(), Rect(left, top, right, bottom), if (fill < 0f) null else RedactFill.entries.getOrElse(fill.toInt()) { RedactFill.Black })
     }
 
 private operator fun <T> List<T>.component6() = this[5]
@@ -108,7 +112,7 @@ fun RedactionLayer(
                 val topLeft = Offset(box.rect.left * size.width, box.rect.top * size.height)
                 val boxSize = Size(box.rect.width * size.width, box.rect.height * size.height)
                 // The box the copy will get, faded so the marked words can still be checked.
-                drawRect(box.fill.color().copy(alpha = 0.6f), topLeft, boxSize)
+                drawRect(box.shownFill.color().copy(alpha = 0.6f), topLeft, boxSize)
                 drawRect(MarkColor, topLeft, boxSize, style = Stroke(2.dp.toPx()))
             }
         }
