@@ -266,7 +266,7 @@
     <string name="files_view_folder">Folder</string>
     <string name="folder_title">Folder</string>
     <string name="folder_empty_title">Browse a folder of PDFs</string>
-    <string name="folder_empty_hint">Pick a folder such as Downloads and its PDFs are listed here. FreePDF can only see the folder you pick.</string>
+    <string name="folder_empty_hint">Pick a folder inside Downloads or Documents, for example Downloads/PDFs, and its PDFs are listed here. Android does not let apps use Downloads itself. FreePDF can only see the folder you pick.</string>
     <string name="folder_choose">Choose folder</string>
     <string name="folder_change">Change</string>
     <string name="folder_forget">Forget</string>
@@ -274,6 +274,9 @@
     <string name="folder_sort_date">Date</string>
     <string name="folder_no_pdfs">No PDFs in this folder. Pull down to refresh.</string>
     <string name="folder_unreadable">This folder can no longer be read. Choose it again or forget it.</string>
+    <string name="folder_forget_title">Forget this folder?</string>
+    <string name="folder_forget_body">FreePDF gives back its access to %1$s. Its PDFs leave the Recent list; the files themselves are not touched.</string>
+    <string name="folder_forget_confirm">Forget</string>
     <string name="close_document">Close %1$s</string>
     <string name="more_actions">More actions for %1$s</string>
     <string name="forget_recent">Remove from recent</string>
@@ -284,6 +287,7 @@
     <string name="rename_invalid">Enter a name without slashes.</string>
     <string name="rename_failed">Could not rename. Another file may already have that name.</string>
     <string name="rename_unsupported">The folder this file is in does not allow renaming from here.</string>
+    <string name="rename_gone">This file is no longer available. It may have been moved or deleted.</string>
     <string name="renamed_toast">Renamed to %1$s</string>
     <string name="delete_file">Delete</string>
     <string name="delete_title">Delete %1$s?</string>
@@ -291,6 +295,9 @@
     <string name="delete_unsupported_title">Can\'t delete this file here</string>
     <string name="delete_unsupported_body">The folder %1$s is in does not allow deleting from FreePDF. You can still remove it from this list; the file itself stays where it is.</string>
     <string name="delete_remove_from_list">Remove from list</string>
+    <string name="delete_gone_title">File not available</string>
+    <string name="delete_gone_body">%1$s can no longer be opened from FreePDF. It may have been moved or deleted, or it is on storage that was removed. You can remove it from this list.</string>
+    <string name="delete_gone_toast">%1$s is no longer available.</string>
     <string name="delete_failed">Could not delete the file. It may already be gone or protected.</string>
     <string name="deleted_toast">Deleted %1$s</string>
     <string name="file_has_unsaved_changes">%1$s has unsaved changes. Save or discard them first.</string>

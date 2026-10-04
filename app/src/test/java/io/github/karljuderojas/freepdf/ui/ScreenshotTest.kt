@@ -90,6 +90,8 @@ import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
 import io.github.karljuderojas.freepdf.speech.ReadAloudState
 import io.github.karljuderojas.freepdf.files.FolderFile
 import io.github.karljuderojas.freepdf.files.FolderSort
+import io.github.karljuderojas.freepdf.files.Support
+import io.github.karljuderojas.freepdf.ui.files.ForgetFolderDialog
 import io.github.karljuderojas.freepdf.ui.files.FilesTopBar
 import io.github.karljuderojas.freepdf.ui.files.FilesView
 import io.github.karljuderojas.freepdf.ui.files.FilesViewChips
@@ -492,18 +494,37 @@ class ScreenshotTest {
     fun filesFolderEmpty() = capture("files_folder_empty") { folder(name = null, files = null) }
 
     @Test
-    fun filesFolder() = capture("files_folder") {
-        folder(
-            name = "Download",
-            files = listOf(
-                FolderFile("content://d/1", "Bank statement September.pdf", now - 2 * HOUR, 182_000),
-                FolderFile("content://d/2", "Lease renewal 2027.pdf", now - 3 * 24 * HOUR, 1_450_000),
-                FolderFile("content://d/3", "Boarding pass.pdf", now - 12 * 24 * HOUR, 64_000),
-                FolderFile("content://d/4", "Invoice 1042.pdf", now - 40 * 24 * HOUR, 310_000),
-                FolderFile("content://d/5", "Tax return 2025.pdf", now - 200 * 24 * HOUR, 5_200_000),
-            ),
-            sort = FolderSort.Date,
-        )
+    fun filesFolder() = capture("files_folder") { folder(name = "PDFs", files = sampleFolder, sort = FolderSort.Date) }
+
+    // The chosen folder is read again right after a turn: the spinner, not the Choose screen.
+    @Test
+    fun filesFolderLoading() {
+        show { folder(name = null, files = null, refreshing = true) }
+        // The refresh spinner never stops, so hold the clock at one moment before capturing.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.mainClock.advanceTimeBy(500)
+        captureRoot("files_folder_loading")
+    }
+
+    @Test
+    fun filesFolderNoPdfs() = capture("files_folder_no_pdfs") { folder(name = "Scans", files = emptyList()) }
+
+    @Test
+    fun filesFolderUnreadable() = capture("files_folder_unreadable") { folder(name = "PDFs", files = null, unreadable = true) }
+
+    @Test
+    fun filesFolderMenu() = capture("files_folder_menu") { folder(name = "PDFs", files = sampleFolder, menuFor = sampleFolder[1].uri) }
+
+    // A read-only folder grant: Rename and Delete are not offered.
+    @Test
+    fun filesFolderMenuReadOnly() = capture("files_folder_menu_read_only") {
+        folder(name = "PDFs", files = sampleFolder, menuFor = sampleFolder[1].uri, writable = false)
+    }
+
+    @Test
+    fun filesForgetFolderDialog() = capture("files_forget_folder_dialog") {
+        folder(name = "PDFs", files = sampleFolder)
+        ForgetFolderDialog(folderName = "PDFs", onForget = {}, onCancel = {})
     }
 
     @Test
@@ -626,7 +647,7 @@ class ScreenshotTest {
     fun filesDeleteDialog() = capture("files_delete_dialog") {
         shell(MainTab.Files) {
             FilesContent(emptyList(), sampleRecent, {}, {}, {}, {}, {}, modifier = it, onRename = {}, onDelete = {}, now = now)
-            DeleteDialog(name = sampleRecent[1].name, canDelete = true, onDelete = {}, onRemoveFromList = {}, onCancel = {})
+            DeleteDialog(name = sampleRecent[1].name, support = Support.Supported, onDelete = {}, onRemoveFromList = {}, onCancel = {})
         }
     }
 
@@ -635,7 +656,25 @@ class ScreenshotTest {
     fun filesDeleteUnsupportedDialog() = capture("files_delete_unsupported_dialog") {
         shell(MainTab.Files) {
             FilesContent(emptyList(), sampleRecent, {}, {}, {}, {}, {}, modifier = it, onRename = {}, onDelete = {}, now = now)
-            DeleteDialog(name = sampleRecent[1].name, canDelete = false, onDelete = {}, onRemoveFromList = {}, onCancel = {})
+            DeleteDialog(name = sampleRecent[1].name, support = Support.Unsupported, onDelete = {}, onRemoveFromList = {}, onCancel = {})
+        }
+    }
+
+    // The file is gone (moved, deleted, storage removed): the dialog says so and offers to only remove the entry.
+    @Test
+    fun filesDeleteGoneDialog() = capture("files_delete_gone_dialog") {
+        shell(MainTab.Files) {
+            FilesContent(emptyList(), sampleRecent, {}, {}, {}, {}, {}, modifier = it, onRename = {}, onDelete = {}, now = now)
+            DeleteDialog(name = sampleRecent[1].name, support = Support.Gone, onDelete = {}, onRemoveFromList = {}, onCancel = {})
+        }
+    }
+
+    // The provider is still being asked (off the main thread): Delete waits, disabled.
+    @Test
+    fun filesDeleteCheckingDialog() = capture("files_delete_checking_dialog") {
+        shell(MainTab.Files) {
+            FilesContent(emptyList(), sampleRecent, {}, {}, {}, {}, {}, modifier = it, onRename = {}, onDelete = {}, now = now)
+            DeleteDialog(name = sampleRecent[1].name, support = null, onDelete = {}, onRemoveFromList = {}, onCancel = {})
         }
     }
 
@@ -2305,12 +2344,30 @@ class ScreenshotTest {
         if (closing) UnsavedCloseDialog(onSave = {}, onDiscard = {}, onCancel = {}, stamps = stamps)
     }
 
+    private val sampleFolder = listOf(
+        FolderFile("content://d/1", "Bank statement September.pdf", now - 2 * HOUR, 182_000),
+        FolderFile("content://d/2", "Lease renewal 2027.pdf", now - 3 * 24 * HOUR, 1_450_000),
+        FolderFile("content://d/3", "Boarding pass.pdf", now - 12 * 24 * HOUR, 64_000),
+        FolderFile("content://d/4", "Invoice 1042.pdf", now - 40 * 24 * HOUR, 310_000),
+        FolderFile("content://d/5", "Tax return 2025.pdf", now - 200 * 24 * HOUR, 5_200_000),
+    )
+
     @Composable
-    private fun folder(name: String?, files: List<FolderFile>?, sort: FolderSort = FolderSort.Name) = shell(MainTab.Files) {
+    private fun folder(
+        name: String?,
+        files: List<FolderFile>?,
+        sort: FolderSort = FolderSort.Name,
+        unreadable: Boolean = false,
+        refreshing: Boolean = false,
+        menuFor: String? = null,
+        writable: Boolean = true,
+    ) = shell(MainTab.Files) {
+        val noop: (FolderFile) -> Unit = {}
         Scaffold(modifier = it, topBar = { FilesTopBar { FilesViewChips(FilesView.Folder, {}) } }) { padding ->
             FolderContent(
-                folderName = name, files = files, unreadable = false, refreshing = false, sort = sort,
+                folderName = name, files = files, unreadable = unreadable, refreshing = refreshing, sort = sort,
                 onSort = {}, onRefresh = {}, onChoose = {}, onForget = {}, onOpen = {}, modifier = Modifier.padding(padding),
+                onRename = noop.takeIf { writable }, onDelete = noop.takeIf { writable }, menuFor = menuFor,
             )
         }
     }
