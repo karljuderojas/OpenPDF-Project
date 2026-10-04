@@ -84,8 +84,10 @@ object SignatureFields {
      *
      * PDFTextStripper reports glyphs in the page's unrotated space, measured from the crop box's
      * top-left (x across, y down to the baseline; getXDirAdj and getYDirAdj for upright text).
-     * Each box is worked out there, turned into PDF space and then into display fractions with
-     * [pdfToDisplay], the same way as the form's own fields. Sideways text is skipped.
+     * Each box is worked out there, kept within the crop box, turned into PDF space and then into
+     * display fractions with [pdfToDisplay], the same way as the form's own fields. Sideways text
+     * is skipped. A page whose text or graphics cannot be replayed has no cues; the other pages
+     * keep theirs.
      */
     private fun textCues(document: PDDocument): List<Cue> {
         val glyphs = ArrayList<TextPosition>()
@@ -99,24 +101,33 @@ object SignatureFields {
             glyphs.clear()
             stripper.startPage = pageIndex + 1
             stripper.endPage = pageIndex + 1
-            stripper.getText(document)
+            if (runCatching { stripper.getText(document) }.isFailure) continue
             val page = document.getPage(pageIndex)
             val crop = page.cropBox.let { PdfRect(it.lowerLeftX, it.lowerLeftY, it.upperRightX, it.upperRightY) }
-            fun display(left: Float, top: Float, right: Float, bottom: Float) = pdfToDisplay(
-                PdfRect(crop.left + left, crop.top - bottom, crop.left + right, crop.top - top), page.rotation, crop,
-            )
+            // Null for a box that would lie off the page: one above the first line, or past the right margin.
+            fun display(left: Float, top: Float, right: Float, bottom: Float): DisplayRect? {
+                val l = left.coerceIn(0f, crop.width)
+                val r = right.coerceIn(0f, crop.width)
+                val t = top.coerceIn(0f, crop.height)
+                val b = bottom.coerceIn(0f, crop.height)
+                if (l >= r || t >= b) return null
+                return pdfToDisplay(PdfRect(crop.left + l, crop.top - b, crop.left + r, crop.top - t), page.rotation, crop)
+            }
             val pageLines = lines(glyphs)
-            val rules = RuleFinder(page).rules.map { Rule(it.left - crop.left, it.right - crop.left, crop.top - it.y) }
+            val rules = runCatching { RuleFinder(page).rules }.getOrDefault(emptyList())
+                .map { Rule(it.left - crop.left, it.right - crop.left, crop.top - it.y) }
             for (line in pageLines) {
                 val mention = line.mention() ?: continue
                 val first = line.glyphs.first()
                 val labelRight = line.glyphs.last().let { it.xDirAdj + it.widthDirAdj }
-                val after = lineAfter(line, labelRight, pageLines, rules)
+                val cue = line.cue()
+                val after = lineAfter(line, first.xDirAdj, labelRight, pageLines, rules, heading = cue == null)
                 // A bare "Signature" or a long sentence is a label after all when its row has a line to sign on.
-                val label = line.cue() ?: mention.takeIf { after != null } ?: continue
+                val label = cue ?: mention.takeIf { after != null } ?: continue
                 val labelTop = line.baseline - maxOf(first.heightDir, first.fontSizeInPt * 0.7f)
                 val onRow = line.underscoresAfter(label)?.let { (left, right) -> Rule(left, right, line.baseline) } ?: after
-                val box = if (onRow != null) {
+                // Parenthesised so a box that is off the page skips the cue whichever branch made it.
+                val box = (if (onRow != null) {
                     val bottom = maxOf(onRow.y, line.baseline) + 2f
                     val right = minOf(onRow.right, onRow.left + FIELD_WIDTH * 1.5f)
                     val height = roomAbove(glyphs, onRow.left, right, bottom, line.baseline - BASELINE_TOLERANCE).coerceAtLeast(MIN_FIELD_HEIGHT)
@@ -136,8 +147,9 @@ object SignatureFields {
                         val height = roomAbove(glyphs, leftAfter, rightAfter, bottomAfter, line.baseline - BASELINE_TOLERANCE).coerceAtLeast(MIN_FIELD_HEIGHT)
                         display(leftAfter, bottomAfter - height, rightAfter, bottomAfter)
                     }
-                }
-                cues += Cue(pageIndex, box, display(first.xDirAdj, labelTop, labelRight, line.baseline))
+                }) ?: continue
+                val labelBox = display(first.xDirAdj, labelTop, labelRight, line.baseline) ?: continue
+                cues += Cue(pageIndex, box, labelBox)
             }
         }
         return cues
@@ -189,6 +201,20 @@ object SignatureFields {
         fun underscoresAfter(cue: IntRange): Pair<Float, Float>? {
             val runs = UNDERSCORES.findAll(text).toList()
             val run = runs.firstOrNull { it.range.first > cue.last } ?: runs.lastOrNull() ?: return null
+            return extent(run)
+        }
+
+        /**
+         * The left and right of a run of underscores this line starts with (nothing but spaces
+         * before it), or null. A run after other words, as in "Date: ______", is that field's line.
+         */
+        fun leadingUnderscores(): Pair<Float, Float>? {
+            val run = UNDERSCORES.find(text) ?: return null
+            if (text.substring(0, run.range.first).isNotBlank()) return null
+            return extent(run)
+        }
+
+        private fun extent(run: MatchResult): Pair<Float, Float>? {
             val start = glyphAt[run.range.first] ?: return null
             val end = glyphAt[run.range.last] ?: return null
             return start.xDirAdj to end.xDirAdj + end.widthDirAdj
@@ -200,17 +226,23 @@ object SignatureFields {
 
     /**
      * The line to sign on further along [label]'s row, after [labelRight]: the nearest run of
-     * underscores in another piece of text on the same baseline, or the nearest drawn line
-     * sitting on that baseline. Null when the row has neither.
+     * underscores that starts another piece of text on the same baseline (one after other words,
+     * as "Date: ______" beside "Signature:", is that field's line), or the nearest drawn line
+     * sitting on that baseline. For a bare [heading] such as "Signature", a drawn line does not
+     * count when another drawn line at the same height runs under the heading itself, from
+     * [labelLeft]: those are a table's cell borders, not a line to sign on. Null when the row
+     * has nothing.
      */
-    private fun lineAfter(label: Line, labelRight: Float, lines: List<Line>, rules: List<Rule>): Rule? {
+    private fun lineAfter(label: Line, labelLeft: Float, labelRight: Float, lines: List<Line>, rules: List<Rule>, heading: Boolean): Rule? {
         val size = label.glyphs.first().fontSizeInPt
         val typed = lines.asSequence()
             .filter { it !== label && abs(it.baseline - label.baseline) <= BASELINE_TOLERANCE }
-            .mapNotNull { other -> other.underscoresAfter(-1..-1)?.let { (left, right) -> Rule(left, right, other.baseline) } }
-        val drawn = rules.asSequence()
-            .filter { it.y in label.baseline - size * 0.4f..label.baseline + size * 0.6f + 2f }
-        return (typed + drawn)
+            .mapNotNull { other -> other.leadingUnderscores()?.let { (left, right) -> Rule(left, right, other.baseline) } }
+        val onRow = rules.filter { it.y in label.baseline - size * 0.4f..label.baseline + size * 0.6f + 2f }
+        val drawn = if (!heading) onRow else onRow.filter { candidate ->
+            onRow.none { it !== candidate && abs(it.y - candidate.y) <= 1f && it.left < labelRight && it.right > labelLeft }
+        }
+        return (typed + drawn.asSequence())
             .filter { it.left >= labelRight - 2f && it.left - labelRight <= MAX_REACH }
             .minByOrNull { it.left }
     }

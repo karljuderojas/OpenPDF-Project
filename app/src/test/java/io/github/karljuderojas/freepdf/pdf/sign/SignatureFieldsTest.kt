@@ -5,8 +5,11 @@ import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.PDResources
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.common.PDStream
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
+import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotation
 import com.tom_roush.pdfbox.pdmodel.interactive.digitalsignature.PDSignature
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDAcroForm
@@ -16,6 +19,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.ByteArrayInputStream
 
 /** Finding the places to sign. Runs under Robolectric so FreePdfApp initialises PdfBox-Android's resources. */
 @RunWith(AndroidJUnit4::class)
@@ -132,6 +136,108 @@ class SignatureFieldsTest {
             // "Signature:" in 10 pt Helvetica ends about 117 pt across; the box starts after it, on its row.
             assertTrue("after the label: $box", box.left > 117f / 612f)
             assertEquals((792f - 400f + 2f) / 792f, box.bottom, 0.004f)
+        }
+    }
+
+    @Test
+    fun theDateFieldsLineOnTheSameRowIsNotTheSignaturesLine() {
+        PDDocument().use { document ->
+            val page = PDPage(PDRectangle.LETTER)
+            document.addPage(page)
+            // "Signature:" with its own line drawn or typed elsewhere, and the date field sharing its row.
+            text(document, page, 72f, 400f, "Signature:")
+            text(document, page, 300f, 400f, "Date: ______________")
+            val fields = SignatureFields.find(document)
+            assertEquals(fields.toString(), 1, fields.size)
+            val box = fields.single().box
+            // Above the label, as before there was a row search, not on the date's underscores at 330 pt across.
+            assertEquals(72f / 612f, box.left, 0.005f)
+            assertEquals(272f / 612f, box.right, 0.005f)
+            assertTrue("above the label: $box", box.bottom < (792f - 400f) / 792f)
+        }
+    }
+
+    @Test
+    fun aRunOfUnderscoresStartingItsOwnTextIsStillTheLine() {
+        PDDocument().use { document ->
+            val page = PDPage(PDRectangle.LETTER)
+            document.addPage(page)
+            text(document, page, 72f, 400f, "Signature:")
+            text(document, page, 170f, 400f, "____________________ (sign in ink)")
+            val fields = SignatureFields.find(document)
+            assertEquals(fields.toString(), 1, fields.size)
+            assertEquals(170f / 612f, fields.single().box.left, 0.005f)
+        }
+    }
+
+    @Test
+    fun aTableHeadingNamedSignatureIsNotRevivedByTheNextCellsBorder() {
+        PDDocument().use { document ->
+            val page = PDPage(PDRectangle.LETTER)
+            document.addPage(page)
+            // A sign-in sheet's header row, with the bottom border of each cell drawn as its own thin rectangle.
+            text(document, page, 72f, 700f, "Name")
+            text(document, page, 250f, 700f, "Signature")
+            text(document, page, 430f, 700f, "Date")
+            PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true).use { stream ->
+                listOf(60f to 240f, 240f to 420f, 420f to 600f).forEach { (left, right) ->
+                    stream.addRect(left, 694f, right - left, 0.5f)
+                    stream.fill()
+                }
+            }
+            assertEquals(SignatureFields.find(document).toString(), 0, SignatureFields.find(document).size)
+        }
+    }
+
+    @Test
+    fun aBareSignatureHeadingWithOnlyALineAfterItIsALabel() {
+        PDDocument().use { document ->
+            val page = PDPage(PDRectangle.LETTER)
+            document.addPage(page)
+            text(document, page, 72f, 400f, "Signature")
+            PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true).use { stream ->
+                stream.moveTo(170f, 398f)
+                stream.lineTo(420f, 398f)
+                stream.stroke()
+            }
+            val fields = SignatureFields.find(document)
+            assertEquals(fields.toString(), 1, fields.size)
+            assertEquals(170f / 612f, fields.single().box.left, 0.005f)
+        }
+    }
+
+    @Test
+    fun aPageWhoseGraphicsCannotBeReplayedLosesOnlyItsOwnCues() {
+        PDDocument().use { document ->
+            val page = PDPage(PDRectangle.LETTER)
+            document.addPage(page)
+            text(document, page, 72f, 400f, "Signature: ____________________")
+            // A form whose /BBox is not an array makes PdfBox's content engines throw while drawing it.
+            val broken = PDPage(PDRectangle.LETTER)
+            document.addPage(broken)
+            val form = PDFormXObject(PDStream(document, ByteArrayInputStream("0 0 m 100 0 l S".toByteArray())))
+            form.cosObject.setInt(COSName.BBOX, 5)
+            broken.resources = PDResources().also { it.put(COSName.getPDFName("Fx"), form) }
+            broken.setContents(PDStream(document, ByteArrayInputStream("q /Fx Do Q".toByteArray())))
+            val fields = SignatureFields.find(document)
+            assertEquals(fields.toString(), 1, fields.size)
+            assertEquals(0, fields.single().page)
+        }
+    }
+
+    @Test
+    fun aLineAtTheTopOfThePageKeepsItsBoxOnThePage() {
+        PDDocument().use { document ->
+            val page = PDPage(PDRectangle.LETTER)
+            document.addPage(page)
+            // 7 pt from the top: the usual 36 pt box would reach above the page.
+            text(document, page, 72f, 785f, "Signature: ____________________")
+            val fields = SignatureFields.find(document)
+            assertEquals(fields.toString(), 1, fields.size)
+            val box = fields.single().box
+            assertTrue(box.toString(), box.top >= 0f)
+            assertEquals(9f / 792f, box.bottom, 0.004f)
+            assertTrue("still has a height: $box", box.bottom > box.top)
         }
     }
 
