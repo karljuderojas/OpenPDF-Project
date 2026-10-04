@@ -4,7 +4,19 @@ import android.net.Uri
 import android.text.format.DateUtils
 import android.text.format.Formatter
 import androidx.compose.foundation.clickable
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import io.github.karljuderojas.freepdf.files.DeleteResult
+import io.github.karljuderojas.freepdf.files.FileActions
+import io.github.karljuderojas.freepdf.files.RenameResult
+import io.github.karljuderojas.freepdf.share.Sharing
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -83,6 +95,17 @@ fun FolderScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
         refreshing = false
     }
 
+    val documents = (context.applicationContext as FreePdfApp).documents
+    val sessions = (context.applicationContext as FreePdfApp).sessions
+    var renaming by remember { mutableStateOf<FolderFile?>(null) }
+    var deleting by remember { mutableStateOf<FolderFile?>(null) }
+    // A file open here with unsaved changes is left alone, like in the Recent view.
+    fun blockedByUnsaved(file: FolderFile): Boolean {
+        val blocked = sessions.get(file.uri)?.hasUnsavedChanges == true
+        if (blocked) Toast.makeText(context, context.getString(R.string.file_has_unsaved_changes, file.name), Toast.LENGTH_LONG).show()
+        return blocked
+    }
+
     FolderContent(
         folderName = listing?.name,
         files = listing?.files,
@@ -94,8 +117,73 @@ fun FolderScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
         onChoose = { pick.launch(null) },
         onForget = { store.forget(context) },
         onOpen = { onOpenPdf(Uri.parse(it.uri)) },
+        onShare = { file ->
+            runCatching { Sharing.shareUri(context, Uri.parse(file.uri), file.name) }
+                .onFailure { Toast.makeText(context, R.string.share_failed, Toast.LENGTH_SHORT).show() }
+        },
+        onRename = { if (!blockedByUnsaved(it)) renaming = it },
+        onDelete = { if (!blockedByUnsaved(it)) deleting = it },
         modifier = modifier,
     )
+
+    renaming?.let { file ->
+        var error by remember(file.uri) { mutableStateOf<Int?>(null) }
+        RenameDialog(
+            currentName = file.name,
+            error = error,
+            onConfirm = { typed ->
+                val name = FileActions.cleanName(typed)
+                when {
+                    name == null -> error = R.string.rename_invalid
+                    name == file.name -> renaming = null
+                    blockedByUnsaved(file) -> renaming = null
+                    else -> scope.launch {
+                        when (val result = withContext(Dispatchers.IO) { FileActions.rename(context, Uri.parse(file.uri), name) }) {
+                            is RenameResult.Renamed -> {
+                                renaming = null
+                                sessions.close(file.uri)
+                                documents.renamed(file.uri, result.uri.toString(), result.name)
+                                if (!result.persisted) documents.forget(result.uri.toString())
+                                Toast.makeText(context, context.getString(R.string.renamed_toast, result.name), Toast.LENGTH_SHORT).show()
+                                reload++
+                            }
+                            RenameResult.Unsupported -> error = R.string.rename_unsupported
+                            RenameResult.Failed -> error = R.string.rename_failed
+                        }
+                    }
+                }
+            },
+            onCancel = { renaming = null },
+        )
+    }
+
+    deleting?.let { file ->
+        val uri = Uri.parse(file.uri)
+        val canDelete = remember(file.uri) { FileActions.canDelete(context, uri) }
+        DeleteDialog(
+            name = file.name,
+            canDelete = canDelete,
+            onDelete = {
+                deleting = null
+                if (blockedByUnsaved(file)) return@DeleteDialog
+                scope.launch {
+                    when (withContext(Dispatchers.IO) { FileActions.delete(context, uri) }) {
+                        DeleteResult.Deleted -> {
+                            documents.close(file.uri)
+                            documents.forget(file.uri)
+                            Toast.makeText(context, context.getString(R.string.deleted_toast, file.name), Toast.LENGTH_SHORT).show()
+                            reload++
+                        }
+                        DeleteResult.Unsupported, DeleteResult.Failed ->
+                            Toast.makeText(context, R.string.delete_failed, Toast.LENGTH_LONG).show()
+                    }
+                }
+            },
+            // There is no list to take it off here: the folder shows whatever is in it.
+            onRemoveFromList = { deleting = null },
+            onCancel = { deleting = null },
+        )
+    }
 }
 
 /**
@@ -116,6 +204,9 @@ fun FolderContent(
     onForget: () -> Unit,
     onOpen: (FolderFile) -> Unit,
     modifier: Modifier = Modifier,
+    onShare: (FolderFile) -> Unit = {},
+    onRename: (FolderFile) -> Unit = {},
+    onDelete: (FolderFile) -> Unit = {},
 ) {
     if (files == null && !unreadable && folderName == null && !refreshing) {
         NoFolder(onChoose, modifier)
@@ -147,7 +238,7 @@ fun FolderContent(
                 unreadable -> Message(stringResource(R.string.folder_unreadable))
                 files != null && sorted.isEmpty() -> Message(stringResource(R.string.folder_no_pdfs))
                 else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-                    items(sorted, key = { it.uri }) { FolderRow(it, onOpen) }
+                    items(sorted, key = { it.uri }) { FolderRow(it, onOpen, onShare, onRename, onDelete) }
                 }
             }
         }
@@ -182,8 +273,15 @@ private fun NoFolder(onChoose: () -> Unit, modifier: Modifier) {
 }
 
 @Composable
-private fun FolderRow(file: FolderFile, onOpen: (FolderFile) -> Unit) {
+private fun FolderRow(
+    file: FolderFile,
+    onOpen: (FolderFile) -> Unit,
+    onShare: (FolderFile) -> Unit,
+    onRename: (FolderFile) -> Unit,
+    onDelete: (FolderFile) -> Unit,
+) {
     val context = LocalContext.current
+    var menu by remember { mutableStateOf(false) }
     val details = listOfNotNull(
         file.modified.takeIf { it > 0 }?.let { DateUtils.formatDateTime(context, it, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_ABBREV_MONTH or DateUtils.FORMAT_SHOW_YEAR) },
         file.size.takeIf { it > 0 }?.let { Formatter.formatShortFileSize(context, it) },
@@ -197,6 +295,19 @@ private fun FolderRow(file: FolderFile, onOpen: (FolderFile) -> Unit) {
             Text(file.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (details.isNotEmpty()) {
                 Text(details, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Box {
+            IconButton(onClick = { menu = true }) {
+                Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.more_actions, file.name))
+            }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text(stringResource(R.string.tool_share)) }, onClick = { menu = false; onShare(file) })
+                DropdownMenuItem(text = { Text(stringResource(R.string.rename_file)) }, onClick = { menu = false; onRename(file) })
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.delete_file), color = MaterialTheme.colorScheme.error) },
+                    onClick = { menu = false; onDelete(file) },
+                )
             }
         }
     }

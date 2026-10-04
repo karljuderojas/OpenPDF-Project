@@ -52,6 +52,7 @@ import io.github.karljuderojas.freepdf.pdf.edit.TextEditing
 import io.github.karljuderojas.freepdf.pdf.edit.WatermarkStyle
 import io.github.karljuderojas.freepdf.pdf.edit.Watermarks
 import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
+import io.github.karljuderojas.freepdf.pdf.redact.RedactFill
 import io.github.karljuderojas.freepdf.pdf.redact.Redactor
 import io.github.karljuderojas.freepdf.pdf.render.OutlineItem
 import io.github.karljuderojas.freepdf.pdf.render.PageBox
@@ -135,6 +136,8 @@ sealed interface ViewerState {
         val hasSignature: Boolean = false,
         val outline: List<OutlineItem> = emptyList(),
         val isProtected: Boolean = false,
+        /** What the PDF's permissions hold back (print, copy, edit...); empty if nothing is restricted. */
+        val restrictions: List<PdfDocuments.Restriction> = emptyList(),
         val formFields: List<FormField> = emptyList(),
         val signFields: List<SignField> = emptyList(),
         val signedFields: Set<Int> = emptySet(),
@@ -291,12 +294,8 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
         set(value) = keep(KEY_PENDING_EXTRACT, value?.toIntArray())
 
     private var pendingRedaction: List<RedactBox>?
-        get() = handle.get<FloatArray>(KEY_PENDING_REDACTION)?.toList()?.chunked(5)
-            ?.map { (page, left, top, right, bottom) -> RedactBox(page.toInt(), Rect(left, top, right, bottom)) }
-        set(value) = keep(
-            KEY_PENDING_REDACTION,
-            value?.flatMap { listOf(it.page.toFloat(), it.rect.left, it.rect.top, it.rect.right, it.rect.bottom) }?.toFloatArray(),
-        )
+        get() = handle.get<FloatArray>(KEY_PENDING_REDACTION)?.toList()?.let(::unflattenRedactBoxes)
+        set(value) = keep(KEY_PENDING_REDACTION, value?.let(::flattenRedactBoxes)?.toFloatArray())
 
     // Each part as its length followed by its pages.
     private var pendingSplit: List<List<Int>>?
@@ -571,6 +570,11 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
         } else {
             PageCrop.crop(it, pages, margins)
         }
+    }
+
+    /** Trims each page in [margins] by its own margins. */
+    fun trimMargins(margins: Map<Int, CropMargins>) = edit(movesPages = true) { document ->
+        margins.forEach { (page, trim) -> PageCrop.crop(document, listOf(page), trim) }
     }
 
     /** Adds a link over [box] on [page] (fractions of the page as shown) that leads to [target]. */
@@ -1265,7 +1269,7 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
                             var redacted: Redactor.Result? = null
                             SafeWrite.write(context, target) { out ->
                                 PDDocument.load(current.workingFile, current.password).use { document ->
-                                    redacted = Redactor.redact(document, redactAreas(document, boxes)) { page, of ->
+                                    redacted = Redactor.redact(document, redactAreas(document, boxes), redactFills(boxes)) { page, of ->
                                         _redacting.value = RedactProgress(page, of)
                                     }
                                     PdfDocuments.keepProtection(document, current.password)
@@ -1317,6 +1321,10 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
                 }
             }
         }
+
+    /** The box colour of each area [redactAreas] gives, in the same order. */
+    private fun redactFills(boxes: List<RedactBox>): Map<Int, List<RedactFill>> =
+        boxes.groupBy { it.page }.mapValues { (_, onPage) -> onPage.map { it.fill } }
 
     fun cancelRedaction() {
         pendingRedaction = null
@@ -1382,6 +1390,20 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
             else -> R.string.password_added
         }
         update(done = done) { it.setPassword(password) }
+    }
+
+    /**
+     * Lifts the PDF's restrictions (and password) when [ownerPassword] is its owner password, as one
+     * undo step. [onResult] gets false, and nothing changes, for any other password.
+     */
+    fun removeRestrictions(ownerPassword: String, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val isOwner = lock.withLock {
+                withContext(Dispatchers.IO) { session?.let { PdfDocuments.isOwnerPassword(it.workingFile, ownerPassword) } == true }
+            }
+            if (!isOwner) return@launch onResult(false)
+            update(done = R.string.restrictions_removed, onDone = { onResult(it != null) }) { it.removeRestrictions(ownerPassword) }
+        }
     }
 
     /** Reads the details of the PDF as it is now, unsaved changes included, for Document info. */
@@ -1671,6 +1693,9 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
             }.getOrDefault(Triple(emptyList<FormField>(), emptyList<SignatureAnnotation.Placed>(), emptyList<PageLink>()))
         }
         val outline = runCatching { next.outline() }.getOrDefault(emptyList())
+        val restrictions = withContext(Dispatchers.IO) {
+            runCatching { PdfDocuments.restrictions(current.workingFile, current.password) }.getOrDefault(emptyList())
+        }
         // Likewise, a document whose text cannot be read just has no places to sign.
         val places = signFields ?: withContext(Dispatchers.IO) {
             runCatching { PDDocument.load(current.workingFile, current.password).use { SignatureFields.find(it) } }.getOrDefault(emptyList())
@@ -1678,7 +1703,7 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
         val signed = places.indices.filter { i -> placedSignatures.any { places[i].covers(it.page, it.x, it.y) } }.toSet()
         return ViewerState.Ready(
             next.pageSizes, revision, current.canUndo, current.canRedo, current.hasUnsavedChanges, hasSignature, outline,
-            isProtected = current.password.isNotEmpty(), formFields = formFields, signFields = places, signedFields = signed,
+            isProtected = current.password.isNotEmpty(), restrictions = restrictions, formFields = formFields, signFields = places, signedFields = signed,
             signatures = signatures, failedPageEdits = failedPageEdits, redactionsSaved = redactionsSaved,
             links = links,
         )

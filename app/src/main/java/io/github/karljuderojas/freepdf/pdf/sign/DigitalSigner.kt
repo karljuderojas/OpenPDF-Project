@@ -24,7 +24,7 @@ import java.util.Calendar
 
 /**
  * Applies a standard PDF digital signature (detached PKCS#7 / CMS over the byte range), the kind
- * Acrobat shows in its signature panel. Any change to the file after signing breaks it, which is
+ * desktop PDF readers show in their signature panels. Any change to the file after signing breaks it, which is
  * what makes the signed document tamper-evident.
  *
  * With a [timestamps] client, the signature also carries an RFC 3161 timestamp, which proves when
