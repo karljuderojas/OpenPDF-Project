@@ -1704,7 +1704,7 @@ fun ViewerContent(
             onDismiss = { pendingTextNote = null },
             onAdd = { text ->
                 pendingTextNote = null
-                // A note on text is a highlight carrying the note, as Acrobat and others make it.
+                // A note on text is a highlight carrying the note, as most PDF readers make it.
                 onAction(ViewerAction.MarkLines(page, AnnotateTool.Highlight, styleOf(AnnotateTool.Highlight), lines, text))
             },
         )

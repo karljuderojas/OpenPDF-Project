@@ -1694,6 +1694,48 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_watermark_picture.png")
     }
 
+    // The words are the user's own, typed over a preset; the row offers them next to the presets.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesWatermarkCustomText() {
+        var open by mutableStateOf(false)
+        show {
+            viewer(ViewerMode.Pages, sixPages, selectedPage = 1)
+            if (open) {
+                WatermarkDialog(
+                    pageCount = 6, selectedPages = listOf(1), pageAspect = 612f / 792f, image = null,
+                    onChooseImage = {}, onDismiss = {}, onWatermark = { _, _, _, _ -> }, onRemove = {},
+                    initialText = "FOR REVIEW ONLY",
+                )
+            }
+        }
+        composeRule.mainClock.autoAdvance = false
+        open = true
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_watermark_custom_text.png")
+    }
+
+    // A ready-made word chosen: the chip is marked and the field and the sketch show the word.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesWatermarkPresetSample() {
+        var open by mutableStateOf(false)
+        show {
+            viewer(ViewerMode.Pages, sixPages, selectedPage = 1)
+            if (open) {
+                WatermarkDialog(
+                    pageCount = 6, selectedPages = listOf(1), pageAspect = 612f / 792f, image = null,
+                    onChooseImage = {}, onDismiss = {}, onWatermark = { _, _, _, _ -> }, onRemove = {},
+                    initialText = "SAMPLE",
+                )
+            }
+        }
+        composeRule.mainClock.autoAdvance = false
+        open = true
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_watermark_preset_sample.png")
+    }
+
     // Text the fonts cannot show: the field is in error and Add is disabled. The text field never
     // lets Compose go idle, so the dialog opens only once the clock is driven by hand.
     @OptIn(ExperimentalRoborazziApi::class)

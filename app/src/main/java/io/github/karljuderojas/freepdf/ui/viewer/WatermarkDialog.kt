@@ -19,7 +19,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,6 +41,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -51,6 +53,7 @@ import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.edit.PageRanges
 import io.github.karljuderojas.freepdf.pdf.edit.PdfText
 import io.github.karljuderojas.freepdf.pdf.edit.WatermarkStyle
+import io.github.karljuderojas.freepdf.settings.AppSettings
 import kotlin.math.roundToInt
 
 private val Gray = Annotator.Rgb(0.5f, 0.5f, 0.5f)
@@ -65,7 +68,7 @@ private val swatches = listOf(
     Swatch(Black, R.string.watermark_color_black),
 )
 
-private val suggestions = listOf("CONFIDENTIAL", "DRAFT", "COPY", "DO NOT COPY")
+private val presets = listOf("CONFIDENTIAL", "DRAFT", "COPY", "SAMPLE", "DO NOT COPY")
 
 /**
  * Asks what to stamp across the pages: text, or a picture from [image] (chosen with
@@ -73,7 +76,9 @@ private val suggestions = listOf("CONFIDENTIAL", "DRAFT", "COPY", "DO NOT COPY")
  * all of them. A sketch of the page shows the text as it will come out. [onWatermark] gets the
  * zero-based pages, the text, the picture if that is what was chosen, and the look. [onRemove]
  * gets the pages whose watermarks (the ones added with this app) should come off instead.
- * [initialText] and [initialPicture] are what the dialog starts with.
+ * Tapping a ready-made word fills the text field, which can then be edited; words typed that are
+ * not one of those are remembered and offered as a chip next time. [initialText] (the remembered
+ * words, when there are some) and [initialPicture] are what the dialog starts with.
  */
 @Composable
 fun WatermarkDialog(
@@ -85,11 +90,14 @@ fun WatermarkDialog(
     onDismiss: () -> Unit,
     onWatermark: (Set<Int>, String, Uri?, WatermarkStyle) -> Unit,
     onRemove: (Set<Int>) -> Unit,
-    initialText: String = "CONFIDENTIAL",
+    initialText: String? = null,
     initialPicture: Boolean = false,
 ) {
+    val prefs = LocalContext.current.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+    val remembered = remember { AppSettings.lastWatermarkText(prefs) }
+    val customChips = listOfNotNull(remembered?.takeIf { it !in presets })
     var picture by rememberSaveable { mutableStateOf(initialPicture) }
-    var text by rememberSaveable { mutableStateOf(initialText) }
+    var text by rememberSaveable { mutableStateOf(initialText ?: remembered ?: presets.first()) }
     var opacity by rememberSaveable { mutableFloatStateOf(0.3f) }
     var angle by rememberSaveable { mutableFloatStateOf(45f) }
     var size by rememberSaveable { mutableFloatStateOf(0.7f) }
@@ -134,7 +142,9 @@ fun WatermarkDialog(
                         modifier = Modifier.fillMaxWidth().testTag("watermark-text"),
                     )
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        suggestions.forEach { AssistChip(onClick = { text = it }, label = { Text(it) }) }
+                        (customChips + presets).forEach {
+                            FilterChip(selected = text == it, onClick = { text = it }, label = { Text(it) }, modifier = Modifier.testTag("watermark-preset-$it"))
+                        }
                     }
                 }
                 Sketch(if (picture) "" else text, style, pageAspect, Modifier.padding(vertical = 8.dp))
@@ -173,7 +183,10 @@ fun WatermarkDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onWatermark(pages, text.trim(), if (picture) image else null, style) },
+                onClick = {
+                    if (!picture && text.trim() !in presets) AppSettings.setLastWatermarkText(prefs, text.trim())
+                    onWatermark(pages, text.trim(), if (picture) image else null, style)
+                },
                 enabled = ready && style.isValid,
             ) { Text(stringResource(R.string.watermark_apply)) }
         },
