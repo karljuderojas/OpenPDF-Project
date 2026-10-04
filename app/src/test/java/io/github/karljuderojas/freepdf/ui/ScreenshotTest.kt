@@ -63,6 +63,7 @@ import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
 import io.github.karljuderojas.freepdf.pdf.DisplayRect
+import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
 import io.github.karljuderojas.freepdf.pdf.links.LinkTarget
 import io.github.karljuderojas.freepdf.pdf.links.PageLink
