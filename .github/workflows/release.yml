@@ -35,12 +35,17 @@ jobs:
         if: env.HAS_KEY == 'true'
         env:
           KEYSTORE_BASE64: ${{ secrets.FREEPDF_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.FREEPDF_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.FREEPDF_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.FREEPDF_KEY_PASSWORD }}
         run: |
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-          echo "FREEPDF_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
-          echo "FREEPDF_KEYSTORE_PASSWORD=${{ secrets.FREEPDF_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
-          echo "FREEPDF_KEY_ALIAS=${{ secrets.FREEPDF_KEY_ALIAS }}" >> "$GITHUB_ENV"
-          echo "FREEPDF_KEY_PASSWORD=${{ secrets.FREEPDF_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+          {
+            echo "FREEPDF_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore"
+            echo "FREEPDF_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "FREEPDF_KEY_ALIAS=$KEY_ALIAS"
+            echo "FREEPDF_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
       - name: Build the release APK
         run: ./gradlew assembleRelease -PappVersionName="$VERSION" -PappVersionCode="${{ github.run_number }}"
       - name: Name the APK
@@ -61,7 +66,7 @@ jobs:
           if [ "$HAS_KEY" = "true" ]; then
             note="Signed with the FreePDF release key."
           else
-            note="This build is signed with a test key, not the project's own release key. It installs normally, but a later release signed with the real key will need this one uninstalled first."
+            note="This build is signed with a test key, not the project's own release key. Android will not install one test-key version over another, so uninstall the old version first (this clears the app's saved data; export anything you need first). A release signed with the real key will also need the old one uninstalled once."
           fi
           gh release create "v$VERSION" dist/* --target "$GITHUB_SHA" --title "FreePDF $VERSION" \
             --notes "Download **FreePDF-$VERSION.apk** below and open it on your phone. See the [install steps](https://github.com/${{ github.repository }}#install-on-your-phone). $note"

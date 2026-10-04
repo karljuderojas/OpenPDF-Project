@@ -13,7 +13,7 @@ On that page, tap the file ending in `.apk` under **Assets** to download it.
 1. Open the download page above in your phone's browser and tap the `.apk` file.
 2. Android will ask whether you allow installs from this source (your browser or Files app). Tap **Settings**, switch on **Allow from this source**, then go back.
 3. Tap **Install**. If Play Protect shows a warning, choose **Install anyway**: FreePDF is not on the Play Store, so Android has not seen it before.
-4. Open FreePDF. To update later, install the newer file the same way; your documents stay where they are.
+4. Open FreePDF. Early versions are signed with a temporary test key, so to update, uninstall the old version first and then install the new file. Uninstalling clears the app's saved signatures and settings, but not your PDF files.
 
 You need Android 8.0 or newer.
 
@@ -112,7 +112,7 @@ Requires JDK 21 (Robolectric screenshot tests need it) and the Android SDK (API 
 ./gradlew testDebugUnitTest      # unit tests
 ```
 
-Or open the project in Android Studio. CI builds a debug APK on every push and pull request.
+Or open the project in Android Studio. CI builds and tests the app on every pull request and keeps a debug APK for each push to main.
 
 ### Releasing
 
