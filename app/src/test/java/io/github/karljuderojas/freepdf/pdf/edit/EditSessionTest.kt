@@ -111,6 +111,7 @@ class EditSessionTest {
     @Test
     fun restrictionsComeOffOnlyWithTheOwnerPassword() {
         val restricted = File(dir, "restricted.pdf")
+        val pageCount = PDDocument.load(session.workingFile).use { it.numberOfPages }
         PDDocument.load(session.workingFile).use { document ->
             val permissions = AccessPermission().apply { setCanPrint(false); setCanExtractContent(false); setCanModify(false) }
             document.protect(StandardProtectionPolicy("owner-secret", "", permissions).apply { encryptionKeyLength = 128 })
@@ -133,7 +134,7 @@ class EditSessionTest {
             restrictedSession.removeRestrictions("owner-secret")
             PDDocument.load(restrictedSession.workingFile).use {
                 assertFalse(it.isEncrypted)
-                assertEquals(1, it.numberOfPages)
+                assertEquals(pageCount, it.numberOfPages)
             }
             assertTrue(PdfDocuments.restrictions(restrictedSession.workingFile, "").isEmpty())
 
