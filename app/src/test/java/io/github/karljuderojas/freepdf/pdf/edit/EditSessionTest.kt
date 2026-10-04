@@ -293,5 +293,70 @@ class EditSessionTest {
         }
     }
 
+    @Test
+    fun theOwnerPasswordStillLiftsRestrictionsAfterAnEdit() {
+        // Edits re-encrypt the working copy under a random owner password; the typed one is checked against the original.
+        val restricted = File(dir, "restricted.pdf")
+        PDDocument.load(session.workingFile).use { document ->
+            val permissions = AccessPermission().apply { setCanPrint(false); setCanModify(false) }
+            document.protect(StandardProtectionPolicy("owner-secret", "", permissions).apply { encryptionKeyLength = 128 })
+            document.save(restricted)
+        }
+        val restrictedSession = EditSession(File(dir, "restricted-session"), restricted.inputStream())
+        try {
+            restrictedSession.edit { PageEditor.rotate(it, 0, 90) }
+            restrictedSession.edit { PageEditor.insertBlank(it, 1) }
+            assertFalse(PdfDocuments.isOwnerPassword(restrictedSession.workingFile, "owner-secret"))
+            assertTrue(restrictedSession.isOwnerPassword("owner-secret"))
+            assertFalse(restrictedSession.isOwnerPassword("guess"))
+            assertThrows(EditSession.WrongOwnerPassword::class.java) { restrictedSession.removeRestrictions("guess") }
+
+            restrictedSession.removeRestrictions("owner-secret")
+            PDDocument.load(restrictedSession.workingFile).use {
+                assertFalse(it.isEncrypted)
+                assertEquals(3, it.numberOfPages)
+                assertEquals(90, it.getPage(0).rotation)
+            }
+            // The edits before it are their own undo steps still.
+            restrictedSession.undo()
+            assertTrue(PdfDocuments.restrictions(restrictedSession.workingFile, "").contains(PdfDocuments.Restriction.Print))
+            restrictedSession.undo()
+            assertEquals(2, PDDocument.load(restrictedSession.workingFile).use { it.numberOfPages })
+        } finally {
+            restrictedSession.close()
+        }
+    }
+
+    @Test
+    fun restrictionsSetWithAnEmptyOwnerPasswordAreListedAndComeOffWithIt() {
+        // qpdf --encrypt "" "" and pypdf without an owner password make such files: PdfBox opens them as
+        // owner, other viewers as user, so the /P flags still count and the open password lifts them.
+        val restricted = File(dir, "restricted.pdf")
+        PDDocument.load(session.workingFile).use { document ->
+            val permissions = AccessPermission().apply { setCanPrint(false) }
+            document.protect(StandardProtectionPolicy("", "", permissions).apply { encryptionKeyLength = 128 })
+            document.save(restricted)
+        }
+        val restrictedSession = EditSession(File(dir, "restricted-session"), restricted.inputStream())
+        try {
+            assertEquals(listOf(PdfDocuments.Restriction.Print), PdfDocuments.restrictions(restrictedSession.workingFile, ""))
+            assertTrue(restrictedSession.isOwnerPassword(""))
+            assertFalse(restrictedSession.isOwnerPassword("guess"))
+
+            restrictedSession.removeRestrictions("")
+            PDDocument.load(restrictedSession.workingFile).use { assertFalse(it.isEncrypted) }
+            assertTrue(PdfDocuments.restrictions(restrictedSession.workingFile, "").isEmpty())
+        } finally {
+            restrictedSession.close()
+        }
+    }
+
+    @Test
+    fun theOwnerCheckIsFalseNotAnErrorForAFileThatCannotBeRead() {
+        val broken = File(dir, "broken.pdf").apply { writeText("not a pdf at all") }
+        assertFalse(PdfDocuments.isOwnerPassword(broken, "owner-secret"))
+        assertFalse(PdfDocuments.isOwnerPassword(File(dir, "missing.pdf"), "owner-secret"))
+    }
+
     private fun pageCount() = PDDocument.load(session.workingFile).use { it.numberOfPages }
 }

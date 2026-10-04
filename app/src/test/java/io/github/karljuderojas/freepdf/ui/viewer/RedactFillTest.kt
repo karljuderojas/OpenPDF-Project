@@ -46,4 +46,13 @@ class RedactFillTest {
         val boxes = listOf(RedactBox(0, Rect(0.1f, 0.2f, 0.3f, 0.4f)), RedactBox(2, Rect(0.5f, 0.5f, 0.6f, 0.6f), RedactFill.White))
         assertEquals(boxes, unflattenRedactBoxes(flattenRedactBoxes(boxes)))
     }
+
+    @Test
+    fun anUndecidedAutoMarkStaysUndecidedAcrossSavedStateAndShowsAsBlack() {
+        // A rotation while Auto is still looking at the page must not leave the mark black for good.
+        val undecided = RedactBox(1, Rect(0.1f, 0.2f, 0.3f, 0.4f), fill = null)
+        assertEquals(listOf(undecided), unflattenRedactBoxes(flattenRedactBoxes(listOf(undecided))))
+        assertEquals(RedactFill.Black, undecided.shownFill)
+        assertEquals(RedactFill.White, undecided.copy(fill = RedactFill.White).shownFill)
+    }
 }

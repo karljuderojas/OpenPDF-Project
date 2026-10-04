@@ -31,13 +31,24 @@ import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments.Restriction
 
 /**
  * The More mode's Restrictions tool: lists what the PDF's permissions hold back, and, if any
- * apply, asks for the owner password to lift them. [onRemove] gets the password and a callback
- * to run if it turns out not to be the owner password; the caller closes the dialog on success.
+ * apply, asks for the owner password to lift them. [restrictions] is null when the PDF's
+ * permissions could not be read. With [openedAsOwner] the password the PDF opened with is
+ * already its owner password, so they come off without asking: [onRemove] then gets null.
+ * Otherwise [onRemove] gets the typed password and a callback to run if it turns out not to be
+ * the owner password; the caller closes the dialog on success. [signed] adds a word that an
+ * existing digital signature will no longer verify once the file is rewritten.
  */
 @Composable
-fun RestrictionsDialog(restrictions: List<Restriction>, onDismiss: () -> Unit, onRemove: (String, wrong: () -> Unit) -> Unit) {
+fun RestrictionsDialog(
+    restrictions: List<Restriction>?,
+    openedAsOwner: Boolean,
+    signed: Boolean,
+    onDismiss: () -> Unit,
+    onRemove: (String?, wrong: () -> Unit) -> Unit,
+) {
     var asking by rememberSaveable { mutableStateOf(false) }
     var wrong by rememberSaveable { mutableStateOf(false) }
+    val removable = !restrictions.isNullOrEmpty()
     if (!asking) {
         AlertDialog(
             onDismissRequest = onDismiss,
@@ -45,28 +56,35 @@ fun RestrictionsDialog(restrictions: List<Restriction>, onDismiss: () -> Unit, o
             title = { Text(stringResource(R.string.restrictions_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (restrictions.isEmpty()) {
-                        Text(stringResource(R.string.restrictions_none))
-                    } else {
-                        Text(stringResource(R.string.restrictions_body))
-                        restrictions.forEach { Text("• " + stringResource(it.label())) }
+                    when {
+                        restrictions == null -> Text(stringResource(R.string.restrictions_unreadable))
+                        restrictions.isEmpty() -> Text(stringResource(R.string.restrictions_none))
+                        else -> {
+                            Text(stringResource(R.string.restrictions_body))
+                            restrictions.forEach { Text("• " + stringResource(it.label())) }
+                            if (openedAsOwner) {
+                                Text(stringResource(R.string.restrictions_owner_opened), modifier = Modifier.testTag("restrictions-owner-opened"))
+                                if (signed) Text(stringResource(R.string.restrictions_signed_note))
+                            }
+                        }
                     }
                 }
             },
             confirmButton = {
-                if (restrictions.isEmpty()) {
+                if (!removable) {
                     TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
                 } else {
-                    Button(onClick = { asking = true }) { Text(stringResource(R.string.restrictions_remove)) }
+                    Button(onClick = { if (openedAsOwner) onRemove(null) {} else asking = true }) { Text(stringResource(R.string.restrictions_remove)) }
                 }
             },
-            dismissButton = if (restrictions.isEmpty()) null else {
+            dismissButton = if (!removable) null else {
                 { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }
             },
         )
     } else {
         OwnerPasswordDialog(
             wrong = wrong,
+            signed = signed,
             onDismiss = onDismiss,
             onConfirm = { password ->
                 wrong = false
@@ -77,7 +95,7 @@ fun RestrictionsDialog(restrictions: List<Restriction>, onDismiss: () -> Unit, o
 }
 
 @Composable
-private fun OwnerPasswordDialog(wrong: Boolean, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+private fun OwnerPasswordDialog(wrong: Boolean, signed: Boolean, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var password by rememberSaveable { mutableStateOf("") }
     var visible by rememberSaveable { mutableStateOf(false) }
     AlertDialog(
@@ -87,6 +105,7 @@ private fun OwnerPasswordDialog(wrong: Boolean, onDismiss: () -> Unit, onConfirm
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.restrictions_owner_body))
+                if (signed) Text(stringResource(R.string.restrictions_signed_note), modifier = Modifier.testTag("restrictions-signed-note"))
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },

@@ -8,6 +8,7 @@ import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import io.github.karljuderojas.freepdf.files.SafeWrite
 import java.io.File
+import java.io.IOException
 import java.util.UUID
 
 /** Loading and saving PdfBox documents through Android's storage access framework. */
@@ -34,13 +35,19 @@ object PdfDocuments {
     /** What a PDF's permissions hold back from someone who opened it with [password]. */
     enum class Restriction { Print, Copy, Edit, Annotate, FillForms, Assemble }
 
-    /** The [Restriction]s in force when [file] is opened with [password]; none for an unlocked or owner-opened file. */
+    /** The [Restriction]s the permissions of [file] set; none for an unlocked file. See [restrictions]. */
     fun restrictions(file: File, password: String): List<Restriction> = PDDocument.load(file, password).use { restrictions(it) }
 
+    /**
+     * What the PDF's permissions (its /P flags) hold back. They are read from the encryption
+     * dictionary even when [document] was opened as owner, because a file whose owner password
+     * is empty opens as owner here (PdfBox tries the owner password first) while other viewers
+     * open it as user and enforce the flags; [isOwnerPassword] says which case this is.
+     */
     fun restrictions(document: PDDocument): List<Restriction> {
         if (!document.isEncrypted) return emptyList()
-        val permissions = document.currentAccessPermission
-        if (permissions.isOwnerPermission) return emptyList()
+        val current = document.currentAccessPermission
+        val permissions = if (current.isOwnerPermission) AccessPermission(document.encryption.permissions) else current
         return buildList {
             if (!permissions.canPrint()) add(Restriction.Print)
             if (!permissions.canExtractContent()) add(Restriction.Copy)
@@ -51,10 +58,14 @@ object PdfDocuments {
         }
     }
 
-    /** True if [ownerPassword] is the PDF's owner password, which alone may lift its restrictions. */
+    /**
+     * True if [ownerPassword] is the PDF's owner password, which alone may lift its restrictions.
+     * False for any other password, and for a file that cannot be read with it at all.
+     */
     fun isOwnerPassword(file: File, ownerPassword: String): Boolean = try {
         PDDocument.load(file, ownerPassword).use { it.isEncrypted && it.currentAccessPermission.isOwnerPermission }
-    } catch (e: InvalidPasswordException) {
+    } catch (e: IOException) {
+        // InvalidPasswordException, or a failure to read or decrypt the file (an unusable password for AES-256 among them).
         false
     }
 

@@ -210,8 +210,11 @@ sealed interface ViewerAction {
     /** Locks the PDF with [password], or takes its password off when it is empty. */
     data class SetPassword(val password: String) : ViewerAction
 
-    /** Lifts the PDF's restrictions if [password] is its owner password; [onResult] says whether it was. */
-    data class RemoveRestrictions(val password: String, val onResult: (Boolean) -> Unit) : ViewerAction
+    /**
+     * Lifts the PDF's restrictions if [password] is its owner password, or with the password the
+     * PDF opened with when [password] is null; [onResult] says whether it was the owner password.
+     */
+    data class RemoveRestrictions(val password: String?, val onResult: (Boolean) -> Unit) : ViewerAction
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
     data class Stroke(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val points: List<Offset>) : ViewerAction
@@ -392,6 +395,8 @@ fun ViewerScreen(
         onBack = onBack,
         loadPage = viewModel::page,
         loadPageForAnalysis = viewModel::pageForAnalysis,
+        probePage = viewModel::pageWithoutAnnotations,
+        onPageShown = viewModel::pageShown,
         loadWords = viewModel::words,
         findLine = viewModel::editableLine,
         loadEditableLines = viewModel::editableLines,
@@ -550,6 +555,10 @@ fun ViewerContent(
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
     /** As [loadPage], for pages drawn only to be looked at (Trim margins), which need not be cached. */
     loadPageForAnalysis: suspend (index: Int, widthPx: Int) -> Bitmap? = loadPage,
+    /** The page without its annotations, for Redact's Auto colour; what is left once the marked notes and stamps go. */
+    probePage: suspend (index: Int, widthPx: Int) -> Bitmap? = loadPage,
+    /** Told once the main page view shows a page rendered at a revision; thumbnails do not count. */
+    onPageShown: (index: Int, revision: Int) -> Unit = { _, _ -> },
     loadWords: suspend (page: Int) -> List<PageWord> = { emptyList() },
     findLine: suspend (page: Int, at: Offset) -> TextEditing.EditableLine? = { _, _ -> null },
     loadEditableLines: suspend (page: Int) -> List<TextEditing.EditableLine> = { emptyList() },
@@ -951,7 +960,8 @@ fun ViewerContent(
                             TopBarTitle(pluralStringResource(R.plurals.pages_selected, selectedPages.size, selectedPages.size))
                         mode != ViewerMode.Read -> TopBarTitle(stringResource(mode.label))
                         // Tapping "Page 3 of 12" asks which page to go to. A phone shows it as
-                        // "3 / 12" so it keeps to one line beside the actions.
+                        // "3 / 12" so it keeps to one line beside the actions, in smaller type
+                        // when "1000 / 1000" would not fit next to Save and the open documents.
                         ready != null -> {
                             val full = stringResource(R.string.page_of, currentPage + 1, pageCount)
                             TopBarTitle(
@@ -960,6 +970,7 @@ fun ViewerContent(
                                     .clickable(onClickLabel = stringResource(R.string.go_to_page)) { goingToPage = true }
                                     .semantics { contentDescription = full }
                                     .testTag("page-indicator"),
+                                shrinkToFit = compactBar,
                             )
                         }
                         else -> TopBarTitle(stringResource(R.string.app_name))
@@ -1253,7 +1264,7 @@ fun ViewerContent(
                 else -> {
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
                     val signTool = SignTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Sign }
-                    PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState, pageColors, columns) { page ->
+                    PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState, pageColors, columns, onPageShown) { page ->
                         // Pen strokes still being saved stay where they were drawn, in every mode.
                         val inkOnPage = pendingInk.filter { it.page == page }
                         if (inkOnPage.isNotEmpty()) PendingInkLayer(page, inkOnPage, ready.pageSizes[page].widthPt)
@@ -1371,18 +1382,8 @@ fun ViewerContent(
                                 active = redacting,
                                 pageWidthPt = ready.pageSizes[page].widthPt,
                                 words = words,
-                                onBox = { rect ->
-                                    val chosen = redactFill
-                                    val box = RedactBox(page, rect, chosen ?: RedactFill.Black)
-                                    redactions = redactions + box
-                                    if (chosen == null) {
-                                        // Auto: look at the page under the mark. A mark removed or cleared meanwhile stays gone.
-                                        scope.launch {
-                                            val fill = contrastingFill(runCatching { loadPage(page, AUTO_FILL_WIDTH_PX) }.getOrNull(), rect)
-                                            if (fill != box.fill) redactions = redactions.map { if (it === box) box.copy(fill = fill) else it }
-                                        }
-                                    }
-                                },
+                                // With Auto (null) the colour is undecided until the effect below has looked at the page.
+                                onBox = { rect -> redactions = redactions + RedactBox(page, rect, redactFill) },
                             )
                         }
                         if (tool != null) {
@@ -1480,6 +1481,16 @@ fun ViewerContent(
         )
     }
 
+    // Auto: look at the page under each undecided mark, without the annotations the redaction
+    // removes. The marks stay undecided in saved state, so one still waiting when the screen is
+    // recreated is judged afresh rather than left black. A mark removed meanwhile stays gone.
+    val undecidedRedactions = redactions.filter { it.fill == null }
+    LaunchedEffect(undecidedRedactions) {
+        for (box in undecidedRedactions) {
+            val fill = contrastingFill(runCatching { probePage(box.page, AUTO_FILL_WIDTH_PX) }.getOrNull(), box.rect)
+            redactions = redactions.map { if (it.fill == null && it.page == box.page && it.rect == box.rect) it.copy(fill = fill) else it }
+        }
+    }
     // The confirmation needs a look at the marked pages first, made once per set of marks (and
     // again after the process was killed, when the view model has forgotten it).
     LaunchedEffect(confirmRedact, redactions, redactCheck) {
@@ -1675,7 +1686,9 @@ fun ViewerContent(
 
     if (showingRestrictions) {
         RestrictionsDialog(
-            restrictions = ready?.restrictions.orEmpty(),
+            restrictions = ready?.restrictions,
+            openedAsOwner = ready?.openedAsOwner == true,
+            signed = ready?.signatures?.isNotEmpty() == true,
             onDismiss = { showingRestrictions = false },
             onRemove = { password, wrong ->
                 onAction(ViewerAction.RemoveRestrictions(password) { ok -> if (ok) showingRestrictions = false else wrong() })
@@ -1931,6 +1944,7 @@ private fun PageList(
     listState: LazyListState,
     pageColors: PageColors,
     columns: Int = 1,
+    onPageShown: (index: Int, revision: Int) -> Unit = { _, _ -> },
     overlay: @Composable BoxScope.(page: Int) -> Unit = {},
 ) {
     var zoom by remember { mutableFloatStateOf(1f) }
@@ -1990,7 +2004,7 @@ private fun PageList(
                     // The first page of a two-page view sits alone on the right, as a book's cover does.
                     if (next - first < columns) Spacer(Modifier.weight((columns - (next - first)).toFloat()))
                     for (index in first until minOf(pageSizes.size, next)) {
-                        PageImage(index, pageSizes[index], revision, widthPx, loadPage, Modifier.weight(1f), pageColors) {
+                        PageImage(index, pageSizes[index], revision, widthPx, loadPage, Modifier.weight(1f), pageColors, onRendered = onPageShown) {
                             ZoomDetailLayer(index, revision, detail, detailColors)
                             overlay(index)
                         }
@@ -2005,7 +2019,8 @@ private fun PageList(
 
 /**
  * One page, rendered at [widthPx]. Re-renders when the document's [revision] changes.
- * [pageColors] tints only what is drawn on screen (see PageColors.kt).
+ * [pageColors] tints only what is drawn on screen (see PageColors.kt). [onRendered] hears which
+ * revision of the page is on screen each time a new picture of it is shown.
  */
 @Composable
 internal fun PageImage(
@@ -2016,10 +2031,16 @@ internal fun PageImage(
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
     modifier: Modifier = Modifier,
     pageColors: PageColors = PageColors.Normal,
+    onRendered: (index: Int, revision: Int) -> Unit = { _, _ -> },
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
+    val currentOnRendered by rememberUpdatedState(onRendered)
     val bitmap by produceState<Bitmap?>(null, index, widthPx, revision) {
-        value = loadPage(index, widthPx)
+        val rendered = loadPage(index, widthPx)
+        value = rendered
+        // In the same frame as the new picture, so anything drawn over the old one in its place
+        // does not go a frame early.
+        if (rendered != null) currentOnRendered(index, revision)
     }
     val colorFilter = remember(pageColors) { pageColors.matrix?.let { ColorFilter.colorMatrix(ColorMatrix(it)) } }
     Box(

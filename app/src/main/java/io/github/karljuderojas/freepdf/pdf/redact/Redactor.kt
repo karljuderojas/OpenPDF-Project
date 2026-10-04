@@ -71,7 +71,9 @@ object Redactor {
      * Redacts [areas], given per zero-based page index in the page's own PDF space (unrotated,
      * origin bottom-left; see PdfGeometry). [onPage] hears, before each marked page is done,
      * which one it is (from 1) of how many. [fills] gives, per page, the box colour of each area in
-     * the same order as [areas]; an area it does not name gets [RedactFill.Black].
+     * the same order as [areas]; an area it does not name gets [RedactFill.Black]. On a page where a
+     * picture had to go whole, every box is black whatever [fills] says: a white box chosen for a
+     * dark photo would be invisible on the white page the removal leaves.
      */
     fun redact(
         document: PDDocument,
@@ -119,7 +121,7 @@ object Redactor {
             page.cosObject.removeItem(COSName.getPDFName("PieceInfo"))
 
             // Page content, not an annotation, so the box cannot be taken off the saved copy.
-            val pageFills = fills[index].orEmpty()
+            val pageFills = if (redactor.stats.wholePictures > 0) emptyList() else fills[index].orEmpty()
             PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true, true).use { stream ->
                 rects.indices.groupBy { pageFills.getOrElse(it) { RedactFill.Black } }.forEach { (fill, indices) ->
                     val grey = if (fill == RedactFill.White) 1f else 0f
