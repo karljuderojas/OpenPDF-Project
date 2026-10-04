@@ -178,6 +178,9 @@ sealed interface ViewerAction {
     data class RemoveWatermarks(val pages: Set<Int>) : ViewerAction
     /** Trims [pages] by [margins], or shows them in full again when [margins] is null. */
     data class Crop(val pages: Set<Int>, val margins: CropMargins?) : ViewerAction
+
+    /** Crops each page by its own margins, as found by [io.github.karljuderojas.freepdf.pdf.edit.MarginFinder]. */
+    data class TrimMargins(val margins: Map<Int, CropMargins>) : ViewerAction
     /** Adds a link over [box], an area of [page] as shown, leading to [target]. */
     data class AddLink(val page: Int, val box: DisplayRect, val target: LinkTarget) : ViewerAction
     /** Points the link at [index] in [page]'s annotations (see PageLink.index) at [target] instead. */
@@ -448,6 +451,7 @@ fun ViewerScreen(
                 is ViewerAction.Watermark -> viewModel.watermark(action.pages, action.text, action.image, action.style)
                 is ViewerAction.RemoveWatermarks -> viewModel.removeWatermarks(action.pages)
                 is ViewerAction.Crop -> viewModel.cropPages(action.pages, action.margins)
+                is ViewerAction.TrimMargins -> viewModel.trimMargins(action.margins)
                 is ViewerAction.AddLink -> viewModel.addLink(action.page, action.box, action.target)
                 is ViewerAction.ChangeLink -> viewModel.changeLink(action.page, action.index, action.target)
                 is ViewerAction.RemoveLink -> viewModel.removeLink(action.page, action.index)
@@ -1554,7 +1558,13 @@ fun ViewerContent(
             pageCount = pageCount,
             selectedPages = selectedPages.sorted(),
             pageAspect = ready?.pageSizes?.getOrNull(selectedPage)?.aspectRatio ?: 0.77f,
+            previewPage = selectedPage,
+            loadPage = loadPage,
             onDismiss = { cropping = false },
+            onTrim = { margins ->
+                cropping = false
+                editPages(ViewerAction.TrimMargins(margins), then = selectedPages)
+            },
             onCrop = { pages, margins ->
                 cropping = false
                 editPages(ViewerAction.Crop(pages, margins), then = selectedPages)

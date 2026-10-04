@@ -15,6 +15,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -23,6 +24,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -36,7 +39,12 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.edit.CropMargins
+import io.github.karljuderojas.freepdf.pdf.edit.MarginFinder
 import io.github.karljuderojas.freepdf.pdf.edit.PageRanges
+import android.graphics.Bitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 /**
@@ -52,14 +60,32 @@ fun CropPagesDialog(
     pageAspect: Float,
     onDismiss: () -> Unit,
     onCrop: (Set<Int>, CropMargins?) -> Unit,
+    previewPage: Int = 0,
+    loadPage: (suspend (index: Int, widthPx: Int) -> Bitmap?)? = null,
+    onTrim: (Map<Int, CropMargins>) -> Unit = {},
+    /** Margins already found, to show straight away (for a screenshot). Pages not in it are blank. */
+    initialTrim: Map<Int, CropMargins>? = null,
 ) {
     var left by rememberSaveable { mutableFloatStateOf(0f) }
     var top by rememberSaveable { mutableFloatStateOf(0f) }
     var right by rememberSaveable { mutableFloatStateOf(0f) }
     var bottom by rememberSaveable { mutableFloatStateOf(0f) }
     var allPages by rememberSaveable { mutableStateOf(false) }
-    val margins = CropMargins(left, top, right, bottom)
     val pages = if (allPages) (0 until pageCount).toSet() else selectedPages.toSet()
+    // Margins found for each page by Trim margins; any change by hand or to the pages drops them.
+    var trim by remember { mutableStateOf(initialTrim) }
+    var looking by remember { mutableStateOf(false) }
+    var lookedAt by remember { mutableStateOf(initialTrim != null) }
+    val scope = rememberCoroutineScope()
+    val shown = trim?.get(previewPage)
+    val margins = shown ?: CropMargins(left, top, right, bottom)
+    fun adjust(change: () -> Unit) {
+        // Start from what the sketch shows, so one slider moved does not reset the others.
+        shown?.let { left = it.left; top = it.top; right = it.right; bottom = it.bottom }
+        trim = null
+        lookedAt = false
+        change()
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -68,18 +94,49 @@ fun CropPagesDialog(
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(stringResource(R.string.crop_body), style = MaterialTheme.typography.bodyMedium)
                 CropSketch(margins, pageAspect, Modifier.padding(vertical = 8.dp))
-                MarginSlider(R.string.crop_left, left, "crop-left") { left = it.coerceAtMost(CropMargins.MAX_TOTAL - right) }
-                MarginSlider(R.string.crop_top, top, "crop-top") { top = it.coerceAtMost(CropMargins.MAX_TOTAL - bottom) }
-                MarginSlider(R.string.crop_right, right, "crop-right") { right = it.coerceAtMost(CropMargins.MAX_TOTAL - left) }
-                MarginSlider(R.string.crop_bottom, bottom, "crop-bottom") { bottom = it.coerceAtMost(CropMargins.MAX_TOTAL - top) }
+                MarginSlider(R.string.crop_left, margins.left, "crop-left") { v -> adjust { left = v.coerceAtMost(CropMargins.MAX_TOTAL - right) } }
+                MarginSlider(R.string.crop_top, margins.top, "crop-top") { v -> adjust { top = v.coerceAtMost(CropMargins.MAX_TOTAL - bottom) } }
+                MarginSlider(R.string.crop_right, margins.right, "crop-right") { v -> adjust { right = v.coerceAtMost(CropMargins.MAX_TOTAL - left) } }
+                MarginSlider(R.string.crop_bottom, margins.bottom, "crop-bottom") { v -> adjust { bottom = v.coerceAtMost(CropMargins.MAX_TOTAL - top) } }
                 if (pageCount > 1) {
                     ApplyRow(
                         selected = !allPages,
                         label = stringResource(R.string.crop_apply_selected, PageRanges.format(selectedPages)),
                         tag = "crop-selected",
-                    ) { allPages = false }
+                    ) { allPages = false; trim = null; lookedAt = false }
                     ApplyRow(selected = allPages, label = stringResource(R.string.crop_apply_all, pageCount), tag = "crop-all") {
-                        allPages = true
+                        allPages = true; trim = null; lookedAt = false
+                    }
+                }
+                if (loadPage != null || initialTrim != null) {
+                    OutlinedButton(
+                        onClick = {
+                            if (loadPage == null) return@OutlinedButton
+                            looking = true
+                            scope.launch {
+                                val found = withContext(Dispatchers.Default) {
+                                    pages.sorted().mapNotNull { page ->
+                                        val picture = loadPage(page, MarginFinder.PICTURE_WIDTH_PX) ?: return@mapNotNull null
+                                        MarginFinder.find(picture)?.let { page to it }
+                                    }.toMap()
+                                }
+                                trim = found
+                                lookedAt = true
+                                looking = false
+                            }
+                        },
+                        enabled = !looking,
+                        modifier = Modifier.fillMaxWidth().testTag("crop-trim"),
+                    ) { Text(stringResource(R.string.crop_trim)) }
+                    val found = trim
+                    if (looking || lookedAt) {
+                        val note = when {
+                            looking -> stringResource(R.string.crop_trim_working)
+                            found.isNullOrEmpty() -> stringResource(R.string.crop_trim_none)
+                            pages.size > 1 -> stringResource(R.string.crop_trim_found_pages, found.size, pages.size)
+                            else -> stringResource(R.string.crop_trim_found)
+                        }
+                        Text(note, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("crop-trim-note"))
                     }
                 }
                 TextButton(onClick = { onCrop(pages, null) }, modifier = Modifier.testTag("crop-reset")) {
@@ -88,7 +145,11 @@ fun CropPagesDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onCrop(pages, margins) }, enabled = !margins.isEmpty && margins.isValid) {
+            val found = trim
+            TextButton(
+                onClick = { if (found != null) onTrim(found) else onCrop(pages, margins) },
+                enabled = if (found != null) found.isNotEmpty() else !margins.isEmpty && margins.isValid,
+            ) {
                 Text(stringResource(R.string.tool_crop))
             }
         },

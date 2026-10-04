@@ -106,6 +106,7 @@ import io.github.karljuderojas.freepdf.pdf.scan.ScanFilters
 import io.github.karljuderojas.freepdf.pdf.scan.ScanPage
 import io.github.karljuderojas.freepdf.pdf.scan.SyntheticPhoto
 import io.github.karljuderojas.freepdf.pdf.create.PageFit
+import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
@@ -1615,6 +1616,44 @@ class ScreenshotTest {
         }
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_crop.png")
+    }
+
+    // The crop dialog after Trim margins found the white around the page's text.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun cropTrimMargins() {
+        val found = io.github.karljuderojas.freepdf.pdf.edit.MarginFinder.find(scaled(loadSample("page-1.png"), 300))!!
+        show {
+            io.github.karljuderojas.freepdf.ui.viewer.CropPagesDialog(
+                pageCount = 6, selectedPages = listOf(1), pageAspect = 612f / 792f,
+                onDismiss = {}, onCrop = { _, _ -> }, initialTrim = mapOf(1 to found), previewPage = 1,
+            )
+        }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/crop_trim_margins.png")
+    }
+
+    // A page before and after the trim: the same picture, cut to what the finder found.
+    @Test
+    fun cropTrimBeforeAfter() = capture("crop_trim_before_after") {
+        val page = loadSample("page-1.png")
+        val m = io.github.karljuderojas.freepdf.pdf.edit.MarginFinder.find(scaled(page, 300))!!
+        val x = (page.width * m.left).toInt()
+        val y = (page.height * m.top).toInt()
+        val trimmed = Bitmap.createBitmap(
+            page, x, y, page.width - x - (page.width * m.right).toInt(), page.height - y - (page.height * m.bottom).toInt(),
+        )
+        androidx.compose.foundation.layout.Row(
+            Modifier.padding(16.dp),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp),
+        ) {
+            for (bitmap in listOf(page, trimmed)) {
+                androidx.compose.foundation.Image(
+                    bitmap.asImageBitmap(), null,
+                    Modifier.weight(1f).border(1.dp, androidx.compose.ui.graphics.Color.Gray),
+                )
+            }
+        }
     }
 
     @OptIn(ExperimentalRoborazziApi::class)

@@ -312,6 +312,11 @@
     <string name="crop_percent">%1$d%%</string>
     <string name="crop_apply_selected">Selected pages (%1$s)</string>
     <string name="crop_apply_all">All %1$d pages</string>
+    <string name="crop_trim">Trim margins automatically</string>
+    <string name="crop_trim_working">Looking for margins…</string>
+    <string name="crop_trim_found">Found white margins to trim. Check the sketch, then tap Crop.</string>
+    <string name="crop_trim_found_pages">Found white margins on %1$d of %2$d pages. Check the sketch, then tap Crop.</string>
+    <string name="crop_trim_none">No white margins to trim here.</string>
     <string name="crop_reset">Show whole page</string>
     <string name="crop_nothing_to_reset">These pages are not cropped.</string>
     <string name="extract_title">Extract pages</string>
