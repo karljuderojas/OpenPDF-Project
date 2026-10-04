@@ -16,6 +16,8 @@ import androidx.compose.material3.IconButton
 import io.github.karljuderojas.freepdf.files.DeleteResult
 import io.github.karljuderojas.freepdf.files.FileActions
 import io.github.karljuderojas.freepdf.files.RenameResult
+import io.github.karljuderojas.freepdf.files.Support
+import io.github.karljuderojas.freepdf.files.documentAlias
 import io.github.karljuderojas.freepdf.share.Sharing
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -28,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -41,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,7 +80,7 @@ fun FolderScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
     var unreadable by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
-    var sort by remember { mutableStateOf(FolderSort.Name) }
+    var sort by rememberSaveable { mutableStateOf(FolderSort.Name) }
     val scope = rememberCoroutineScope()
 
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
@@ -101,11 +105,18 @@ fun FolderScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
     val sessions = (context.applicationContext as FreePdfApp).sessions
     // Renaming and deleting need the write grant; with a read-only one they are not offered.
     val writable = remember(folder) { store.canWrite(context) }
-    var renaming by remember { mutableStateOf<FolderFile?>(null) }
-    var deleting by remember { mutableStateOf<FolderFile?>(null) }
+    // The file the rename or delete question is about, by URI, found again in the listing so the
+    // dialog survives a turn (the listing is read again after it) and goes if the file does.
+    var renamingUri by rememberSaveable { mutableStateOf<String?>(null) }
+    var deletingUri by rememberSaveable { mutableStateOf<String?>(null) }
+    var forgetting by rememberSaveable { mutableStateOf(false) }
+    val renaming = renamingUri?.let { uri -> listing?.files?.firstOrNull { it.uri == uri } }
+    val deleting = deletingUri?.let { uri -> listing?.files?.firstOrNull { it.uri == uri } }
+    // The same file may be open under the URI the file picker gave it, so both spellings are looked at.
+    fun keysOf(file: FolderFile): List<String> = listOfNotNull(file.uri, documentAlias(Uri.parse(file.uri))?.toString())
     // A file open here with unsaved changes is left alone, like in the Recent view.
     fun blockedByUnsaved(file: FolderFile): Boolean {
-        val blocked = sessions.get(file.uri)?.hasUnsavedChanges == true
+        val blocked = keysOf(file).any { sessions.get(it)?.hasUnsavedChanges == true }
         if (blocked) Toast.makeText(context, resources.getString(R.string.file_has_unsaved_changes, file.name), Toast.LENGTH_LONG).show()
         return blocked
     }
@@ -114,21 +125,38 @@ fun FolderScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
         folderName = listing?.name,
         files = listing?.files,
         unreadable = unreadable,
-        refreshing = refreshing,
+        // Right after a turn the chosen folder is read again: the spinner, not the Choose screen, meanwhile.
+        refreshing = refreshing || (folder != null && listing == null && !unreadable),
         sort = sort,
         onSort = { sort = it },
         onRefresh = { scope.launch { reload++ } },
         onChoose = { pick.launch(null) },
-        onForget = { store.forget(context) },
-        onOpen = { onOpenPdf(Uri.parse(it.uri)) },
+        onForget = { forgetting = true },
+        onOpen = { file ->
+            // Already open as the picker's URI: go to that session rather than opening the file a second time.
+            val alias = documentAlias(Uri.parse(file.uri))?.toString()
+            val open = alias?.takeIf { a -> documents.open.value.any { it.uri == a } }
+            onOpenPdf(Uri.parse(open ?: file.uri))
+        },
         onShare = { file ->
             runCatching { Sharing.shareUri(context, Uri.parse(file.uri), file.name) }
                 .onFailure { Toast.makeText(context, R.string.share_failed, Toast.LENGTH_SHORT).show() }
         },
-        onRename = if (writable) { it -> if (!blockedByUnsaved(it)) renaming = it } else null,
-        onDelete = if (writable) { it -> if (!blockedByUnsaved(it)) deleting = it } else null,
+        onRename = if (writable) { it -> if (!blockedByUnsaved(it)) renamingUri = it.uri } else null,
+        onDelete = if (writable) { it -> if (!blockedByUnsaved(it)) deletingUri = it.uri } else null,
         modifier = modifier,
     )
+
+    if (forgetting) {
+        ForgetFolderDialog(
+            folderName = listing?.name ?: stringResource(R.string.folder_title),
+            onForget = {
+                forgetting = false
+                store.forget(context)
+            },
+            onCancel = { forgetting = false },
+        )
+    }
 
     renaming?.let { file ->
         var error by remember(file.uri) { mutableStateOf<Int?>(null) }
@@ -139,43 +167,52 @@ fun FolderScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
                 val name = FileActions.cleanName(typed)
                 when {
                     name == null -> error = R.string.rename_invalid
-                    name == file.name -> renaming = null
-                    blockedByUnsaved(file) -> renaming = null
+                    name == file.name -> renamingUri = null
+                    blockedByUnsaved(file) -> renamingUri = null
                     else -> scope.launch {
                         when (val result = withContext(Dispatchers.IO) { FileActions.rename(context, Uri.parse(file.uri), name) }) {
                             is RenameResult.Renamed -> {
-                                renaming = null
-                                sessions.close(file.uri)
-                                documents.renamed(file.uri, result.uri.toString(), result.name)
+                                renamingUri = null
+                                keysOf(file).forEach { key ->
+                                    sessions.close(key)
+                                    documents.renamed(key, result.uri.toString(), result.name)
+                                }
                                 if (!result.persisted) documents.forget(result.uri.toString())
                                 Toast.makeText(context, resources.getString(R.string.renamed_toast, result.name), Toast.LENGTH_SHORT).show()
                                 reload++
                             }
                             RenameResult.Unsupported -> error = R.string.rename_unsupported
+                            RenameResult.Gone -> error = R.string.rename_gone
                             RenameResult.Failed -> error = R.string.rename_failed
                         }
                     }
                 }
             },
-            onCancel = { renaming = null },
+            onCancel = { renamingUri = null },
         )
     }
 
     deleting?.let { file ->
         val uri = Uri.parse(file.uri)
-        val canDelete = remember(file.uri) { FileActions.canDelete(context, uri) }
+        // Asking the provider can be slow, so it runs off the main thread; the dialog waits with Delete disabled.
+        var support by remember(file.uri) { mutableStateOf<Support?>(null) }
+        LaunchedEffect(file.uri) { support = withContext(Dispatchers.IO) { FileActions.deleteSupport(context, uri) } }
         DeleteDialog(
             name = file.name,
-            canDelete = canDelete,
+            support = support,
             onDelete = {
-                deleting = null
+                deletingUri = null
                 if (blockedByUnsaved(file)) return@DeleteDialog
                 scope.launch {
                     when (withContext(Dispatchers.IO) { FileActions.delete(context, uri) }) {
                         DeleteResult.Deleted -> {
-                            documents.close(file.uri)
-                            documents.forget(file.uri)
+                            keysOf(file).forEach { documents.close(it); documents.forget(it) }
                             Toast.makeText(context, resources.getString(R.string.deleted_toast, file.name), Toast.LENGTH_SHORT).show()
+                            reload++
+                        }
+                        DeleteResult.Gone -> {
+                            keysOf(file).forEach { documents.close(it); documents.forget(it) }
+                            Toast.makeText(context, resources.getString(R.string.delete_gone_toast, file.name), Toast.LENGTH_LONG).show()
                             reload++
                         }
                         DeleteResult.Unsupported, DeleteResult.Failed ->
@@ -183,16 +220,29 @@ fun FolderScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
                     }
                 }
             },
-            // There is no list to take it off here: the folder shows whatever is in it.
-            onRemoveFromList = { deleting = null },
-            onCancel = { deleting = null },
+            // There is no list to take it off here: the folder shows whatever is in it, so it is read again.
+            onRemoveFromList = { deletingUri = null; reload++ },
+            onCancel = { deletingUri = null },
         )
     }
 }
 
+/** Asks before the folder's access is given back, since its PDFs leave the Recent list with it. */
+@Composable
+fun ForgetFolderDialog(folderName: String, onForget: () -> Unit, onCancel: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text(stringResource(R.string.folder_forget_title)) },
+        text = { Text(stringResource(R.string.folder_forget_body, folderName)) },
+        confirmButton = { TextButton(onClick = onForget) { Text(stringResource(R.string.folder_forget_confirm)) } },
+        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
 /**
  * Stateless Folder view, for screenshot tests. [files] is null before a folder is chosen (or
- * while it is read for the first time) and [unreadable] says the chosen folder can no longer be read.
+ * while it is read for the first time) and [unreadable] says the chosen folder can no longer be
+ * read. [menuFor] opens a file's menu, for screenshots.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -211,6 +261,7 @@ fun FolderContent(
     onShare: (FolderFile) -> Unit = {},
     onRename: ((FolderFile) -> Unit)? = {},
     onDelete: ((FolderFile) -> Unit)? = {},
+    menuFor: String? = null,
 ) {
     if (files == null && !unreadable && folderName == null && !refreshing) {
         NoFolder(onChoose, modifier)
@@ -242,7 +293,7 @@ fun FolderContent(
                 unreadable -> Message(stringResource(R.string.folder_unreadable))
                 files != null && sorted.isEmpty() -> Message(stringResource(R.string.folder_no_pdfs))
                 else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-                    items(sorted, key = { it.uri }) { FolderRow(it, onOpen, onShare, onRename, onDelete) }
+                    items(sorted, key = { it.uri }) { FolderRow(it, onOpen, onShare, onRename, onDelete, menuOpen = it.uri == menuFor) }
                 }
             }
         }
@@ -283,9 +334,10 @@ private fun FolderRow(
     onShare: (FolderFile) -> Unit,
     onRename: ((FolderFile) -> Unit)?,
     onDelete: ((FolderFile) -> Unit)?,
+    menuOpen: Boolean = false,
 ) {
     val context = LocalContext.current
-    var menu by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(menuOpen) }
     val details = listOfNotNull(
         file.modified.takeIf { it > 0 }?.let { DateUtils.formatDateTime(context, it, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_ABBREV_MONTH or DateUtils.FORMAT_SHOW_YEAR) },
         file.size.takeIf { it > 0 }?.let { Formatter.formatShortFileSize(context, it) },
