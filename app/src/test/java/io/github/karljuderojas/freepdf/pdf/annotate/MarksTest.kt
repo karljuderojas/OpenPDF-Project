@@ -11,12 +11,18 @@ import io.github.karljuderojas.freepdf.pdf.edit.CropMargins
 import io.github.karljuderojas.freepdf.pdf.edit.PageCrop
 import io.github.karljuderojas.freepdf.pdf.text.PageText
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.ByteArrayOutputStream
+import java.io.File
 
-/** Runs under Robolectric so FreePdfApp initialises PdfBox-Android's resources. */
+/**
+ * Runs under Robolectric so FreePdfApp initialises PdfBox-Android's resources. Also writes
+ * build/outputs/qa/shapes.pdf, which CI renders with poppler so the shapes' appearance streams
+ * are seen as another reader draws them.
+ */
 @RunWith(AndroidJUnit4::class)
 class MarksTest {
 
@@ -208,8 +214,48 @@ class MarksTest {
         shaped().use { document ->
             assertEquals(2, Marks.indexAt(document, 0, 180f, 510f))
             assertEquals(3, Marks.indexAt(document, 0, 410f, 505f))
+            File("build/outputs/qa").apply { mkdirs() }.resolve("shapes.pdf").let { document.save(it) }
             Marks.delete(document, 0, 3)
             assertEquals(listOf(Mark.Kind.Square, Mark.Kind.Circle, Mark.Kind.Line), Marks.list(document).map { it.kind })
+        }
+    }
+
+    @Test
+    fun aLineIsFoundAlongItsStrokeNotAnywhereInItsPaddedBox() {
+        sample().use { document ->
+            // The thickest arrow, slanting up across the page, with a note under its box but well off its line.
+            Annotator.line(document, 0, PdfPoint(100f, 400f), PdfPoint(400f, 600f), arrow = true, lineWidth = 8f)
+            Annotator.note(document, 0, PdfPoint(300f, 440f), "Under the arrow's box")
+            val arrow = document.getPage(0).annotations[0] as PDAnnotationLine
+            // PdfBox grows /Rect by ten line widths every side, so the box reaches far past the line.
+            assertTrue(arrow.rectangle.lowerLeftX <= 100f - 80f && arrow.rectangle.contains(310f, 430f))
+            // The note is picked, not the arrow over it; the empty band beside the line finds nothing.
+            assertEquals(1, Marks.indexAt(document, 0, 310f, 430f))
+            assertNull(Marks.indexAt(document, 0, 120f, 560f))
+            // On the line, a pen's width to the side of it, and on an arrowhead side: the arrow.
+            assertEquals(0, Marks.indexAt(document, 0, 250f, 500f))
+            assertEquals(0, Marks.indexAt(document, 0, 250f, 510f))
+            // One side of the head runs back from the tip at 30 degrees; its middle is near (360, 597) for an 80 pt head.
+            assertEquals(0, Marks.indexAt(document, 0, 360f, 597f))
+            assertNull(Marks.indexAt(document, 0, 400f, 500f))
+
+            val marks = Marks.list(document)
+            val shown = marks[0]
+            assertEquals(Mark.Kind.Arrow, shown.kind)
+            // The listed box hugs the strokes: within a few points of the line's ends, not 80 away.
+            assertTrue(shown.left >= (100f - 8f) / 612f && shown.right <= (400f + 8f) / 612f)
+            assertTrue(shown.top >= (792f - 600f - 8f) / 792f && shown.bottom <= (792f - 400f + 8f) / 792f)
+            // The line and the two sides of its head, and half the pen as a share of the page's width.
+            val lines = shown.lines!!
+            assertEquals(3, lines.segments.size)
+            assertEquals(4f / 612f, lines.reach, 0.0001f)
+            assertEquals(100f / 612f, lines.segments[0].x1, 0.001f)
+            assertEquals(1f - 600f / 792f, lines.segments[0].y2, 0.001f)
+            // A plain line has just the one stroke, and other marks none.
+            Annotator.line(document, 0, PdfPoint(72f, 100f), PdfPoint(300f, 100f), lineWidth = 2f)
+            val listed = Marks.list(document)
+            assertEquals(1, listed.last().lines!!.segments.size)
+            assertNull(listed[1].lines)
         }
     }
 
