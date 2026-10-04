@@ -153,6 +153,8 @@ class CropDialogTest {
         val restoration = StateRestorationTester(composeRule)
         restoration.setContent { TrimDialog(listOf(1)) { _, _ -> loads.incrementAndGet(); gate.await(); page(0.1f) } }
         composeRule.onNodeWithTag("crop-trim").performScrollTo().performClick()
+        // waitUntil only polls; it is waitForIdle that runs the recomposition which starts the scan.
+        composeRule.waitForIdle()
         composeRule.waitUntil(5_000) { loads.get() == 1 }
 
         restoration.emulateSavedInstanceStateRestore()
