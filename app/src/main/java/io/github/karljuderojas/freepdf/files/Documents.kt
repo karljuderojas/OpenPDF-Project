@@ -86,6 +86,17 @@ class Documents(
         }
     }
 
+    /**
+     * After the lasting grant on the folder [tree] was given back: its PDFs cannot be opened
+     * again later, so they leave the history. Files open right now stay open.
+     */
+    fun forgetUnder(tree: String) {
+        val root = Uri.parse(tree)
+        if (_recent.value.none { covers(root, Uri.parse(it.uri)) }) return
+        _recent.update { list -> list.filterNot { covers(root, Uri.parse(it.uri)) } }
+        writeRecent()
+    }
+
     /** Empties the history. Files open right now stay open. */
     fun clearHistory() {
         _recent.value = emptyList()
@@ -131,6 +142,13 @@ class Documents(
             "file" -> uri.path?.let { isUnder(File(it), filesDir) } ?: false
             else -> false
         }
+
+        /**
+         * True if a grant on [grant] gives access to [uri]: the same URI, or a document inside
+         * the folder tree [grant] is for (the system grants a whole tree at once, and its
+         * documents are reached through tree URIs that start with it).
+         */
+        fun covers(grant: Uri, uri: Uri): Boolean = uri == grant || uri.toString().startsWith("$grant/document/")
 
         private fun isUnder(file: File, dir: File): Boolean {
             val root = runCatching { dir.canonicalFile }.getOrDefault(dir.absoluteFile)
