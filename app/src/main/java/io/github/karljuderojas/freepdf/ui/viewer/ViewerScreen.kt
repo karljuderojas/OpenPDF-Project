@@ -391,6 +391,7 @@ fun ViewerScreen(
         state = state,
         onBack = onBack,
         loadPage = viewModel::page,
+        onPageShown = viewModel::pageShown,
         loadWords = viewModel::words,
         findLine = viewModel::editableLine,
         loadEditableLines = viewModel::editableLines,
@@ -547,6 +548,8 @@ fun ViewerContent(
     state: ViewerState,
     onBack: () -> Unit,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
+    /** Told once the main page view shows a page rendered at a revision; thumbnails do not count. */
+    onPageShown: (index: Int, revision: Int) -> Unit = { _, _ -> },
     loadWords: suspend (page: Int) -> List<PageWord> = { emptyList() },
     findLine: suspend (page: Int, at: Offset) -> TextEditing.EditableLine? = { _, _ -> null },
     loadEditableLines: suspend (page: Int) -> List<TextEditing.EditableLine> = { emptyList() },
@@ -1250,7 +1253,7 @@ fun ViewerContent(
                 else -> {
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
                     val signTool = SignTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Sign }
-                    PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState, pageColors, columns) { page ->
+                    PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState, pageColors, columns, onPageShown) { page ->
                         // Pen strokes still being saved stay where they were drawn, in every mode.
                         val inkOnPage = pendingInk.filter { it.page == page }
                         if (inkOnPage.isNotEmpty()) PendingInkLayer(page, inkOnPage, ready.pageSizes[page].widthPt)
@@ -1928,6 +1931,7 @@ private fun PageList(
     listState: LazyListState,
     pageColors: PageColors,
     columns: Int = 1,
+    onPageShown: (index: Int, revision: Int) -> Unit = { _, _ -> },
     overlay: @Composable BoxScope.(page: Int) -> Unit = {},
 ) {
     var zoom by remember { mutableFloatStateOf(1f) }
@@ -1987,7 +1991,7 @@ private fun PageList(
                     // The first page of a two-page view sits alone on the right, as a book's cover does.
                     if (next - first < columns) Spacer(Modifier.weight((columns - (next - first)).toFloat()))
                     for (index in first until minOf(pageSizes.size, next)) {
-                        PageImage(index, pageSizes[index], revision, widthPx, loadPage, Modifier.weight(1f), pageColors) {
+                        PageImage(index, pageSizes[index], revision, widthPx, loadPage, Modifier.weight(1f), pageColors, onRendered = onPageShown) {
                             ZoomDetailLayer(index, revision, detail, detailColors)
                             overlay(index)
                         }
@@ -2002,7 +2006,8 @@ private fun PageList(
 
 /**
  * One page, rendered at [widthPx]. Re-renders when the document's [revision] changes.
- * [pageColors] tints only what is drawn on screen (see PageColors.kt).
+ * [pageColors] tints only what is drawn on screen (see PageColors.kt). [onRendered] hears which
+ * revision of the page is on screen each time a new picture of it is shown.
  */
 @Composable
 internal fun PageImage(
@@ -2013,10 +2018,16 @@ internal fun PageImage(
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
     modifier: Modifier = Modifier,
     pageColors: PageColors = PageColors.Normal,
+    onRendered: (index: Int, revision: Int) -> Unit = { _, _ -> },
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
+    val currentOnRendered by rememberUpdatedState(onRendered)
     val bitmap by produceState<Bitmap?>(null, index, widthPx, revision) {
-        value = loadPage(index, widthPx)
+        val rendered = loadPage(index, widthPx)
+        value = rendered
+        // In the same frame as the new picture, so anything drawn over the old one in its place
+        // does not go a frame early.
+        if (rendered != null) currentOnRendered(index, revision)
     }
     val colorFilter = remember(pageColors) { pageColors.matrix?.let { ColorFilter.colorMatrix(ColorMatrix(it)) } }
     Box(

@@ -2,6 +2,7 @@ package io.github.karljuderojas.freepdf.ui.viewer
 
 import androidx.compose.ui.geometry.Offset
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -61,6 +62,21 @@ class PendingInkTest {
         ink.landed(second, 5)
         ink.rendered(0, 5)
         assertTrue(ink.strokes.value.isEmpty())
+    }
+
+    @Test
+    fun aRenderingThatShowsNoStrokeLeavesTheListAsItWas() {
+        val ink = PendingInk()
+        val id = ink.add(0, line, pen)
+        val before = ink.strokes.value
+        // Pages re-rendered for other reasons, and a page the stroke is not on, change nothing.
+        ink.rendered(0, 2)
+        ink.rendered(1, 9)
+        assertSame(before, ink.strokes.value)
+        ink.landed(id, 4)
+        val landed = ink.strokes.value
+        ink.rendered(2, 4)
+        assertSame(landed, ink.strokes.value)
     }
 
     @Test
