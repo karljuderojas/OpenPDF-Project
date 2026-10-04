@@ -27,11 +27,24 @@ internal fun isPdf(mimeType: String?, name: String): Boolean =
         (name.endsWith(".pdf", ignoreCase = true) && (mimeType == null || mimeType == "application/octet-stream"))
 
 /**
+ * For a document reached through a folder grant (a tree URI with a document part), the same
+ * document's plain URI, as the file picker hands it out; null for any other URI. The two name
+ * one file, so lists keyed by URI can look for the other spelling too.
+ */
+fun documentAlias(uri: Uri): Uri? = runCatching {
+    if (uri.scheme != "content" || !DocumentsContract.isTreeUri(uri)) return null
+    val segments = uri.pathSegments
+    if (segments.size < 4 || segments[2] != "document") return null
+    DocumentsContract.buildDocumentUri(uri.authority, DocumentsContract.getDocumentId(uri))
+}.getOrNull()
+
+/**
  * The one folder the Files tab browses, chosen with the system folder picker. Only the picker's
  * grant to that folder is used: the app asks for no broad storage permission. The choice is kept
- * in app preferences on this device.
+ * in app preferences on this device. [onReleased] hears of every folder whose grant was given
+ * back, so what was kept about its files (the history) can be let go too.
  */
-class FolderStore(private val prefs: SharedPreferences) {
+class FolderStore(private val prefs: SharedPreferences, private val onReleased: (tree: String) -> Unit = {}) {
 
     private val _folder = MutableStateFlow(prefs.getString(KEY, null))
 
@@ -66,6 +79,7 @@ class FolderStore(private val prefs: SharedPreferences) {
     private fun release(context: Context, tree: String) {
         val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         runCatching { context.contentResolver.releasePersistableUriPermission(Uri.parse(tree), flags) }
+        onReleased(tree)
     }
 
     private companion object {
