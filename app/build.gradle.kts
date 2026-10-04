@@ -13,12 +13,27 @@ android {
         applicationId = "io.github.karljuderojas.freepdf"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = providers.gradleProperty("appVersionCode").orNull?.toInt() ?: 1
+        versionName = providers.gradleProperty("appVersionName").orNull ?: "0.9.0"
+    }
+
+    // The release workflow passes the real key through these variables (from repository secrets).
+    // Without them the release build is signed with the debug key so it still installs.
+    val releaseKeystore = System.getenv("FREEPDF_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = System.getenv("FREEPDF_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("FREEPDF_KEY_ALIAS")
+                keyPassword = System.getenv("FREEPDF_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
