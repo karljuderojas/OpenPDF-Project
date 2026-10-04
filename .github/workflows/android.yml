@@ -60,7 +60,14 @@ jobs:
             pdftoppm -png -f 1 -l 1 -scale-to 1080 -singlefile \
               app/build/outputs/qa/textbox-and-stamps.pdf app/build/outputs/roborazzi/pdf_textbox_and_stamps
           fi
-      # WatermarksTest stamps a diagonal CONFIDENTIAL across the sample's first page.
+      # MarksTest draws a rectangle, an ellipse, a line and an arrow with PdfBox's own appearance
+      # streams. Show them as another reader draws them.
+      - name: Render the shapes
+        run: |
+          if [ -f app/build/outputs/qa/shapes.pdf ]; then
+            pdftoppm -png -f 1 -l 1 -scale-to 1080 -singlefile \
+              app/build/outputs/qa/shapes.pdf app/build/outputs/roborazzi/pdf_shapes
+          fi
       - name: Render the watermarked page
         run: |
           if [ -f app/build/outputs/qa/watermarks.pdf ]; then

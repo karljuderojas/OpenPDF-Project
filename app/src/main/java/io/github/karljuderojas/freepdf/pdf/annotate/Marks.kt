@@ -11,6 +11,7 @@ import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationTextMarku
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDBorderStyleDictionary
 import com.tom_roush.pdfbox.util.DateConverter
 import io.github.karljuderojas.freepdf.pdf.DisplayRect
+import io.github.karljuderojas.freepdf.pdf.PdfPoint
 import io.github.karljuderojas.freepdf.pdf.PdfRect
 import io.github.karljuderojas.freepdf.pdf.onPage
 import io.github.karljuderojas.freepdf.pdf.sign.SignatureAnnotation
@@ -18,6 +19,10 @@ import io.github.karljuderojas.freepdf.pdf.pdfToDisplay
 import io.github.karljuderojas.freepdf.pdf.text.PageText
 import io.github.karljuderojas.freepdf.pdf.text.PageWord
 import java.util.Calendar
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.sin
 
 /**
  * One mark on a page (a highlight, drawing, note and so on, made here or in another app), as the
@@ -39,8 +44,28 @@ data class Mark(
     val markedText: String,
     val author: String?,
     val modified: Long?,
+    /** For a line or arrow, the strokes it is really drawn with; a tap must land on one of them. */
+    val lines: LineShape? = null,
 ) {
     enum class Kind { Highlight, Underline, StrikeOut, Ink, Square, Circle, Line, Arrow, Note, TextBox, Stamp, Other }
+
+    /** One straight stroke, as fractions of the displayed page. */
+    data class Segment(val x1: Float, val y1: Float, val x2: Float, val y2: Float)
+
+    /**
+     * The line itself and the two sides of each arrowhead, with how far from them the pen
+     * reaches ([reach], half the line width as a fraction of the displayed page's width).
+     */
+    data class LineShape(val segments: List<Segment>, val reach: Float)
+}
+
+/** How far ([px], [py]) is from the segment ([x1], [y1])-([x2], [y2]). */
+internal fun distanceToSegment(px: Float, py: Float, x1: Float, y1: Float, x2: Float, y2: Float): Float {
+    val dx = x2 - x1
+    val dy = y2 - y1
+    val length2 = dx * dx + dy * dy
+    val t = if (length2 == 0f) 0f else (((px - x1) * dx + (py - y1) * dy) / length2).coerceIn(0f, 1f)
+    return hypot(px - (x1 + t * dx), py - (y1 + t * dy))
 }
 
 /** Lists, restyles, comments on and deletes the marks in a document. */
@@ -61,9 +86,13 @@ object Marks {
         val words by lazy { wordsOn(pageIndex) }
         annotations.mapIndexedNotNull { index, annotation ->
             val kind = kindOf(annotation) ?: return@mapIndexedNotNull null
-            val box = annotation.rectangle ?: return@mapIndexedNotNull null
-            val (x1, y1) = page.toDisplay(box.lowerLeftX, box.lowerLeftY)
-            val (x2, y2) = page.toDisplay(box.upperRightX, box.upperRightY)
+            // A line's /Rect is padded well past its ends for the arrowhead (PdfBox grows it by ten
+            // line widths every side), so its box comes from the strokes themselves.
+            val strokes = (annotation as? PDAnnotationLine)?.let { strokesOf(it) }
+            val box = strokes?.bounds ?: annotation.rectangle?.let { PdfRect(it.lowerLeftX, it.lowerLeftY, it.upperRightX, it.upperRightY) }
+                ?: return@mapIndexedNotNull null
+            val (x1, y1) = page.toDisplay(box.left, box.bottom)
+            val (x2, y2) = page.toDisplay(box.right, box.top)
             val shown = DisplayRect(minOf(x1, x2), minOf(y1, y2), maxOf(x1, x2), maxOf(y1, y2)).onPage()
                 ?: return@mapIndexedNotNull null
             val markup = annotation as? PDAnnotationMarkup
@@ -82,6 +111,16 @@ object Marks {
                 author = markup?.titlePopup?.takeIf { it.isNotBlank() },
                 modified = (annotation.modifiedDate?.let { runCatching { DateConverter.toCalendar(it) }.getOrNull() }
                     ?: markup?.creationDate)?.timeInMillis,
+                lines = strokes?.let { drawn ->
+                    Mark.LineShape(
+                        drawn.segments.map { (from, to) ->
+                            val (ax, ay) = page.toDisplay(from.x, from.y)
+                            val (bx, by) = page.toDisplay(to.x, to.y)
+                            Mark.Segment(ax, ay, bx, by)
+                        },
+                        reach = drawn.halfWidth / page.displayedWidth(),
+                    )
+                },
             )
         }
     }
@@ -144,8 +183,59 @@ object Marks {
      */
     fun indexAt(document: PDDocument, pageIndex: Int, x: Float, y: Float): Int? =
         document.getPage(pageIndex).annotations.indexOfLast { annotation ->
-            kindOf(annotation) != null && annotation.rectangle?.contains(x, y) == true
+            if (kindOf(annotation) == null) return@indexOfLast false
+            val strokes = (annotation as? PDAnnotationLine)?.let { strokesOf(it) }
+            // A line is hit along its strokes, not anywhere in its padded box.
+            if (strokes != null) strokes.hits(x, y, slop = TAP_SLOP_PT) else annotation.rectangle?.contains(x, y) == true
         }.takeIf { it >= 0 }
+
+    /** How far from a line's strokes a tap still counts, in points: about a fingertip's width. */
+    private const val TAP_SLOP_PT = 8f
+
+    /** The strokes PdfBox draws for a Line annotation, in PDF space. */
+    private class Strokes(val segments: List<Pair<PdfPoint, PdfPoint>>, val halfWidth: Float) {
+        /** The strokes' bounds plus the pen, like the box of any other mark. */
+        val bounds: PdfRect
+            get() {
+                val points = segments.flatMap { listOf(it.first, it.second) }
+                val pad = halfWidth + 1f
+                return PdfRect(
+                    points.minOf { it.x } - pad, points.minOf { it.y } - pad,
+                    points.maxOf { it.x } + pad, points.maxOf { it.y } + pad,
+                )
+            }
+
+        fun hits(x: Float, y: Float, slop: Float) =
+            segments.any { (a, b) -> distanceToSegment(x, y, a.x, a.y, b.x, b.y) <= halfWidth + slop }
+    }
+
+    /**
+     * The line from /L and, at each end that has an arrowhead, its two sides: [Annotator.ARROW_LENGTH]
+     * line widths long, 30 degrees off the line, the way PdfBox draws them. Null without a usable /L.
+     */
+    private fun strokesOf(line: PDAnnotationLine): Strokes? {
+        val l = line.line?.takeIf { it.size >= 4 } ?: return null
+        val start = PdfPoint(l[0], l[1])
+        val end = PdfPoint(l[2], l[3])
+        // PdfBox draws a hairline as one point wide.
+        val width = (line.borderStyle?.width ?: 1f).let { if (it < 1e-5f) 1f else it }
+        val angle = atan2((end.y - start.y).toDouble(), (end.x - start.x).toDouble())
+        val segments = mutableListOf(start to end)
+        if (line.endPointEndingStyle in ArrowEndings) segments += arrowhead(end, angle, width)
+        if (line.startPointEndingStyle in ArrowEndings) segments += arrowhead(start, angle + Math.PI, width)
+        return Strokes(segments, width / 2)
+    }
+
+    /** The two sides of an arrowhead whose point is [tip], on a line coming in at [angle]. */
+    private fun arrowhead(tip: PdfPoint, angle: Double, width: Float): List<Pair<PdfPoint, PdfPoint>> {
+        val length = Annotator.ARROW_LENGTH * width
+        return listOf(ARROW_ANGLE, -ARROW_ANGLE).map { side ->
+            val back = angle + Math.PI + side
+            tip to PdfPoint(tip.x + (length * cos(back)).toFloat(), tip.y + (length * sin(back)).toFloat())
+        }
+    }
+
+    private val ARROW_ANGLE = Math.toRadians(30.0)
 
     private fun kindOf(annotation: PDAnnotation): Mark.Kind? = when (annotation.subtype) {
         PDAnnotationTextMarkup.SUB_TYPE_HIGHLIGHT -> Mark.Kind.Highlight
@@ -201,4 +291,8 @@ object Marks {
         val crop = cropBox.let { PdfRect(it.lowerLeftX, it.lowerLeftY, it.upperRightX, it.upperRightY) }
         return pdfToDisplay(x, y, rotation, crop)
     }
+
+    /** The width of the page as shown, in points: its crop box's height when it is turned on its side. */
+    private fun PDPage.displayedWidth(): Float =
+        if (((rotation % 360) + 360) % 360 % 180 == 90) cropBox.height else cropBox.width
 }
