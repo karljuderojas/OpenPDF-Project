@@ -7,6 +7,7 @@ import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -105,6 +106,44 @@ class EditSessionTest {
         session.undo()
         session.edit { PageEditor.rotate(it, 0, 90) }
         assertTrue(session.hasUnsavedChanges)
+    }
+
+    @Test
+    fun restrictionsComeOffOnlyWithTheOwnerPassword() {
+        val restricted = File(dir, "restricted.pdf")
+        val pageCount = PDDocument.load(session.workingFile).use { it.numberOfPages }
+        PDDocument.load(session.workingFile).use { document ->
+            val permissions = AccessPermission().apply { setCanPrint(false); setCanExtractContent(false); setCanModify(false) }
+            document.protect(StandardProtectionPolicy("owner-secret", "", permissions).apply { encryptionKeyLength = 128 })
+            document.save(restricted)
+        }
+        val restrictedSession = EditSession(File(dir, "restricted-session"), restricted.inputStream())
+        try {
+            assertTrue(restrictedSession.unlock(""))
+            assertEquals(
+                listOf(PdfDocuments.Restriction.Print, PdfDocuments.Restriction.Copy, PdfDocuments.Restriction.Edit),
+                PdfDocuments.restrictions(restrictedSession.workingFile, ""),
+            )
+            assertFalse(PdfDocuments.isOwnerPassword(restrictedSession.workingFile, ""))
+
+            // Neither the open password nor a guess lifts them, and nothing changes.
+            assertThrows(EditSession.WrongOwnerPassword::class.java) { restrictedSession.removeRestrictions("") }
+            assertThrows(EditSession.WrongOwnerPassword::class.java) { restrictedSession.removeRestrictions("guess") }
+            assertFalse(restrictedSession.canUndo)
+
+            restrictedSession.removeRestrictions("owner-secret")
+            PDDocument.load(restrictedSession.workingFile).use {
+                assertFalse(it.isEncrypted)
+                assertEquals(pageCount, it.numberOfPages)
+            }
+            assertTrue(PdfDocuments.restrictions(restrictedSession.workingFile, "").isEmpty())
+
+            // One undo step puts the restrictions back.
+            restrictedSession.undo()
+            assertEquals(3, PdfDocuments.restrictions(restrictedSession.workingFile, restrictedSession.password).size)
+        } finally {
+            restrictedSession.close()
+        }
     }
 
     @Test

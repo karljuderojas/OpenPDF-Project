@@ -210,6 +210,9 @@ sealed interface ViewerAction {
     /** Locks the PDF with [password], or takes its password off when it is empty. */
     data class SetPassword(val password: String) : ViewerAction
 
+    /** Lifts the PDF's restrictions if [password] is its owner password; [onResult] says whether it was. */
+    data class RemoveRestrictions(val password: String, val onResult: (Boolean) -> Unit) : ViewerAction
+
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
     data class Stroke(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val points: List<Offset>) : ViewerAction
     /** A drag with a box tool from [start] to [end]; [shape] is what the Shapes tool draws. */
@@ -471,6 +474,7 @@ fun ViewerScreen(
                 is ViewerAction.Search -> viewModel.search(action.query)
                 is ViewerAction.Unlock -> viewModel.unlock(action.password)
                 is ViewerAction.SetPassword -> viewModel.setPassword(action.password)
+                is ViewerAction.RemoveRestrictions -> viewModel.removeRestrictions(action.password, action.onResult)
                 is ViewerAction.Stroke -> viewModel.ink(action.page, listOf(action.points), action.style)
                 is ViewerAction.Box -> action.tool.markup.let { kind ->
                     if (kind != null) {
@@ -661,6 +665,7 @@ fun ViewerContent(
     var pendingField by remember { mutableStateOf<SignField?>(null) }
     var sharing by rememberSaveable { mutableStateOf(false) }
     var choosingPassword by rememberSaveable { mutableStateOf(false) }
+    var showingRestrictions by rememberSaveable { mutableStateOf(false) }
     // Chosen here so the page preview follows at once; the view model remembers them for next time.
     var styles by remember { mutableStateOf(toolStyles) }
     LaunchedEffect(toolStyles) { styles = styles + toolStyles }
@@ -1173,6 +1178,7 @@ fun ViewerContent(
                         }
                         R.string.tool_share -> sharing = true
                         R.string.tool_password -> choosingPassword = true
+                        R.string.tool_restrictions -> showingRestrictions = true
                         R.string.tool_info -> onAction(ViewerAction.ShowInfo)
                         R.string.tool_print -> onAction(ViewerAction.Print)
                         R.string.tool_comments -> showComments = true
@@ -1660,6 +1666,16 @@ fun ViewerContent(
             onSetPassword = {
                 choosingPassword = false
                 onAction(ViewerAction.SetPassword(it))
+            },
+        )
+    }
+
+    if (showingRestrictions) {
+        RestrictionsDialog(
+            restrictions = ready?.restrictions.orEmpty(),
+            onDismiss = { showingRestrictions = false },
+            onRemove = { password, wrong ->
+                onAction(ViewerAction.RemoveRestrictions(password) { ok -> if (ok) showingRestrictions = false else wrong() })
             },
         )
     }

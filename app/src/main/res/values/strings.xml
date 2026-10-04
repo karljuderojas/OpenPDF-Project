@@ -69,6 +69,7 @@
     <string name="tool_split">Split</string>
     <string name="tool_watermark">Watermark</string>
     <string name="tool_password">Password</string>
+    <string name="tool_restrictions">Restrictions</string>
     <string name="tool_print">Print</string>
     <string name="tool_share">Share</string>
     <string name="tool_info">Document info</string>
@@ -354,6 +355,21 @@
     <string name="password_remove">Remove password</string>
     <string name="password_remove_title">Remove the password?</string>
     <string name="password_remove_body">Once you save, anyone can open this PDF without a password.</string>
+    <string name="restrictions_title">Restrictions</string>
+    <string name="restrictions_none">This PDF has no restrictions.</string>
+    <string name="restrictions_body">The person who made this PDF has turned these off:</string>
+    <string name="restriction_print">Printing</string>
+    <string name="restriction_copy">Copying text and images</string>
+    <string name="restriction_edit">Editing the content</string>
+    <string name="restriction_annotate">Adding comments and notes</string>
+    <string name="restriction_fill_forms">Filling in forms</string>
+    <string name="restriction_assemble">Changing pages</string>
+    <string name="restrictions_remove">Remove restrictions</string>
+    <string name="restrictions_owner_title">Owner password</string>
+    <string name="restrictions_owner_body">Enter the owner password to remove the restrictions. Without it they stay, and FreePDF can\'t guess it. The unlocked copy has no password at all once you save.</string>
+    <string name="restrictions_owner_label">Owner password</string>
+    <string name="restrictions_owner_wrong">That is not the owner password.</string>
+    <string name="restrictions_removed">Restrictions removed. Save to keep them off.</string>
     <string name="password_added">Password added. Save to keep it.</string>
     <string name="password_changed">Password changed. Save to keep it.</string>
     <string name="password_removed">Password removed. Save to keep it.</string>
@@ -416,6 +432,7 @@
     <string name="tool_about_watermark">Stamp text or a picture across pages, such as DRAFT or a logo.</string>
     <string name="tool_about_merge">Add another PDF\'s pages to this one.</string>
     <string name="tool_about_share">Send the PDF to another app.</string>
+    <string name="tool_about_restrictions">See what the PDF does not allow, and lift it with the owner password.</string>
     <string name="tool_about_password">Lock the PDF with a password, or change or remove one.</string>
     <string name="tool_about_info">See the title, author, page size and other details.</string>
     <string name="tool_about_print">Print it, or save it as a PDF from the print screen.</string>
@@ -444,6 +461,7 @@
     <string name="tool_synonyms_watermark">stamp, draft, confidential, logo, overlay, background, text across page</string>
     <string name="tool_synonyms_merge">combine, join, append, add pdf, attach</string>
     <string name="tool_synonyms_share">send, email, export, upload</string>
+    <string name="tool_synonyms_restrictions">restrictions, permissions, unlock, print, copy, edit, owner password, secured</string>
     <string name="tool_synonyms_password">lock, unlock, protect, encrypt, secure</string>
     <string name="tool_synonyms_info">details, properties, metadata, author, title, size</string>
     <string name="tool_synonyms_print">printer, paper, hard copy</string>

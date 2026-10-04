@@ -64,6 +64,7 @@ import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
 import io.github.karljuderojas.freepdf.pdf.DisplayRect
+import io.github.karljuderojas.freepdf.pdf.edit.PdfDocuments
 import io.github.karljuderojas.freepdf.pdf.info.DocumentInfo
 import io.github.karljuderojas.freepdf.pdf.links.LinkTarget
 import io.github.karljuderojas.freepdf.pdf.links.PageLink
@@ -2000,6 +2001,34 @@ class ScreenshotTest {
         composeRule.onNodeWithText("Remove password").performClick()
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_password_remove.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerRestrictions() {
+        val restricted = sample.copy(
+            restrictions = listOf(PdfDocuments.Restriction.Print, PdfDocuments.Restriction.Copy, PdfDocuments.Restriction.Edit),
+        )
+        show { viewer(ViewerMode.More, restricted) }
+        composeRule.onNodeWithText("Restrictions").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_restrictions.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerRestrictionsOwnerPassword() {
+        val restricted = sample.copy(
+            restrictions = listOf(PdfDocuments.Restriction.Print, PdfDocuments.Restriction.Copy, PdfDocuments.Restriction.Edit),
+        )
+        show { viewer(ViewerMode.More, restricted) }
+        composeRule.onNodeWithText("Restrictions").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        // The password field never lets Compose go idle, as in viewerPasswordAdd.
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Remove restrictions").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_restrictions_owner_password.png")
     }
 
     @OptIn(ExperimentalRoborazziApi::class)
