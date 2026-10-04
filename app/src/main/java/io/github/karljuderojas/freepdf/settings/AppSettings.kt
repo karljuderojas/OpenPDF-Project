@@ -72,6 +72,14 @@ class AppSettings(private val prefs: SharedPreferences) {
     }
 
     companion object {
+        /** The watermark words typed last that were not one of the ready-made ones, or null. */
+        fun lastWatermarkText(prefs: SharedPreferences): String? = prefs.getString(KEY_WATERMARK_TEXT, null)?.takeIf { it.isNotBlank() }
+
+        fun setLastWatermarkText(prefs: SharedPreferences, text: String) {
+            prefs.edit().putString(KEY_WATERMARK_TEXT, text).apply()
+        }
+
+        private const val KEY_WATERMARK_TEXT = "watermark_custom_text"
         const val MIN_TEXT_SIZE = 12
         const val MAX_TEXT_SIZE = 36
         const val DEFAULT_TEXT_SIZE = 18

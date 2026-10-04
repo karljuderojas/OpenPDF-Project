@@ -80,6 +80,7 @@ private val descriptions = mapOf(
     R.string.tool_watermark to R.string.tool_about_watermark,
     R.string.tool_share to R.string.tool_about_share,
     R.string.tool_password to R.string.tool_about_password,
+    R.string.tool_restrictions to R.string.tool_about_restrictions,
     R.string.tool_info to R.string.tool_about_info,
     R.string.tool_print to R.string.tool_about_print,
 )
@@ -112,6 +113,7 @@ private val synonymLists = mapOf(
     R.string.tool_watermark to R.string.tool_synonyms_watermark,
     R.string.tool_share to R.string.tool_synonyms_share,
     R.string.tool_password to R.string.tool_synonyms_password,
+    R.string.tool_restrictions to R.string.tool_synonyms_restrictions,
     R.string.tool_info to R.string.tool_synonyms_info,
     R.string.tool_print to R.string.tool_synonyms_print,
 )
