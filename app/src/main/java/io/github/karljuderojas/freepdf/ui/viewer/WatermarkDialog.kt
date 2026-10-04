@@ -77,7 +77,8 @@ private val presets = listOf("CONFIDENTIAL", "DRAFT", "COPY", "SAMPLE", "DO NOT 
  * zero-based pages, the text, the picture if that is what was chosen, and the look. [onRemove]
  * gets the pages whose watermarks (the ones added with this app) should come off instead.
  * Tapping a ready-made word fills the text field, which can then be edited; words typed that are
- * not one of those are remembered and offered as a chip next time. [initialText] (the remembered
+ * not one of those are remembered and offered as a chip next time, until a ready-made word is
+ * applied, which forgets them. [initialText] (the remembered
  * words, when there are some) and [initialPicture] are what the dialog starts with.
  */
 @Composable
@@ -184,7 +185,11 @@ fun WatermarkDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    if (!picture && text.trim() !in presets) AppSettings.setLastWatermarkText(prefs, text.trim())
+                    // Words of the user's own are kept for next time; a ready-made word chosen instead forgets them.
+                    if (!picture) {
+                        if (text.trim() !in presets) AppSettings.setLastWatermarkText(prefs, text.trim())
+                        else AppSettings.clearLastWatermarkText(prefs)
+                    }
                     onWatermark(pages, text.trim(), if (picture) image else null, style)
                 },
                 enabled = ready && style.isValid,

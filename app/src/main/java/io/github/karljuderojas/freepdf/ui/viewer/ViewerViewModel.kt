@@ -532,6 +532,21 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
     }
 
     /**
+     * Page [index] drawn [widthPx] wide to be looked at rather than shown, as Trim margins does
+     * for every page: a picture not already on hand is not kept, so the pages on screen stay in
+     * the cache and come back without a flash when the dialog closes.
+     */
+    suspend fun pageForAnalysis(index: Int, widthPx: Int): Bitmap? {
+        val key = "$revision/$index@$widthPx"
+        return cache.get(key) ?: lock.withLock {
+            val current = renderer ?: return@withLock null
+            if (index >= current.pageCount) return@withLock null
+            cache.get(key) ?: runCatching { current.renderPage(index, widthPx) }
+                .getOrElse { if (it is OutOfMemoryError) null else throw it }
+        }
+    }
+
+    /**
      * Page [index] as [page] gives it but without its annotations: the page itself, which is what
      * is left under a redaction once the notes and stamps touching it have gone. Not cached; it
      * is wanted once per mark, at a small size.

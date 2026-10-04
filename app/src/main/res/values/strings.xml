@@ -351,8 +351,10 @@
     <string name="crop_apply_all">All %1$d pages</string>
     <string name="crop_trim">Trim margins automatically</string>
     <string name="crop_trim_working">Looking for margins…</string>
+    <string name="crop_trim_working_pages">Looking for margins… %1$d of %2$d pages</string>
     <string name="crop_trim_found">Found white margins to trim. Check the sketch, then tap Crop.</string>
-    <string name="crop_trim_found_pages">Found white margins on %1$d of %2$d pages. Check the sketch, then tap Crop.</string>
+    <string name="crop_trim_found_pages">Found white margins on %1$d of %2$d pages. The smallest margins found are used for all of them, so the pages keep one size. Check the sketch, then tap Crop.</string>
+    <string name="crop_trim_uneven">Found white margins on %1$d of %2$d pages, but one page is printed to its edge, so there is nothing all of them can be trimmed by.</string>
     <string name="crop_trim_none">No white margins to trim here.</string>
     <string name="crop_reset">Show whole page</string>
     <string name="crop_nothing_to_reset">These pages are not cropped.</string>

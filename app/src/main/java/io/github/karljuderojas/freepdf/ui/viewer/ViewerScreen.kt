@@ -394,6 +394,7 @@ fun ViewerScreen(
         state = state,
         onBack = onBack,
         loadPage = viewModel::page,
+        loadPageForAnalysis = viewModel::pageForAnalysis,
         probePage = viewModel::pageWithoutAnnotations,
         onPageShown = viewModel::pageShown,
         loadWords = viewModel::words,
@@ -552,6 +553,8 @@ fun ViewerContent(
     state: ViewerState,
     onBack: () -> Unit,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
+    /** As [loadPage], for pages drawn only to be looked at (Trim margins), which need not be cached. */
+    loadPageForAnalysis: suspend (index: Int, widthPx: Int) -> Bitmap? = loadPage,
     /** The page without its annotations, for Redact's Auto colour; what is left once the marked notes and stamps go. */
     probePage: suspend (index: Int, widthPx: Int) -> Bitmap? = loadPage,
     /** Told once the main page view shows a page rendered at a revision; thumbnails do not count. */
@@ -1593,7 +1596,7 @@ fun ViewerContent(
             selectedPages = selectedPages.sorted(),
             pageAspect = ready?.pageSizes?.getOrNull(selectedPage)?.aspectRatio ?: 0.77f,
             previewPage = selectedPage,
-            loadPage = loadPage,
+            loadPage = loadPageForAnalysis,
             onDismiss = { cropping = false },
             onTrim = { margins ->
                 cropping = false

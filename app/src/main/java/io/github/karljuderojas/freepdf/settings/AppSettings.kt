@@ -79,6 +79,11 @@ class AppSettings(private val prefs: SharedPreferences) {
             prefs.edit().putString(KEY_WATERMARK_TEXT, text).apply()
         }
 
+        /** Forgets the words kept by [setLastWatermarkText], so they are no longer offered. */
+        fun clearLastWatermarkText(prefs: SharedPreferences) {
+            prefs.edit().remove(KEY_WATERMARK_TEXT).apply()
+        }
+
         private const val KEY_WATERMARK_TEXT = "watermark_custom_text"
         const val MIN_TEXT_SIZE = 12
         const val MAX_TEXT_SIZE = 36

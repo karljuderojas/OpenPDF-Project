@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,5 +37,14 @@ class AppSettingsTest {
         assertFalse(restarted.rememberHistory.value)
         assertEquals(PageColors.Sepia, restarted.pageColors.value)
         assertEquals(SpeechRate.Fast, restarted.speechRate.value)
+    }
+
+    @Test
+    fun theLastWatermarkWordsCanBeForgotten() {
+        assertNull(AppSettings.lastWatermarkText(prefs))
+        AppSettings.setLastWatermarkText(prefs, "Case 42")
+        assertEquals("Case 42", AppSettings.lastWatermarkText(prefs))
+        AppSettings.clearLastWatermarkText(prefs)
+        assertNull(AppSettings.lastWatermarkText(prefs))
     }
 }
