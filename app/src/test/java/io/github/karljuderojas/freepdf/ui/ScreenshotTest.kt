@@ -1,6 +1,7 @@
 package io.github.karljuderojas.freepdf.ui
 
 import android.graphics.Bitmap
+import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Looper
@@ -53,6 +54,7 @@ import androidx.compose.ui.test.swipe
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import androidx.core.content.res.ResourcesCompat
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
@@ -83,6 +85,7 @@ import io.github.karljuderojas.freepdf.pdf.sign.SignatureStore
 import io.github.karljuderojas.freepdf.pdf.sign.SignedCopy
 import io.github.karljuderojas.freepdf.pdf.sign.TimestampReport
 import io.github.karljuderojas.freepdf.ui.sign.SignatureInk
+import io.github.karljuderojas.freepdf.settings.AppSettings
 import io.github.karljuderojas.freepdf.settings.PageColors
 import io.github.karljuderojas.freepdf.settings.SpeechRate
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
@@ -1747,6 +1750,52 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/crop_trim_margins.png")
     }
 
+    // Trim margins still looking at all six pages: the count climbs as pages are looked at, and
+    // the button and Crop wait.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun cropTrimLooking() {
+        show {
+            io.github.karljuderojas.freepdf.ui.viewer.CropPagesDialog(
+                pageCount = 6, selectedPages = (0 until 6).toList(), pageAspect = 612f / 792f,
+                onDismiss = {}, onCrop = { _, _ -> }, initialLooking = true,
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("crop-trim").assertIsNotEnabled()
+        captureScreenRoboImage("build/outputs/roborazzi/crop_trim_looking.png")
+    }
+
+    // Trim margins on a page printed to its edges: nothing to trim, and Crop stays off.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun cropTrimNoneFound() {
+        show {
+            io.github.karljuderojas.freepdf.ui.viewer.CropPagesDialog(
+                pageCount = 6, selectedPages = listOf(1), pageAspect = 612f / 792f,
+                onDismiss = {}, onCrop = { _, _ -> }, initialTrim = emptyMap(), previewPage = 1,
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Crop").assertIsNotEnabled()
+        captureScreenRoboImage("build/outputs/roborazzi/crop_trim_none_found.png")
+    }
+
+    // Trim margins over six pages: one shared crop for all of them, and the note says so.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun cropTrimMarginsAllPages() {
+        val found = io.github.karljuderojas.freepdf.pdf.edit.MarginFinder.find(scaled(loadSample("page-1.png"), 300))!!
+        show {
+            io.github.karljuderojas.freepdf.ui.viewer.CropPagesDialog(
+                pageCount = 6, selectedPages = (0 until 6).toList(), pageAspect = 612f / 792f,
+                onDismiss = {}, onCrop = { _, _ -> }, initialTrim = (0 until 6).associateWith { found },
+            )
+        }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/crop_trim_margins_all_pages.png")
+    }
+
     // A page before and after the trim: the same picture, cut to what the finder found.
     @Test
     fun cropTrimBeforeAfter() = capture("crop_trim_before_after") {
@@ -1808,10 +1857,13 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_watermark_picture.png")
     }
 
-    // The words are the user's own, typed over a preset; the row offers them next to the presets.
+    // The words are the user's own, remembered from last time: the row offers them as a chip next
+    // to the presets, marked, and the field starts with them.
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerPagesWatermarkCustomText() {
+        val prefs = ApplicationProvider.getApplicationContext<Context>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        AppSettings.setLastWatermarkText(prefs, "FOR REVIEW ONLY")
         var open by mutableStateOf(false)
         show {
             viewer(ViewerMode.Pages, sixPages, selectedPage = 1)

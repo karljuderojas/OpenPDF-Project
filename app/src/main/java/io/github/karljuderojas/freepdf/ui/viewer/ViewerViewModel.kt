@@ -533,6 +533,21 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
     }
 
     /**
+     * Page [index] drawn [widthPx] wide to be looked at rather than shown, as Trim margins does
+     * for every page: a picture not already on hand is not kept, so the pages on screen stay in
+     * the cache and come back without a flash when the dialog closes.
+     */
+    suspend fun pageForAnalysis(index: Int, widthPx: Int): Bitmap? {
+        val key = "$revision/$index@$widthPx"
+        return cache.get(key) ?: lock.withLock {
+            val current = renderer ?: return@withLock null
+            if (index >= current.pageCount) return@withLock null
+            cache.get(key) ?: runCatching { current.renderPage(index, widthPx) }
+                .getOrElse { if (it is OutOfMemoryError) null else throw it }
+        }
+    }
+
+    /**
      * The part of page [index] in [region], rendered as if the page were [fullWidthPx] wide.
      * Not cached: it is only good for one zoom and scroll position, and it is at most a
      * screenful of pixels, so a zoomed screen never holds much more than two screenfuls.

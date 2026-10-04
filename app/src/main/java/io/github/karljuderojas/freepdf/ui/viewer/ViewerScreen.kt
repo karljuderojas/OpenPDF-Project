@@ -391,6 +391,7 @@ fun ViewerScreen(
         state = state,
         onBack = onBack,
         loadPage = viewModel::page,
+        loadPageForAnalysis = viewModel::pageForAnalysis,
         loadWords = viewModel::words,
         findLine = viewModel::editableLine,
         loadEditableLines = viewModel::editableLines,
@@ -547,6 +548,8 @@ fun ViewerContent(
     state: ViewerState,
     onBack: () -> Unit,
     loadPage: suspend (index: Int, widthPx: Int) -> Bitmap?,
+    /** As [loadPage], for pages drawn only to be looked at (Trim margins), which need not be cached. */
+    loadPageForAnalysis: suspend (index: Int, widthPx: Int) -> Bitmap? = loadPage,
     loadWords: suspend (page: Int) -> List<PageWord> = { emptyList() },
     findLine: suspend (page: Int, at: Offset) -> TextEditing.EditableLine? = { _, _ -> null },
     loadEditableLines: suspend (page: Int) -> List<TextEditing.EditableLine> = { emptyList() },
@@ -1582,7 +1585,7 @@ fun ViewerContent(
             selectedPages = selectedPages.sorted(),
             pageAspect = ready?.pageSizes?.getOrNull(selectedPage)?.aspectRatio ?: 0.77f,
             previewPage = selectedPage,
-            loadPage = loadPage,
+            loadPage = loadPageForAnalysis,
             onDismiss = { cropping = false },
             onTrim = { margins ->
                 cropping = false
