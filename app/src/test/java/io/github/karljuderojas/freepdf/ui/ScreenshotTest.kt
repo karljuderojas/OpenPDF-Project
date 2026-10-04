@@ -2112,6 +2112,49 @@ class ScreenshotTest {
 
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
+    fun viewerRestrictionsOwnerPasswordSigned() {
+        // A signed, locked contract: the owner password step says the signature will not verify after the rewrite.
+        val restricted = sample.copy(restrictions = listOf(PdfDocuments.Restriction.Print), signatures = listOf(signedByDana))
+        show { viewer(ViewerMode.More, restricted) }
+        composeRule.onNodeWithText("Restrictions").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText("Remove restrictions").performClick()
+        composeRule.mainClock.advanceTimeBy(1_000)
+        composeRule.onNodeWithTag("restrictions-signed-note").assertExists()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_restrictions_owner_password_signed.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerRestrictionsOpenedAsOwner() {
+        // The file's owner password is the one it opened with (often empty): the list shows, with a note, and Remove needs no password.
+        val actions = mutableListOf<ViewerAction>()
+        val restricted = sample.copy(restrictions = listOf(PdfDocuments.Restriction.Print, PdfDocuments.Restriction.Copy), openedAsOwner = true)
+        show { viewer(ViewerMode.More, restricted, onAction = { actions += it }) }
+        composeRule.onNodeWithText("Restrictions").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("restrictions-owner-opened").assertExists()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_restrictions_opened_as_owner.png")
+        composeRule.onNodeWithText("Remove restrictions").performClick()
+        composeRule.waitForIdle()
+        val remove = actions.filterIsInstance<ViewerAction.RemoveRestrictions>().single()
+        assertEquals(null, remove.password)
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerRestrictionsUnreadable() {
+        // PdfBox could not read the permissions: the dialog says so rather than "no restrictions".
+        show { viewer(ViewerMode.More, sample.copy(restrictions = null)) }
+        composeRule.onNodeWithText("Restrictions").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("FreePDF could not read this PDF's permissions.").assertExists()
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_restrictions_unreadable.png")
+    }
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
     fun viewerDocumentInfo() {
         fun at(day: Int, hour: Int, minute: Int) =
             Calendar.getInstance().apply { set(2026, Calendar.SEPTEMBER, day, hour, minute, 0) }.toInstant()

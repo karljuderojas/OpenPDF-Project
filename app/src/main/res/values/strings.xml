@@ -399,6 +399,9 @@
     <string name="restrictions_owner_label">Owner password</string>
     <string name="restrictions_owner_wrong">That is not the owner password.</string>
     <string name="restrictions_removed">Restrictions removed. Save to keep them off.</string>
+    <string name="restrictions_unreadable">FreePDF could not read this PDF\'s permissions.</string>
+    <string name="restrictions_owner_opened">This PDF opened with its owner password, so FreePDF already allows all of this; other apps may not until the restrictions are removed.</string>
+    <string name="restrictions_signed_note">This PDF carries a digital signature. Removing the restrictions rewrites the file, so the signature will no longer verify once you save.</string>
     <string name="password_added">Password added. Save to keep it.</string>
     <string name="password_changed">Password changed. Save to keep it.</string>
     <string name="password_removed">Password removed. Save to keep it.</string>

@@ -19,6 +19,10 @@ class EditSession(private val dir: File, source: InputStream) {
 
     val workingFile = File(dir, "working.pdf")
 
+    // The PDF as it was opened. Edits re-encrypt the working copy under a password of their own
+    // (see PdfDocuments.keepProtection), so the owner password is checked against this copy.
+    private val originalFile = File(dir, "original.pdf")
+
     /** A saved copy of the document, which version of it that was, and the password that opens it. */
     private class Snapshot(val file: File, val version: Int, val password: String)
 
@@ -35,6 +39,7 @@ class EditSession(private val dir: File, source: InputStream) {
     init {
         dir.mkdirs()
         workingFile.outputStream().use { source.copyTo(it) }
+        Files.copy(workingFile.toPath(), originalFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
     }
 
     /** The password the PDF was unlocked with; empty for one that opens without. See [unlock]. */
@@ -67,20 +72,28 @@ class EditSession(private val dir: File, source: InputStream) {
     class WrongOwnerPassword : Exception()
 
     /**
+     * True if [candidate] is the owner password of the PDF as it was opened. Edits made since do
+     * not change the answer: they are checked against the copy taken at the start, not the
+     * working copy, whose owner password is the session's own.
+     */
+    fun isOwnerPassword(candidate: String): Boolean = PdfDocuments.isOwnerPassword(originalFile, candidate)
+
+    /**
      * Takes every restriction, and any password, off the working copy as one undoable edit. Only
-     * the owner password allows it: with anything else this throws [WrongOwnerPassword] and
-     * changes nothing.
+     * the owner password allows it (see [isOwnerPassword]): with anything else this throws
+     * [WrongOwnerPassword] and changes nothing. Once it matches, the working copy is unlocked
+     * with the password this session holds; PdfBox strips the security either way.
      */
     fun removeRestrictions(ownerPassword: String) {
-        if (!PdfDocuments.isOwnerPassword(workingFile, ownerPassword)) throw WrongOwnerPassword()
-        commit("", loadPassword = ownerPassword) { it.isAllSecurityToBeRemoved = true }
+        if (!isOwnerPassword(ownerPassword)) throw WrongOwnerPassword()
+        commit("") { it.isAllSecurityToBeRemoved = true }
     }
 
     /** Saves [change] as the new working copy, which [nextPassword] opens, and records an undo step. */
-    private fun commit(nextPassword: String, loadPassword: String = password, change: (PDDocument) -> Unit) {
+    private fun commit(nextPassword: String, change: (PDDocument) -> Unit) {
         val next = File(dir, "next.pdf")
         try {
-            PDDocument.load(workingFile, loadPassword).use { document ->
+            PDDocument.load(workingFile, password).use { document ->
                 change(document)
                 document.save(next)
             }

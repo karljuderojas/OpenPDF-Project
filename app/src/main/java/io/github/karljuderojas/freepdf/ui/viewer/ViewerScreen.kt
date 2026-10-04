@@ -210,8 +210,11 @@ sealed interface ViewerAction {
     /** Locks the PDF with [password], or takes its password off when it is empty. */
     data class SetPassword(val password: String) : ViewerAction
 
-    /** Lifts the PDF's restrictions if [password] is its owner password; [onResult] says whether it was. */
-    data class RemoveRestrictions(val password: String, val onResult: (Boolean) -> Unit) : ViewerAction
+    /**
+     * Lifts the PDF's restrictions if [password] is its owner password, or with the password the
+     * PDF opened with when [password] is null; [onResult] says whether it was the owner password.
+     */
+    data class RemoveRestrictions(val password: String?, val onResult: (Boolean) -> Unit) : ViewerAction
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
     data class Stroke(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val points: List<Offset>) : ViewerAction
@@ -1672,7 +1675,9 @@ fun ViewerContent(
 
     if (showingRestrictions) {
         RestrictionsDialog(
-            restrictions = ready?.restrictions.orEmpty(),
+            restrictions = ready?.restrictions,
+            openedAsOwner = ready?.openedAsOwner == true,
+            signed = ready?.signatures?.isNotEmpty() == true,
             onDismiss = { showingRestrictions = false },
             onRemove = { password, wrong ->
                 onAction(ViewerAction.RemoveRestrictions(password) { ok -> if (ok) showingRestrictions = false else wrong() })
