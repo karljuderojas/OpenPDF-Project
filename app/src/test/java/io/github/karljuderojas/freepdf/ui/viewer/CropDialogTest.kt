@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.karljuderojas.freepdf.pdf.edit.CropMargins
@@ -63,6 +64,8 @@ class CropDialogTest {
         )
     }
 
+    // The dialog's column scrolls, and on the test device's small screen the buttons below the
+    // sliders are off screen, where a tap lands on nothing: scroll to each before clicking it.
     private fun waitForNote(text: String) {
         composeRule.waitUntil(5_000) { composeRule.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty() }
     }
@@ -73,7 +76,7 @@ class CropDialogTest {
     fun trimHandsTheFoundMarginsToOnTrim() {
         composeRule.setContent { TrimDialog(listOf(1)) { _, _ -> page(0.1f) } }
         composeRule.onNodeWithText("Crop").assertIsNotEnabled()
-        composeRule.onNodeWithTag("crop-trim").performClick()
+        composeRule.onNodeWithTag("crop-trim").performScrollTo().performClick()
         waitForNote("Found white margins")
         composeRule.onNodeWithTag("crop-trim").assertIsEnabled()
         composeRule.onNodeWithText("Crop").performClick()
@@ -88,7 +91,7 @@ class CropDialogTest {
     @Test
     fun aSliderTouchDropsTheFoundMarginsButKeepsTheOtherEdges() {
         composeRule.setContent { TrimDialog(listOf(1)) { _, _ -> page(0.1f) } }
-        composeRule.onNodeWithTag("crop-trim").performClick()
+        composeRule.onNodeWithTag("crop-trim").performScrollTo().performClick()
         waitForNote("Found white margins")
         composeRule.onNodeWithTag("crop-left").performSemanticsAction(SemanticsActions.SetProgress) { it(0.3f) }
         composeRule.waitForIdle()
@@ -107,12 +110,12 @@ class CropDialogTest {
     fun changingThePagesWhileLookingDropsThatScan() {
         val gate = CompletableDeferred<Unit>()
         composeRule.setContent { TrimDialog(listOf(1)) { _, _ -> gate.await(); page(0.1f) } }
-        composeRule.onNodeWithTag("crop-trim").performClick()
+        composeRule.onNodeWithTag("crop-trim").performScrollTo().performClick()
         composeRule.onNodeWithTag("crop-trim").assertIsNotEnabled()
         composeRule.onNodeWithTag("crop-trim-note").assertTextContains("Looking", substring = true)
 
         // All pages chosen while the one page is still being looked at: that answer is not wanted.
-        composeRule.onNodeWithTag("crop-all").performClick()
+        composeRule.onNodeWithTag("crop-all").performScrollTo().performClick()
         composeRule.onNodeWithTag("crop-trim").assertIsEnabled()
         composeRule.onNodeWithTag("crop-trim-note").assertDoesNotExist()
         gate.complete(Unit)
@@ -122,7 +125,7 @@ class CropDialogTest {
         composeRule.onNodeWithText("Crop").assertIsNotEnabled()
 
         // Asked again, it looks at the pages chosen now.
-        composeRule.onNodeWithTag("crop-trim").performClick()
+        composeRule.onNodeWithTag("crop-trim").performScrollTo().performClick()
         waitForNote("Found white margins on 3 of 3 pages")
         composeRule.onNodeWithText("Crop").performClick()
         assertEquals(setOf(0, 1, 2), trimmed!!.keys)
@@ -132,7 +135,7 @@ class CropDialogTest {
     fun theFoundMarginsSurviveARecreation() {
         val restoration = StateRestorationTester(composeRule)
         restoration.setContent { TrimDialog(listOf(1)) { _, _ -> page(0.1f) } }
-        composeRule.onNodeWithTag("crop-trim").performClick()
+        composeRule.onNodeWithTag("crop-trim").performScrollTo().performClick()
         waitForNote("Found white margins")
 
         restoration.emulateSavedInstanceStateRestore()
@@ -149,7 +152,7 @@ class CropDialogTest {
         val loads = AtomicInteger()
         val restoration = StateRestorationTester(composeRule)
         restoration.setContent { TrimDialog(listOf(1)) { _, _ -> loads.incrementAndGet(); gate.await(); page(0.1f) } }
-        composeRule.onNodeWithTag("crop-trim").performClick()
+        composeRule.onNodeWithTag("crop-trim").performScrollTo().performClick()
         composeRule.waitUntil(5_000) { loads.get() == 1 }
 
         restoration.emulateSavedInstanceStateRestore()
@@ -167,7 +170,7 @@ class CropDialogTest {
         composeRule.setContent {
             TrimDialog(listOf(0, 1)) { index, _ -> if (index == 0) throw IllegalStateException("Page 1 is damaged") else page(0.1f) }
         }
-        composeRule.onNodeWithTag("crop-trim").performClick()
+        composeRule.onNodeWithTag("crop-trim").performScrollTo().performClick()
         waitForNote("Found white margins on 1 of 2 pages")
         composeRule.onNodeWithTag("crop-trim").assertIsEnabled()
         composeRule.onNodeWithText("Crop").performClick()
@@ -180,7 +183,7 @@ class CropDialogTest {
     fun aBlankPageIsCutLikeTheOthersSoThePagesKeepOneSize() {
         val blank = Bitmap.createBitmap(300, 400, Bitmap.Config.ARGB_8888).also { Canvas(it).drawColor(Color.WHITE) }
         composeRule.setContent { TrimDialog(listOf(0, 1)) { index, _ -> if (index == 0) blank else page(0.1f) } }
-        composeRule.onNodeWithTag("crop-trim").performClick()
+        composeRule.onNodeWithTag("crop-trim").performScrollTo().performClick()
         waitForNote("Found white margins on 1 of 2 pages")
         composeRule.onNodeWithText("Crop").performClick()
         assertEquals(setOf(0, 1), trimmed!!.keys)
@@ -191,7 +194,7 @@ class CropDialogTest {
     fun aPagePrintedToItsEdgesStopsTheOthersBeingCut() {
         // Page 2 is black to every edge. Before, it dropped out of the scan and was cut by page 1's margins.
         composeRule.setContent { TrimDialog(listOf(0, 1)) { index, _ -> if (index == 0) page(0.1f) else page(0f) } }
-        composeRule.onNodeWithTag("crop-trim").performClick()
+        composeRule.onNodeWithTag("crop-trim").performScrollTo().performClick()
         waitForNote("printed to its edge")
         composeRule.onNodeWithText("Crop").assertIsNotEnabled()
         assertNull(trimmed)
@@ -200,7 +203,7 @@ class CropDialogTest {
     @Test
     fun aSinglePagePrintedToItsEdgesHasNothingToTrim() {
         composeRule.setContent { TrimDialog(listOf(1)) { _, _ -> page(0f) } }
-        composeRule.onNodeWithTag("crop-trim").performClick()
+        composeRule.onNodeWithTag("crop-trim").performScrollTo().performClick()
         waitForNote("No white margins")
         composeRule.onNodeWithText("Crop").assertIsNotEnabled()
     }
@@ -208,7 +211,7 @@ class CropDialogTest {
     @Test
     fun severalPagesShareTheSmallestMarginFound() {
         composeRule.setContent { TrimDialog(listOf(0, 1, 2)) { index, _ -> page(if (index == 1) 0.2f else 0.1f) } }
-        composeRule.onNodeWithTag("crop-trim").performClick()
+        composeRule.onNodeWithTag("crop-trim").performScrollTo().performClick()
         waitForNote("Found white margins on 3 of 3 pages")
         composeRule.onNodeWithText("Crop").performClick()
 
@@ -224,7 +227,7 @@ class CropDialogTest {
         composeRule.setContent {
             TrimDialog(listOf(0, 1)) { index, _ -> if (index == 0) page(0f, left = 0.1f) else page(0f, right = 0.1f) }
         }
-        composeRule.onNodeWithTag("crop-trim").performClick()
+        composeRule.onNodeWithTag("crop-trim").performScrollTo().performClick()
         waitForNote("printed to its edge")
         composeRule.onNodeWithText("Crop").assertIsNotEnabled()
     }
