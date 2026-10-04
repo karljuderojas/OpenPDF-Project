@@ -579,13 +579,16 @@ class ScreenshotTest {
 
     @OptIn(ExperimentalRoborazziApi::class)
     private fun captureRenameDialog(name: String, error: Int?) {
-        composeRule.mainClock.autoAdvance = false
+        var open by mutableStateOf(false)
         show {
             shell(MainTab.Files) {
                 FilesContent(emptyList(), sampleRecent, {}, {}, {}, {}, {}, modifier = it, onRename = {}, onDelete = {}, now = now)
-                RenameDialog(currentName = sampleRecent[1].name, error = error, onConfirm = {}, onCancel = {})
+                if (open) RenameDialog(currentName = sampleRecent[1].name, error = error, onConfirm = {}, onCancel = {})
             }
         }
+        // The dialog only opens once the clock is held, since its field's cursor blinks forever.
+        composeRule.mainClock.autoAdvance = false
+        open = true
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/$name.png")
     }
