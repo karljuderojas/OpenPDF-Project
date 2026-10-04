@@ -105,24 +105,30 @@ fun CropPagesDialog(
     LaunchedEffect(request) {
         if (request == null || loadPage == null) return@LaunchedEffect
         lookedAtSoFar = 0
-        val found = withContext(Dispatchers.Default) {
+        // Each page that could be drawn, with its margins, or null for a blank page. A page that
+        // cannot be drawn is left out: nobody knows what is on it, so it is not cut, and it must
+        // not take the app down either.
+        val seen = withContext(Dispatchers.Default) {
             request.sorted().mapNotNull { page ->
-                // A page that cannot be drawn has no margins to find; it must not take the app down.
-                val margins = try {
-                    loadPage(page, MarginFinder.PICTURE_WIDTH_PX)?.let { MarginFinder.find(it) }
+                val drawn = try {
+                    loadPage(page, MarginFinder.PICTURE_WIDTH_PX)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     null
                 }
                 lookedAtSoFar++
-                margins?.let { page to it }
+                drawn?.let { page to MarginFinder.find(it) }
             }.toMap()
         }
-        foundOn = found.size
+        val found = seen.filterValues { it != null }.mapValues { it.value!! }
+        foundOn = found.values.count { !it.isEmpty }
         trim = when {
-            request.size > 1 -> MarginFinder.shared(found.values)?.let { shared -> request.associateWith { shared } } ?: emptyMap()
-            else -> found
+            // A page printed to its edge is in found with zero margins, so it pulls the shared crop
+            // to nothing rather than being cut by the other pages' margins. Blank pages are cut
+            // like the rest, so the pages keep one size.
+            request.size > 1 -> MarginFinder.shared(found.values)?.let { shared -> seen.keys.associateWith { shared } } ?: emptyMap()
+            else -> found.filterValues { !it.isEmpty }
         }
         lookedAt = true
         lookingAt = null

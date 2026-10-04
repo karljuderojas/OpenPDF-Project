@@ -69,9 +69,17 @@ class MarginFinderTest {
     }
 
     @Test
-    fun aPageThatFillsItsEdgesHasNoMargin() {
+    fun aPageThatFillsItsEdgesHasZeroMargins() {
+        // Not null, as a blank page is: the page has ink, so a crop shared with other pages must not cut it.
         val full = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888).also { Canvas(it).drawColor(Color.BLACK) }
-        assertNull(MarginFinder.find(full))
+        assertEquals(CropMargins(), MarginFinder.find(full))
+    }
+
+    @Test
+    fun aMarginTooSmallToBeWorthTrimmingCountsAsZero() {
+        // A black block that leaves only one pixel of paper on every side.
+        val pixels = IntArray(200 * 400) { i -> if (i % 200 in 1..198 && i / 200 in 1..398) Color.BLACK else Color.WHITE }
+        assertEquals(CropMargins(), MarginFinder.find(pixels, 200, 400, padding = 0f))
     }
 
     @Test
@@ -134,6 +142,9 @@ class MarginFinderTest {
     fun noSharedCropWhenAPageIsPrintedToItsEdges() {
         assertNull(MarginFinder.shared(emptyList()))
         assertNull(MarginFinder.shared(listOf(CropMargins(0.1f, 0.1f, 0.1f, 0.1f), CropMargins())))
+        // What find gives for a page that fills its edges leaves the others nothing to be trimmed by.
+        val full = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888).also { Canvas(it).drawColor(Color.BLACK) }
+        assertNull(MarginFinder.shared(listOf(MarginFinder.find(page())!!, MarginFinder.find(full)!!)))
     }
 
     @Test

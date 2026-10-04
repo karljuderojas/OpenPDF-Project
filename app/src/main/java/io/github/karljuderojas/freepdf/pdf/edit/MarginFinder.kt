@@ -47,8 +47,9 @@ object MarginFinder {
     private const val SEE_THROUGH = 24
 
     /**
-     * The margins to trim from [bitmap], a picture of a whole page, or null when the page is blank
-     * or has no margin worth trimming.
+     * The margins to trim from [bitmap], a picture of a whole page: zero margins when the page has
+     * ink but no margin worth trimming, so that [shared] knows it is printed to its edge, or null
+     * when the page is blank.
      */
     fun find(bitmap: Bitmap, padding: Float = PADDING): CropMargins? {
         val width = bitmap.width
@@ -81,7 +82,7 @@ object MarginFinder {
         val paper = percentile(histogram, counted, PAPER_PERCENTILE)
         val grain = maxOf(percentile(histogram, counted, GRAIN_PERCENTILE), paper - MAX_GRAIN)
         val inkBelow = grain - INK_CONTRAST
-        if (inkBelow <= 0) return null // Dark paper, or a page printed to its edges: nothing to find.
+        if (inkBelow <= 0) return CropMargins() // Dark paper, or a page printed to its edges: no margin to trim.
 
         val ink = BooleanArray(width * height) { brightness[it] < inkBelow }
         val edgeX = (width * EDGE).toInt()
@@ -109,7 +110,7 @@ object MarginFinder {
             right = edge(width - 1 - maxX, width),
             bottom = edge(height - 1 - maxY, height),
         )
-        return margins.takeIf { isWorthTrimming(it) && it.isValid }
+        return if (isWorthTrimming(margins) && margins.isValid) margins else CropMargins()
     }
 
     /**

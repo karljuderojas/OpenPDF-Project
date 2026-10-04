@@ -171,9 +171,38 @@ class CropDialogTest {
         waitForNote("Found white margins on 1 of 2 pages")
         composeRule.onNodeWithTag("crop-trim").assertIsEnabled()
         composeRule.onNodeWithText("Crop").performClick()
-        // Both pages are cut alike, by what the page that could be drawn showed.
+        // Only the page that could be drawn is cut: nobody knows what is on the other.
+        assertEquals(setOf(1), trimmed!!.keys)
+        assertMargin(0.1f - MarginFinder.PADDING, trimmed!!.getValue(1).left)
+    }
+
+    @Test
+    fun aBlankPageIsCutLikeTheOthersSoThePagesKeepOneSize() {
+        val blank = Bitmap.createBitmap(300, 400, Bitmap.Config.ARGB_8888).also { Canvas(it).drawColor(Color.WHITE) }
+        composeRule.setContent { TrimDialog(listOf(0, 1)) { index, _ -> if (index == 0) blank else page(0.1f) } }
+        composeRule.onNodeWithTag("crop-trim").performClick()
+        waitForNote("Found white margins on 1 of 2 pages")
+        composeRule.onNodeWithText("Crop").performClick()
         assertEquals(setOf(0, 1), trimmed!!.keys)
         assertMargin(0.1f - MarginFinder.PADDING, trimmed!!.getValue(0).left)
+    }
+
+    @Test
+    fun aPagePrintedToItsEdgesStopsTheOthersBeingCut() {
+        // Page 2 is black to every edge. Before, it dropped out of the scan and was cut by page 1's margins.
+        composeRule.setContent { TrimDialog(listOf(0, 1)) { index, _ -> if (index == 0) page(0.1f) else page(0f) } }
+        composeRule.onNodeWithTag("crop-trim").performClick()
+        waitForNote("printed to its edge")
+        composeRule.onNodeWithText("Crop").assertIsNotEnabled()
+        assertNull(trimmed)
+    }
+
+    @Test
+    fun aSinglePagePrintedToItsEdgesHasNothingToTrim() {
+        composeRule.setContent { TrimDialog(listOf(1)) { _, _ -> page(0f) } }
+        composeRule.onNodeWithTag("crop-trim").performClick()
+        waitForNote("No white margins")
+        composeRule.onNodeWithText("Crop").assertIsNotEnabled()
     }
 
     @Test
