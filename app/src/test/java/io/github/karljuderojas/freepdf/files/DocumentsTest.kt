@@ -159,5 +159,32 @@ class DocumentsTest {
         assertEquals(listOf("B.pdf", "Renamed.pdf"), documentsAfterRestart().recent.value.map { it.name })
     }
 
+    @Test
+    fun forgettingAFolderDropsItsPdfsFromHistoryButNotFromOpen() {
+        val documents = documents()
+        val tree = "content://com.android.externalstorage.documents/tree/primary%3APDFs"
+        documents.opened("$tree/document/primary%3APDFs%2Fa.pdf", "a.pdf", remember = true)
+        documents.opened("content://com.android.externalstorage.documents/document/primary%3Ab.pdf", "b.pdf", remember = true)
+        documents.opened("$tree/document/primary%3APDFs%2Fc.pdf", "c.pdf", remember = true)
+        // A different folder whose tree URI merely starts the same way is not under it.
+        documents.opened("${tree}2/document/primary%3APDFs2%2Fd.pdf", "d.pdf", remember = true)
+        documents.forgetUnder(tree)
+        assertEquals(listOf("d.pdf", "b.pdf"), documents.recent.value.map { it.name })
+        assertEquals(listOf("d.pdf", "b.pdf"), documentsAfterRestart().recent.value.map { it.name })
+        assertEquals(listOf("d.pdf", "c.pdf", "b.pdf", "a.pdf"), documents.open.value.map { it.name })
+    }
+
+    @Test
+    fun aGrantCoversItselfAndTheDocumentsOfItsTree() {
+        val tree = Uri.parse("content://docs/tree/primary%3APDFs")
+        assertTrue(Documents.covers(tree, tree))
+        assertTrue(Documents.covers(tree, Uri.parse("$tree/document/primary%3APDFs%2Fa.pdf")))
+        assertFalse(Documents.covers(tree, Uri.parse("content://docs/document/primary%3APDFs%2Fa.pdf")))
+        assertFalse(Documents.covers(tree, Uri.parse("${tree}2/document/primary%3APDFs2%2Fa.pdf")))
+        val document = Uri.parse("content://docs/document/primary%3Aa.pdf")
+        assertTrue(Documents.covers(document, document))
+        assertFalse(Documents.covers(document, Uri.parse("content://docs/document/primary%3Ab.pdf")))
+    }
+
     private fun documentsAfterRestart() = documents()
 }

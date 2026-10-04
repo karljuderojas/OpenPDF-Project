@@ -1,6 +1,7 @@
 package io.github.karljuderojas.freepdf.files
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -56,6 +57,40 @@ class FileActionsTest {
         temp.newFile("b.pdf")
         assertEquals(RenameResult.Failed, FileActions.rename(context, Uri.fromFile(a), "b.pdf"))
         assertTrue(a.exists())
+    }
+
+    @Test
+    fun missingOwnFilesAreGoneNotUnsupported() {
+        val missing = Uri.fromFile(temp.root.resolve("missing.pdf"))
+        assertEquals(Support.Gone, FileActions.renameSupport(context, missing))
+        assertEquals(Support.Gone, FileActions.deleteSupport(context, missing))
+        assertEquals(RenameResult.Gone, FileActions.rename(context, missing, "b.pdf"))
+        assertEquals(DeleteResult.Gone, FileActions.delete(context, missing))
+        assertEquals(Support.Supported, FileActions.deleteSupport(context, Uri.fromFile(temp.newFile("here.pdf"))))
+    }
+
+    // A document reached through a folder grant is covered by it; the system would refuse a grant of its own.
+    @Test
+    fun persistGrantNeedsNothingForADocumentUnderAFolderGrant() {
+        val resolver = context.contentResolver
+        val tree = Uri.parse("content://com.android.externalstorage.documents/tree/primary%3APDFs")
+        resolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        val old = Uri.parse("$tree/document/primary%3APDFs%2Fa.pdf")
+        val new = Uri.parse("$tree/document/primary%3APDFs%2Fb.pdf")
+        assertTrue(FileActions.persistGrant(resolver, old, new))
+        // The folder's grant is all the app holds, untouched; no grant was taken for the new URI.
+        assertEquals(listOf(tree), resolver.persistedUriPermissions.map { it.uri })
+    }
+
+    @Test
+    fun persistGrantMovesAPlainDocumentGrantToTheNewUri() {
+        val resolver = context.contentResolver
+        val old = Uri.parse("content://com.android.externalstorage.documents/document/primary%3AA.pdf")
+        val new = Uri.parse("content://com.android.externalstorage.documents/document/primary%3AB.pdf")
+        resolver.takePersistableUriPermission(old, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        assertTrue(FileActions.persistGrant(resolver, old, new))
+        assertEquals(listOf(new), resolver.persistedUriPermissions.map { it.uri })
+        assertTrue(FileActions.persistGrant(resolver, new, new))
     }
 
     @Test
