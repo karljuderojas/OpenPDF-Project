@@ -142,6 +142,7 @@ import io.github.karljuderojas.freepdf.ui.viewer.ViewerAction
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerContent
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerMode
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerState
+import io.github.karljuderojas.freepdf.ui.viewer.ViewPosition
 import io.github.karljuderojas.freepdf.ui.viewer.WatermarkDialog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -770,6 +771,19 @@ class ScreenshotTest {
         composeRule.onNodeWithTag("top-bar-menu").performClick()
         composeRule.waitForIdle()
         captureScreenRoboImage("build/outputs/roborazzi/viewer_top_bar_menu_narrow.png")
+    }
+
+    // The same bar on the last page of a thousand-page document: "1000 / 1000" shrinks to fit
+    // rather than losing its count to an ellipsis.
+    @Test
+    @Config(qualifiers = "w360dp-h780dp-xxhdpi")
+    fun viewerLongDocumentNarrow() = capture("viewer_read_long_narrow") {
+        viewer(
+            ViewerMode.Read,
+            sample.copy(pageSizes = List(1000) { PageSize(612f, 792f) }, canUndo = true, hasUnsavedChanges = true),
+            openDocuments = sampleRecent.take(3),
+            restorePosition = ViewPosition(page = 999),
+        )
     }
 
     @Test
@@ -2315,10 +2329,12 @@ class ScreenshotTest {
         onAction: (ViewerAction) -> Unit = {},
         pages: List<Bitmap> = samplePages,
         signField: Int? = null,
+        restorePosition: ViewPosition? = null,
     ) {
         ViewerContent(
             state = state,
             onBack = {},
+            restorePosition = restorePosition,
             loadPage = { index, width -> scaled(withMarks(pages[index % pages.size], index, marks), width) },
             // The agreement's words and sharp, zoomed-in renders; the form has neither.
             loadWords = { if (pages === samplePages) sampleWords[it % sampleWords.size] else emptyList() },

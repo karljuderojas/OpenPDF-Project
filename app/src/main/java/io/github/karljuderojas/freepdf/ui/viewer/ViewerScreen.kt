@@ -951,7 +951,8 @@ fun ViewerContent(
                             TopBarTitle(pluralStringResource(R.plurals.pages_selected, selectedPages.size, selectedPages.size))
                         mode != ViewerMode.Read -> TopBarTitle(stringResource(mode.label))
                         // Tapping "Page 3 of 12" asks which page to go to. A phone shows it as
-                        // "3 / 12" so it keeps to one line beside the actions.
+                        // "3 / 12" so it keeps to one line beside the actions, in smaller type
+                        // when "1000 / 1000" would not fit next to Save and the open documents.
                         ready != null -> {
                             val full = stringResource(R.string.page_of, currentPage + 1, pageCount)
                             TopBarTitle(
@@ -960,6 +961,7 @@ fun ViewerContent(
                                     .clickable(onClickLabel = stringResource(R.string.go_to_page)) { goingToPage = true }
                                     .semantics { contentDescription = full }
                                     .testTag("page-indicator"),
+                                shrinkToFit = compactBar,
                             )
                         }
                         else -> TopBarTitle(stringResource(R.string.app_name))

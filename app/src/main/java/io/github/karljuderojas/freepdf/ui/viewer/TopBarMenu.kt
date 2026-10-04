@@ -2,6 +2,8 @@ package io.github.karljuderojas.freepdf.ui.viewer
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
@@ -9,6 +11,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -22,6 +26,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSp
+import androidx.compose.ui.unit.sp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.settings.PageColors
 
@@ -70,8 +76,23 @@ internal fun TopBarMenu(items: List<TopBarMenuItem>, pageColors: PageColors, onP
     }
 }
 
-/** A top-bar title that never wraps: it stays on one line and trails off if it must. */
+/**
+ * A top-bar title that never wraps: it stays on one line and trails off if it must. With
+ * [shrinkToFit] it gives up size before it gives up letters, down to [MIN_TITLE_SIZE]: a page
+ * label like "1000 / 1000" on a narrow phone, beside Save and the open documents, keeps its count.
+ */
 @Composable
-internal fun TopBarTitle(text: String, modifier: Modifier = Modifier) {
-    Text(text, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = modifier)
+internal fun TopBarTitle(text: String, modifier: Modifier = Modifier, shrinkToFit: Boolean = false) {
+    if (shrinkToFit) {
+        val style = LocalTextStyle.current.copy(color = LocalContentColor.current)
+        val maxSize = style.fontSize.takeIf { it.isSp && it > MIN_TITLE_SIZE } ?: MaterialTheme.typography.titleLarge.fontSize
+        BasicText(
+            text, modifier, style, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+            autoSize = TextAutoSize.StepBased(minFontSize = MIN_TITLE_SIZE, maxFontSize = maxSize, stepSize = 1.sp),
+        )
+    } else {
+        Text(text, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = modifier)
+    }
 }
+
+private val MIN_TITLE_SIZE = 14.sp
