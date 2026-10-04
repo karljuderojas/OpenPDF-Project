@@ -517,8 +517,7 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
     }
 
     suspend fun page(index: Int, widthPx: Int): Bitmap? {
-        val shown = revision
-        val key = "$shown/$index@$widthPx"
+        val key = "$revision/$index@$widthPx"
         val bitmap = cache.get(key) ?: lock.withLock {
             val current = renderer ?: return@withLock null
             if (index >= current.pageCount) return@withLock null
@@ -527,10 +526,16 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
                 // A page too big for the heap stays blank rather than taking the app down.
                 .getOrElse { if (it is OutOfMemoryError) null else throw it }
         }
-        // The pen strokes saved by then are in this picture, so the screen stops drawing them itself.
-        if (bitmap != null) pendingInk.rendered(index, shown)
         return bitmap
     }
+
+    /**
+     * The main view now shows page [index] as rendered at [revision] (see [pendingStrokes]): the pen
+     * strokes saved by then are in that picture, so the screen stops drawing them itself. Only the
+     * page on screen says so; a thumbnail rendered first in the side panel must not blank a stroke
+     * while the big page still shows the picture from before it.
+     */
+    fun pageShown(index: Int, revision: Int) = pendingInk.rendered(index, revision)
 
     /**
      * The part of page [index] in [region], rendered as if the page were [fullWidthPx] wide.

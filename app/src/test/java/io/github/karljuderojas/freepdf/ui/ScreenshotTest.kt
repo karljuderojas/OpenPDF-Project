@@ -144,6 +144,7 @@ import io.github.karljuderojas.freepdf.ui.viewer.ViewerAction
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerContent
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerMode
 import io.github.karljuderojas.freepdf.ui.viewer.ViewerState
+import io.github.karljuderojas.freepdf.ui.viewer.ViewPosition
 import io.github.karljuderojas.freepdf.ui.viewer.WatermarkDialog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -811,6 +812,19 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_top_bar_menu_narrow.png")
     }
 
+    // The same bar on the last page of a thousand-page document: "1000 / 1000" shrinks to fit
+    // rather than losing its count to an ellipsis.
+    @Test
+    @Config(qualifiers = "w360dp-h780dp-xxhdpi")
+    fun viewerLongDocumentNarrow() = capture("viewer_read_long_narrow") {
+        viewer(
+            ViewerMode.Read,
+            sample.copy(pageSizes = List(1000) { PageSize(612f, 792f) }, canUndo = true, hasUnsavedChanges = true),
+            openDocuments = sampleRecent.take(3),
+            restorePosition = ViewPosition(page = 999),
+        )
+    }
+
     @Test
     @Config(qualifiers = "w360dp-h780dp-xxhdpi")
     fun viewerReflowNarrow() = capture("viewer_reflow_narrow") { viewer(ViewerMode.Read, reflow = true) }
@@ -1053,6 +1067,19 @@ class ScreenshotTest {
             for (i in 1..20) moveTo(Offset(180f + i * 28f, 1080f - i * 14f))
         }
         captureRoot("viewer_annotate_shape_arrow")
+    }
+
+    // On a 360 dp phone the four shape chips show their pictures alone, so Arrow is never off the edge.
+    @Test
+    @Config(qualifiers = "w360dp-h780dp-xxhdpi")
+    fun viewerAnnotateShapeArrowNarrow() {
+        show { viewer(ViewerMode.Annotate, tool = R.string.tool_shapes) }
+        composeRule.onNodeWithTag("shape-arrow").performClick()
+        composeRule.onNodeWithTag("annotation-layer-0").performTouchInput {
+            down(Offset(120f, 900f))
+            for (i in 1..20) moveTo(Offset(120f + i * 30f, 900f - i * 12f))
+        }
+        captureRoot("viewer_annotate_shape_arrow_narrow")
     }
 
     @Test
@@ -2372,10 +2399,12 @@ class ScreenshotTest {
         onAction: (ViewerAction) -> Unit = {},
         pages: List<Bitmap> = samplePages,
         signField: Int? = null,
+        restorePosition: ViewPosition? = null,
     ) {
         ViewerContent(
             state = state,
             onBack = {},
+            restorePosition = restorePosition,
             loadPage = { index, width -> scaled(withMarks(pages[index % pages.size], index, marks), width) },
             // The agreement's words and sharp, zoomed-in renders; the form has neither.
             loadWords = { if (pages === samplePages) sampleWords[it % sampleWords.size] else emptyList() },

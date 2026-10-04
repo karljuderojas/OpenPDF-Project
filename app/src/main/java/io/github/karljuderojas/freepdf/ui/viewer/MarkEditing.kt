@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.karljuderojas.freepdf.R
 import io.github.karljuderojas.freepdf.pdf.annotate.Mark
+import io.github.karljuderojas.freepdf.pdf.annotate.distanceToSegment
 import java.text.DateFormat
 import java.util.Date
 
@@ -96,8 +97,17 @@ val Mark.displayColor: Color get() = color?.let { Color(it.r, it.g, it.b) } ?: C
 /** The mark's current look, in the shape the style bar takes. */
 val Mark.style: ToolStyle get() = ToolStyle(displayColor, width)
 
-private fun Mark.contains(point: Offset, slop: Float) =
-    point.x in left - slop..right + slop && point.y in top - slop..bottom + slop
+/**
+ * Whether a tap at [point] (fractions of the page) lands on the mark, with [slop] (a fraction of
+ * the page's width) of give. A line or arrow is hit along its strokes, so a tap beside a slanted
+ * arrow reaches what lies under its box; [aspect] (height over width) keeps that distance true.
+ */
+private fun Mark.contains(point: Offset, slop: Float, aspect: Float): Boolean {
+    val shape = lines ?: return point.x in left - slop..right + slop && point.y in top - slop..bottom + slop
+    return shape.segments.any { (x1, y1, x2, y2) ->
+        distanceToSegment(point.x, point.y * aspect, x1, y1 * aspect, x2, y2 * aspect) <= shape.reach + slop
+    }
+}
 
 /**
  * Over one page while reading or annotating without a tool: a tap on a mark picks it for
@@ -132,7 +142,8 @@ fun MarkTapLayer(
                     if (up.uptimeMillis - down.uptimeMillis > viewConfiguration.longPressTimeoutMillis) return@awaitEachGesture
                     val at = Offset(up.position.x / size.width, up.position.y / size.height)
                     // Topmost first, a few pixels of give around small marks.
-                    val hit = currentMarks.lastOrNull { it.contains(at, slop = 0.01f) }
+                    val aspect = size.height.toFloat() / size.width
+                    val hit = currentMarks.lastOrNull { it.contains(at, slop = 0.01f, aspect = aspect) }
                     when {
                         hit != null -> {
                             up.consume()
