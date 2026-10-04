@@ -136,8 +136,10 @@ sealed interface ViewerState {
         val hasSignature: Boolean = false,
         val outline: List<OutlineItem> = emptyList(),
         val isProtected: Boolean = false,
-        /** What the PDF's permissions hold back (print, copy, edit...); empty if nothing is restricted. */
-        val restrictions: List<PdfDocuments.Restriction> = emptyList(),
+        /** What the PDF's permissions hold back (print, copy, edit...); empty if nothing is restricted, null if they could not be read. */
+        val restrictions: List<PdfDocuments.Restriction>? = emptyList(),
+        /** True when the password the PDF opened with is its owner password, so [restrictions] bind other apps but not this one. */
+        val openedAsOwner: Boolean = false,
         val formFields: List<FormField> = emptyList(),
         val signFields: List<SignField> = emptyList(),
         val signedFields: Set<Int> = emptySet(),
@@ -527,6 +529,17 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
                 .getOrElse { if (it is OutOfMemoryError) null else throw it }
         }
         return bitmap
+    }
+
+    /**
+     * Page [index] as [page] gives it but without its annotations: the page itself, which is what
+     * is left under a redaction once the notes and stamps touching it have gone. Not cached; it
+     * is wanted once per mark, at a small size.
+     */
+    suspend fun pageWithoutAnnotations(index: Int, widthPx: Int): Bitmap? = lock.withLock {
+        val current = renderer ?: return@withLock null
+        if (index >= current.pageCount) return@withLock null
+        runCatching { current.renderPage(index, widthPx, annotations = false) }.getOrElse { if (it is OutOfMemoryError) null else throw it }
     }
 
     /**
@@ -1327,9 +1340,9 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
             }
         }
 
-    /** The box colour of each area [redactAreas] gives, in the same order. */
+    /** The box colour of each area [redactAreas] gives, in the same order; a mark Auto has not judged yet is black. */
     private fun redactFills(boxes: List<RedactBox>): Map<Int, List<RedactFill>> =
-        boxes.groupBy { it.page }.mapValues { (_, onPage) -> onPage.map { it.fill } }
+        boxes.groupBy { it.page }.mapValues { (_, onPage) -> onPage.map { it.fill ?: RedactFill.Black } }
 
     fun cancelRedaction() {
         pendingRedaction = null
@@ -1399,15 +1412,19 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
 
     /**
      * Lifts the PDF's restrictions (and password) when [ownerPassword] is its owner password, as one
-     * undo step. [onResult] gets false, and nothing changes, for any other password.
+     * undo step; null means the password the PDF opened with (see [ViewerState.Ready.openedAsOwner]).
+     * [onResult] gets false, and nothing changes, for any other password.
      */
-    fun removeRestrictions(ownerPassword: String, onResult: (Boolean) -> Unit) {
+    fun removeRestrictions(ownerPassword: String?, onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
-            val isOwner = lock.withLock {
-                withContext(Dispatchers.IO) { session?.let { PdfDocuments.isOwnerPassword(it.workingFile, ownerPassword) } == true }
+            val candidate = lock.withLock {
+                val current = session ?: return@withLock null
+                val typed = ownerPassword ?: current.password
+                // A file that cannot be read with the password is not unlocked by it.
+                withContext(Dispatchers.IO) { runCatching { current.isOwnerPassword(typed) }.getOrDefault(false) }.let { if (it) typed else null }
             }
-            if (!isOwner) return@launch onResult(false)
-            update(done = R.string.restrictions_removed, onDone = { onResult(it != null) }) { it.removeRestrictions(ownerPassword) }
+            if (candidate == null) return@launch onResult(false)
+            update(done = R.string.restrictions_removed, onDone = { onResult(it != null) }) { it.removeRestrictions(candidate) }
         }
     }
 
@@ -1698,8 +1715,12 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
             }.getOrDefault(Triple(emptyList<FormField>(), emptyList<SignatureAnnotation.Placed>(), emptyList<PageLink>()))
         }
         val outline = runCatching { next.outline() }.getOrDefault(emptyList())
+        // Permissions PdfBox cannot read are unknown (null), not absent; see RestrictionsDialog.
         val restrictions = withContext(Dispatchers.IO) {
-            runCatching { PdfDocuments.restrictions(current.workingFile, current.password) }.getOrDefault(emptyList())
+            runCatching { PdfDocuments.restrictions(current.workingFile, current.password) }.getOrNull()
+        }
+        val openedAsOwner = !restrictions.isNullOrEmpty() && withContext(Dispatchers.IO) {
+            runCatching { current.isOwnerPassword(current.password) }.getOrDefault(false)
         }
         // Likewise, a document whose text cannot be read just has no places to sign.
         val places = signFields ?: withContext(Dispatchers.IO) {
@@ -1708,7 +1729,8 @@ class ViewerViewModel(application: Application, private val handle: SavedStateHa
         val signed = places.indices.filter { i -> placedSignatures.any { places[i].covers(it.page, it.x, it.y) } }.toSet()
         return ViewerState.Ready(
             next.pageSizes, revision, current.canUndo, current.canRedo, current.hasUnsavedChanges, hasSignature, outline,
-            isProtected = current.password.isNotEmpty(), restrictions = restrictions, formFields = formFields, signFields = places, signedFields = signed,
+            isProtected = current.password.isNotEmpty(), restrictions = restrictions, openedAsOwner = openedAsOwner,
+            formFields = formFields, signFields = places, signedFields = signed,
             signatures = signatures, failedPageEdits = failedPageEdits, redactionsSaved = redactionsSaved,
             links = links,
         )

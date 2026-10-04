@@ -828,6 +828,24 @@ class RedactorTest {
         }
     }
 
+    @Test
+    fun aPageWhosePictureGoesWholeGetsBlackBoxesWhateverWasAsked() {
+        PDDocument().use { source ->
+            // An inline picture cannot be blanked in part, so it is removed whole: a white box would then vanish on the page.
+            source.addPage("q 200 0 0 200 100 400 cm BI /W 1 /H 1 /CS /G /BPC 8 ID ÿ EI Q BT /F1 12 Tf 72 700 Td (hello) Tj ET")
+            val area = PdfRect(100f, 500f, 200f, 600f)
+            val elsewhere = PdfRect(300f, 300f, 400f, 340f)
+            val result = Redactor.redact(source, mapOf(0 to listOf(area, elsewhere)), mapOf(0 to listOf(RedactFill.White, RedactFill.White)))
+            assertEquals(1, result.wholePictures)
+            roundTrip(source).use { saved ->
+                val raw = rawContent(saved)
+                assertFalse(raw, raw.contains("EI"))
+                assertTrue(raw, raw.contains("0 0 0 rg"))
+                assertFalse(raw, raw.contains("1 1 1 rg"))
+            }
+        }
+    }
+
     // ---- round 3: forms without a box or resources, stencil masks, attachments ----
 
     @Test
