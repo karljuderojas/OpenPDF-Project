@@ -42,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.TextRange
@@ -52,6 +53,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
@@ -68,6 +70,7 @@ import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.files.FileActions
 import io.github.karljuderojas.freepdf.files.RenameResult
 import io.github.karljuderojas.freepdf.files.SafeWrite
+import io.github.karljuderojas.freepdf.files.Support
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.rememberPdfPicker
 import kotlinx.coroutines.Dispatchers
@@ -198,6 +201,7 @@ private fun RecentFilesScreen(onOpenPdf: (Uri) -> Unit, viewSwitch: @Composable 
                                 Toast.makeText(context, resources.getString(R.string.renamed_toast, result.name), Toast.LENGTH_SHORT).show()
                             }
                             RenameResult.Unsupported -> error = R.string.rename_unsupported
+                            RenameResult.Gone -> error = R.string.rename_gone
                             RenameResult.Failed -> error = R.string.rename_failed
                         }
                     }
@@ -209,10 +213,12 @@ private fun RecentFilesScreen(onOpenPdf: (Uri) -> Unit, viewSwitch: @Composable 
 
     deleting?.let { entry ->
         val uri = Uri.parse(entry.uri)
-        val canDelete = remember(entry.uri) { FileActions.canDelete(context, uri) }
+        // Asking the provider can be slow, so it runs off the main thread; the dialog waits with Delete disabled.
+        var support by remember(entry.uri) { mutableStateOf<Support?>(null) }
+        LaunchedEffect(entry.uri) { support = withContext(Dispatchers.IO) { FileActions.deleteSupport(context, uri) } }
         DeleteDialog(
             name = entry.name,
-            canDelete = canDelete,
+            support = support,
             onDelete = {
                 deletingUri = null
                 if (sessions.get(entry.uri)?.hasUnsavedChanges == true) {
@@ -223,6 +229,12 @@ private fun RecentFilesScreen(onOpenPdf: (Uri) -> Unit, viewSwitch: @Composable 
                             documents.close(entry.uri)
                             documents.forget(entry.uri)
                             Toast.makeText(context, resources.getString(R.string.deleted_toast, entry.name), Toast.LENGTH_SHORT).show()
+                        }
+                        // Gone since the dialog opened: nothing to delete, so only the entry goes.
+                        DeleteResult.Gone -> {
+                            documents.close(entry.uri)
+                            documents.forget(entry.uri)
+                            Toast.makeText(context, resources.getString(R.string.delete_gone_toast, entry.name), Toast.LENGTH_LONG).show()
                         }
                         // The file stays; the dialog offered the list-only removal for this case.
                         DeleteResult.Unsupported, DeleteResult.Failed ->
@@ -330,18 +342,31 @@ fun RenameDialog(currentName: String, error: Int?, onConfirm: (String) -> Unit, 
 }
 
 /**
- * Confirms deleting a file. When the folder it is in does not allow deleting ([canDelete] false)
- * the dialog says so and offers to only take it off the list.
+ * Confirms deleting a file. [support] is what the provider said, or null while it is still being
+ * asked (Delete waits, disabled). When the folder the file is in does not allow deleting, or the
+ * file is no longer available, the dialog says so and offers to only take it off the list.
  */
 @Composable
-fun DeleteDialog(name: String, canDelete: Boolean, onDelete: () -> Unit, onRemoveFromList: () -> Unit, onCancel: () -> Unit) {
+fun DeleteDialog(name: String, support: Support?, onDelete: () -> Unit, onRemoveFromList: () -> Unit, onCancel: () -> Unit) {
+    val title = when (support) {
+        null, Support.Supported -> R.string.delete_title
+        Support.Unsupported -> R.string.delete_unsupported_title
+        Support.Gone -> R.string.delete_gone_title
+    }
+    val body = when (support) {
+        null, Support.Supported -> R.string.delete_body
+        Support.Unsupported -> R.string.delete_unsupported_body
+        Support.Gone -> R.string.delete_gone_body
+    }
     AlertDialog(
         onDismissRequest = onCancel,
-        title = { Text(stringResource(if (canDelete) R.string.delete_title else R.string.delete_unsupported_title, name)) },
-        text = { Text(stringResource(if (canDelete) R.string.delete_body else R.string.delete_unsupported_body, name)) },
+        title = { Text(stringResource(title, name)) },
+        text = { Text(stringResource(body, name)) },
         confirmButton = {
-            if (canDelete) {
-                TextButton(onClick = onDelete) { Text(stringResource(R.string.delete_file), color = MaterialTheme.colorScheme.error) }
+            if (support == null || support == Support.Supported) {
+                TextButton(onClick = onDelete, enabled = support != null) {
+                    Text(stringResource(R.string.delete_file), color = if (support != null) MaterialTheme.colorScheme.error else Color.Unspecified)
+                }
             } else {
                 TextButton(onClick = onRemoveFromList) { Text(stringResource(R.string.delete_remove_from_list)) }
             }

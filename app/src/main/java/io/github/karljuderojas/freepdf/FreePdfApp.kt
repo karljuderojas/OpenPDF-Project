@@ -21,8 +21,8 @@ class FreePdfApp : Application() {
         )
     }
 
-    /** The one folder of PDFs the Files tab can browse. */
-    val folders by lazy { FolderStore(getSharedPreferences("folder", Context.MODE_PRIVATE)) }
+    /** The one folder of PDFs the Files tab can browse. Its PDFs leave the history when its grant is given back. */
+    val folders by lazy { FolderStore(getSharedPreferences("folder", Context.MODE_PRIVATE), onReleased = documents::forgetUnder) }
 
     /** The live working copies of the open PDFs, which the viewer attaches to; see [DocumentSessions]. */
     val sessions by lazy { DocumentSessions(File(cacheDir, "edit")) }
