@@ -1,0 +1,117 @@
+package io.github.karljuderojas.freepdf.files
+
+import android.content.ContentResolver
+import android.content.Context
+import android.content.Intent
+import android.content.SharedPreferences
+import android.net.Uri
+import android.provider.DocumentsContract
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+/** A PDF found in the folder the user chose. [modified] and [size] are 0 when the provider does not say. */
+data class FolderFile(val uri: String, val name: String, val modified: Long, val size: Long)
+
+enum class FolderSort { Name, Date }
+
+/** [files] ordered by [sort]: names A to Z ignoring case, dates newest first. */
+fun sortFolderFiles(files: List<FolderFile>, sort: FolderSort): List<FolderFile> = when (sort) {
+    FolderSort.Name -> files.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+    FolderSort.Date -> files.sortedWith(compareByDescending<FolderFile> { it.modified }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+}
+
+/** True for a PDF, going by its type and falling back to the file name when the provider gives a generic type. */
+internal fun isPdf(mimeType: String?, name: String): Boolean =
+    mimeType == "application/pdf" ||
+        (name.endsWith(".pdf", ignoreCase = true) && (mimeType == null || mimeType == "application/octet-stream"))
+
+/**
+ * The one folder the Files tab browses, chosen with the system folder picker. Only the picker's
+ * grant to that folder is used: the app asks for no broad storage permission. The choice is kept
+ * in app preferences on this device.
+ */
+class FolderStore(private val prefs: SharedPreferences) {
+
+    private val _folder = MutableStateFlow(prefs.getString(KEY, null))
+
+    /** The chosen folder's tree URI, or null when none is chosen. */
+    val folder: StateFlow<String?> = _folder.asStateFlow()
+
+    fun choose(context: Context, tree: Uri) {
+        // Keep access across restarts. Write access is asked for too, so files can be renamed and
+        // deleted; a provider that only grants reading still lets the folder be browsed and opened.
+        val read = Intent.FLAG_GRANT_READ_URI_PERMISSION
+        runCatching { context.contentResolver.takePersistableUriPermission(tree, read or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+            .recoverCatching { context.contentResolver.takePersistableUriPermission(tree, read) }
+        val old = _folder.value
+        if (old != null && old != tree.toString()) release(context, old)
+        prefs.edit().putString(KEY, tree.toString()).apply()
+        _folder.value = tree.toString()
+    }
+
+    /** Stops browsing the folder and gives its access back. Files in it are not touched. */
+    fun forget(context: Context) {
+        _folder.value?.let { release(context, it) }
+        prefs.edit().remove(KEY).apply()
+        _folder.value = null
+    }
+
+    /** True if the app holds a lasting write grant on the chosen folder, so renaming and deleting can work. */
+    fun canWrite(context: Context): Boolean {
+        val tree = _folder.value ?: return false
+        return context.contentResolver.persistedUriPermissions.any { it.uri.toString() == tree && it.isWritePermission }
+    }
+
+    private fun release(context: Context, tree: String) {
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching { context.contentResolver.releasePersistableUriPermission(Uri.parse(tree), flags) }
+    }
+
+    private companion object {
+        const val KEY = "folder"
+    }
+}
+
+/** What reading the chosen folder gave. [name] is the folder's own name, [files] its PDFs. */
+data class FolderListing(val name: String, val files: List<FolderFile>)
+
+object FolderReader {
+
+    /** Reads the PDFs directly inside [tree] (subfolders are not entered). Null if the folder cannot be read any more. */
+    fun read(resolver: ContentResolver, tree: Uri): FolderListing? = try {
+        readOrThrow(resolver, tree)
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun readOrThrow(resolver: ContentResolver, tree: Uri): FolderListing? {
+        val treeId = DocumentsContract.getTreeDocumentId(tree)
+        val nameColumns = arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+        var folderName: String? = null
+        resolver.query(DocumentsContract.buildDocumentUriUsingTree(tree, treeId), nameColumns, null, null, null)?.use {
+            if (it.moveToFirst()) folderName = it.getString(0)
+        }
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, treeId)
+        val columns = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+            DocumentsContract.Document.COLUMN_SIZE,
+        )
+        val cursor = resolver.query(children, columns, null, null, null) ?: return null
+        val files = ArrayList<FolderFile>()
+        cursor.use {
+            while (it.moveToNext()) {
+                val name: String = it.getString(1) ?: continue
+                if (!isPdf(it.getString(2), name)) continue
+                val modified: Long = if (it.isNull(3)) 0L else it.getLong(3)
+                val size: Long = if (it.isNull(4)) 0L else it.getLong(4)
+                val uri = DocumentsContract.buildDocumentUriUsingTree(tree, it.getString(0)).toString()
+                files.add(FolderFile(uri, name, modified, size))
+            }
+        }
+        return FolderListing(folderName ?: treeId.substringAfterLast(':').ifEmpty { treeId }, files)
+    }
+}

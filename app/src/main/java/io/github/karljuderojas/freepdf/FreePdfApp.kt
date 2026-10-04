@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import io.github.karljuderojas.freepdf.files.Documents
+import io.github.karljuderojas.freepdf.files.FolderStore
 import io.github.karljuderojas.freepdf.settings.AppSettings
 import io.github.karljuderojas.freepdf.settings.Tips
 import io.github.karljuderojas.freepdf.ui.viewer.DocumentSessions
@@ -19,6 +20,9 @@ class FreePdfApp : Application() {
             hasUnsavedChanges = { uri -> sessions.get(uri)?.hasUnsavedChanges == true },
         )
     }
+
+    /** The one folder of PDFs the Files tab can browse. */
+    val folders by lazy { FolderStore(getSharedPreferences("folder", Context.MODE_PRIVATE)) }
 
     /** The live working copies of the open PDFs, which the viewer attaches to; see [DocumentSessions]. */
     val sessions by lazy { DocumentSessions(File(cacheDir, "edit")) }
