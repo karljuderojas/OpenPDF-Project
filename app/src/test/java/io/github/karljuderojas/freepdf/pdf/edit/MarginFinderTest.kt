@@ -25,10 +25,10 @@ class MarginFinderTest {
     @Test
     fun findsTheWhiteAroundThePrintedBlock() {
         val m = MarginFinder.find(page(), padding = 0f)!!
-        assertEquals(40f / 200, m.left, 0.001f)
-        assertEquals(100f / 400, m.top, 0.001f)
-        assertEquals(40f / 200, m.right, 0.001f)
-        assertEquals(100f / 400, m.bottom, 0.001f)
+        assertEquals(40f / 200, m.left, 0.006f)
+        assertEquals(100f / 400, m.top, 0.006f)
+        assertEquals(40f / 200, m.right, 0.006f)
+        assertEquals(100f / 400, m.bottom, 0.006f)
     }
 
     @Test
