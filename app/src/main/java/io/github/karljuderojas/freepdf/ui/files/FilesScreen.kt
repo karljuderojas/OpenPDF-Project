@@ -52,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -77,6 +78,7 @@ import java.util.Calendar
 @Composable
 fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val documents = (context.applicationContext as FreePdfApp).documents
     val open by documents.open.collectAsStateWithLifecycle()
     val recent by documents.recent.collectAsStateWithLifecycle()
@@ -103,7 +105,7 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
     // Closing the session of a file about to change under it; its edits are checked first.
     fun blockedByUnsaved(entry: DocumentEntry): Boolean {
         val blocked = entry.uri in unsaved
-        if (blocked) Toast.makeText(context, context.getString(R.string.file_has_unsaved_changes, entry.name), Toast.LENGTH_LONG).show()
+        if (blocked) Toast.makeText(context, resources.getString(R.string.file_has_unsaved_changes, entry.name), Toast.LENGTH_LONG).show()
         return blocked
     }
 
@@ -157,7 +159,7 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
                                 documents.renamed(entry.uri, result.uri.toString(), result.name)
                                 // Without a lasting grant it would not reopen after a restart, so it stays out of the history.
                                 if (!result.persisted) documents.forget(result.uri.toString())
-                                Toast.makeText(context, context.getString(R.string.renamed_toast, result.name), Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, resources.getString(R.string.renamed_toast, result.name), Toast.LENGTH_SHORT).show()
                             }
                             RenameResult.Unsupported -> error = R.string.rename_unsupported
                             RenameResult.Failed -> error = R.string.rename_failed
@@ -184,7 +186,7 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
                         DeleteResult.Deleted -> {
                             documents.close(entry.uri)
                             documents.forget(entry.uri)
-                            Toast.makeText(context, context.getString(R.string.deleted_toast, entry.name), Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, resources.getString(R.string.deleted_toast, entry.name), Toast.LENGTH_SHORT).show()
                         }
                         // The file stays; the dialog offered the list-only removal for this case.
                         DeleteResult.Unsupported, DeleteResult.Failed ->

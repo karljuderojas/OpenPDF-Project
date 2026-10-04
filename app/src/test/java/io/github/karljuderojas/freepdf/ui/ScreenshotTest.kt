@@ -568,20 +568,26 @@ class ScreenshotTest {
         }
     }
 
+    // The name field takes focus, and its blinking cursor never lets Compose go idle, so the clock is driven by hand.
+    @OptIn(ExperimentalRoborazziApi::class)
     @Test
-    fun filesRenameDialog() = capture("files_rename_dialog") {
-        shell(MainTab.Files) {
-            FilesContent(emptyList(), sampleRecent, {}, {}, {}, {}, {}, modifier = it, onRename = {}, onDelete = {}, now = now)
-            RenameDialog(currentName = sampleRecent[1].name, error = null, onConfirm = {}, onCancel = {})
-        }
-    }
+    fun filesRenameDialog() = captureRenameDialog("files_rename_dialog", error = null)
 
+    @OptIn(ExperimentalRoborazziApi::class)
     @Test
-    fun filesRenameDialogError() = capture("files_rename_dialog_error") {
-        shell(MainTab.Files) {
-            FilesContent(emptyList(), sampleRecent, {}, {}, {}, {}, {}, modifier = it, onRename = {}, onDelete = {}, now = now)
-            RenameDialog(currentName = sampleRecent[1].name, error = R.string.rename_failed, onConfirm = {}, onCancel = {})
+    fun filesRenameDialogError() = captureRenameDialog("files_rename_dialog_error", error = R.string.rename_failed)
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    private fun captureRenameDialog(name: String, error: Int?) {
+        composeRule.mainClock.autoAdvance = false
+        show {
+            shell(MainTab.Files) {
+                FilesContent(emptyList(), sampleRecent, {}, {}, {}, {}, {}, modifier = it, onRename = {}, onDelete = {}, now = now)
+                RenameDialog(currentName = sampleRecent[1].name, error = error, onConfirm = {}, onCancel = {})
+            }
         }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/$name.png")
     }
 
     @Test
