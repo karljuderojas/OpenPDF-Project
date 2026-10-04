@@ -38,8 +38,8 @@ import javax.security.auth.x500.X500Principal
  * vouches for that, and any trusted timestamp. Runs entirely on the phone.
  *
  * Trust is judged against [trustAnchors], which on a phone are the system's trusted certificate
- * authorities. Those are the web's authorities, not Adobe's list, so a certificate that Acrobat
- * trusts can show here as "issuer not recognised". The wording in the app says so.
+ * authorities. Those are the web's authorities, not the Adobe Approved Trust List, so a certificate
+ * that desktop PDF readers trust can show here as "issuer not recognised". The wording in the app says so.
  */
 class SignatureVerifier(private val trustAnchors: Set<X509Certificate> = systemTrustAnchors()) {
 
