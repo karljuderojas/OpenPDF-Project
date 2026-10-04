@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -68,6 +69,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun FolderScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val store = (context.applicationContext as FreePdfApp).folders
     val folder by store.folder.collectAsState()
     var listing by remember { mutableStateOf<FolderListing?>(null) }
@@ -104,7 +106,7 @@ fun FolderScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
     // A file open here with unsaved changes is left alone, like in the Recent view.
     fun blockedByUnsaved(file: FolderFile): Boolean {
         val blocked = sessions.get(file.uri)?.hasUnsavedChanges == true
-        if (blocked) Toast.makeText(context, context.getString(R.string.file_has_unsaved_changes, file.name), Toast.LENGTH_LONG).show()
+        if (blocked) Toast.makeText(context, resources.getString(R.string.file_has_unsaved_changes, file.name), Toast.LENGTH_LONG).show()
         return blocked
     }
 
@@ -146,7 +148,7 @@ fun FolderScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
                                 sessions.close(file.uri)
                                 documents.renamed(file.uri, result.uri.toString(), result.name)
                                 if (!result.persisted) documents.forget(result.uri.toString())
-                                Toast.makeText(context, context.getString(R.string.renamed_toast, result.name), Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, resources.getString(R.string.renamed_toast, result.name), Toast.LENGTH_SHORT).show()
                                 reload++
                             }
                             RenameResult.Unsupported -> error = R.string.rename_unsupported
@@ -173,7 +175,7 @@ fun FolderScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
                         DeleteResult.Deleted -> {
                             documents.close(file.uri)
                             documents.forget(file.uri)
-                            Toast.makeText(context, context.getString(R.string.deleted_toast, file.name), Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, resources.getString(R.string.deleted_toast, file.name), Toast.LENGTH_SHORT).show()
                             reload++
                         }
                         DeleteResult.Unsupported, DeleteResult.Failed ->
