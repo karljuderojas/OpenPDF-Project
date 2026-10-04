@@ -55,7 +55,7 @@ val Mark.Kind.tool: AnnotateTool?
         Mark.Kind.Underline -> AnnotateTool.Underline
         Mark.Kind.StrikeOut -> AnnotateTool.StrikeOut
         Mark.Kind.Ink -> AnnotateTool.Pen
-        Mark.Kind.Square, Mark.Kind.Circle -> AnnotateTool.Shapes
+        Mark.Kind.Square, Mark.Kind.Circle, Mark.Kind.Line, Mark.Kind.Arrow -> AnnotateTool.Shapes
         Mark.Kind.Note -> AnnotateTool.Note
         Mark.Kind.TextBox -> AnnotateTool.TextBox
         Mark.Kind.Stamp, Mark.Kind.Other -> null
@@ -82,6 +82,8 @@ val Mark.Kind.label: Int
         Mark.Kind.Ink -> R.string.mark_drawing
         Mark.Kind.Square -> R.string.mark_rectangle
         Mark.Kind.Circle -> R.string.mark_ellipse
+        Mark.Kind.Line -> R.string.mark_line
+        Mark.Kind.Arrow -> R.string.mark_arrow
         Mark.Kind.Note -> R.string.tool_note
         Mark.Kind.TextBox -> R.string.tool_text_box
         Mark.Kind.Stamp -> R.string.tool_stamp

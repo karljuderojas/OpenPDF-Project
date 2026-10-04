@@ -2,7 +2,9 @@
 """Writes the sample PDFs used by the tests, then renders their pages to PNG.
 
 agreement.pdf is a plain two-page contract. form.pdf is a one-page sign-up form with fillable
-fields (text, checkboxes, radio buttons, a dropdown) for the Fill form tool.
+fields (text, checkboxes, radio buttons, a dropdown) for the Fill form tool. witness.pdf is a flat
+one-page authorization (no form fields) whose "Signature:" label sits apart from its typed line,
+just under a sentence that says "signed", for finding the place to sign.
 
 Usage: scripts/make_sample_pdf.py   (needs pdftoppm from poppler-utils)
 The PDF is written by hand with only the standard Helvetica fonts, so no Python packages are needed.
@@ -76,6 +78,47 @@ def page_two():
         ops += text(340, y - 14, 9.5, "Date")
         y -= 80
     ops += text(72, 48, 9, "Page 2 of 2")
+    return ops
+
+
+WITNESS_PARAGRAPHS = [
+    "Harbor Lane Traders (the Company) authorizes Bluewater Freight and its affiliates (the Agent) "
+    "to prepare, sign and file export paperwork for shipments the Company sends, and to act for "
+    "the Company with carriers and customs in doing so.",
+    "The Company confirms that the details it gives the Agent are true and complete, and that it "
+    "remains responsible for deciding whether a shipment needs an export licence.",
+    "The Agent may share shipment details with carriers and customs authorities only as needed to "
+    "move the Company's goods, and keeps them private otherwise.",
+    "This authorization stays in effect until the Company withdraws it in writing and the Agent "
+    "confirms that it has been received.",
+]
+
+
+def witness_page():
+    ops = text(160, 720, 12, "SHIPPER AUTHORIZATION FOR EXPORT FILING", "F2")
+    ops += text(72, 690, 10, "Company: Harbor Lane Traders     Account no. 00-1234567")
+    y = 660
+    for body in WITNESS_PARAGRAPHS:
+        for line in textwrap.wrap(body, 100):
+            ops += text(72, y, 10, line)
+            y -= 13
+        y -= 9
+    # The sentence that says "signed", then the label one line below with its line set well apart.
+    ops += text(72, y, 10, "IN WITNESS WHEREOF, the Company has caused this authorization to be sealed and signed:")
+    rows = [("Signature:", "", "(By signing, the signer confirms they may sign for the Company.)"),
+            ("Capacity:", "Owner", "(Owner, President, Director or Officer)"),
+            ("Date:", "10/02/2026", "")]
+    y -= 24
+    for label, value, note in rows:
+        ops += text(72, y, 10, label)
+        ops += text(170, y, 10, "_" * 45)
+        ops += text(425, y, 10, f"({rows.index((label, value, note)) + 6})")
+        if value:
+            ops += text(250, y + 2, 10, value)
+        if note:
+            ops += text(170, y - 13, 9, note)
+        y -= 40
+    ops += text(72, 48, 9, "Sample document for tests. Not a real authorization.")
     return ops
 
 
@@ -225,4 +268,7 @@ if __name__ == "__main__":
     form = OUT / "form.pdf"
     form.write_bytes(form_pdf())
     subprocess.run(["pdftoppm", "-png", "-scale-to-x", "1080", "-scale-to-y", "-1", "-singlefile", str(form), str(OUT / "form-page")], check=True)
-    print("Wrote", pdf, form, "and", sorted(p.name for p in OUT.glob("*.png")))
+    witness = OUT / "witness.pdf"
+    witness.write_bytes(build_pdf([witness_page()]))
+    subprocess.run(["pdftoppm", "-png", "-scale-to-x", "1080", "-scale-to-y", "-1", "-singlefile", str(witness), str(OUT / "witness-page")], check=True)
+    print("Wrote", pdf, form, witness, "and", sorted(p.name for p in OUT.glob("*.png")))

@@ -5,6 +5,7 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.graphics.color.PDColor
 import com.tom_roush.pdfbox.pdmodel.graphics.color.PDDeviceRGB
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLine
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationMarkup
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationSquareCircle
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationText
@@ -18,7 +19,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Standard PDF annotations, so marks made here show up in Acrobat, Xodo, browsers and others.
+ * Standard PDF annotations, so marks made here show up in other PDF readers and browsers.
  * Each call also builds an appearance stream, which is what other viewers actually draw.
  */
 object Annotator {
@@ -32,6 +33,9 @@ object Annotator {
             val Blue = Rgb(0.13f, 0.4f, 0.9f)
         }
     }
+
+    /** The Shapes tool's choices: an outlined box or oval, or a straight line with or without an arrowhead. */
+    enum class Shape { Rectangle, Ellipse, Line, Arrow }
 
     enum class TextMarkup(val subtype: String) {
         Highlight(PDAnnotationTextMarkup.SUB_TYPE_HIGHLIGHT),
@@ -140,6 +144,42 @@ object Annotator {
         document.getPage(pageIndex).annotations.add(annotation)
         annotation.constructAppearances(document)
     }
+
+    /**
+     * A straight line from [from] to [to], as a standard Line annotation. With [arrow] it ends in
+     * an open arrowhead at [to], the way other PDF editors draw an arrow.
+     */
+    fun line(
+        document: PDDocument,
+        pageIndex: Int,
+        from: PdfPoint,
+        to: PdfPoint,
+        arrow: Boolean = false,
+        color: Rgb = Rgb.Red,
+        lineWidth: Float = 2f,
+    ) {
+        val annotation = PDAnnotationLine().apply {
+            line = floatArrayOf(from.x, from.y, to.x, to.y)
+            startPointEndingStyle = PDAnnotationLine.LE_NONE
+            endPointEndingStyle = if (arrow) PDAnnotationLine.LE_OPEN_ARROW else PDAnnotationLine.LE_NONE
+            if (arrow) intent = PDAnnotationLine.IT_LINE_ARROW
+            // Room for the pen and the arrowhead, which PdfBox draws ten line widths long; drawing
+            // the appearance only ever grows this.
+            val pad = lineWidth * if (arrow) ARROW_LENGTH else 1f
+            rectangle = PdfRect(
+                minOf(from.x, to.x) - pad, minOf(from.y, to.y) - pad,
+                maxOf(from.x, to.x) + pad, maxOf(from.y, to.y) + pad,
+            ).toPdRectangle()
+            borderStyle = PDBorderStyleDictionary().apply { width = lineWidth }
+            this.color = color.toPdColor()
+            stamp(null)
+        }
+        document.getPage(pageIndex).annotations.add(annotation)
+        annotation.constructAppearances(document)
+    }
+
+    /** How long PdfBox draws an arrowhead, in line widths; each side is 30 degrees off the line. */
+    const val ARROW_LENGTH = 10f
 
     /** True when every point of the stroke sits within a fraction of the pen width of the first. */
     private fun List<PdfPoint>.isDot(lineWidth: Float): Boolean {

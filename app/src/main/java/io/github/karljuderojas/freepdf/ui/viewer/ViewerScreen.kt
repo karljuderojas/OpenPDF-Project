@@ -179,6 +179,9 @@ sealed interface ViewerAction {
     data class RemoveWatermarks(val pages: Set<Int>) : ViewerAction
     /** Trims [pages] by [margins], or shows them in full again when [margins] is null. */
     data class Crop(val pages: Set<Int>, val margins: CropMargins?) : ViewerAction
+
+    /** Crops each page by its own margins, as found by [io.github.karljuderojas.freepdf.pdf.edit.MarginFinder]. */
+    data class TrimMargins(val margins: Map<Int, CropMargins>) : ViewerAction
     /** Adds a link over [box], an area of [page] as shown, leading to [target]. */
     data class AddLink(val page: Int, val box: DisplayRect, val target: LinkTarget) : ViewerAction
     /** Points the link at [index] in [page]'s annotations (see PageLink.index) at [target] instead. */
@@ -209,7 +212,15 @@ sealed interface ViewerAction {
 
     /** Annotate actions. Points are fractions of the displayed page; see [AnnotationLayer]. */
     data class Stroke(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val points: List<Offset>) : ViewerAction
-    data class Box(val page: Int, val tool: AnnotateTool, val style: ToolStyle, val start: Offset, val end: Offset) : ViewerAction
+    /** A drag with a box tool from [start] to [end]; [shape] is what the Shapes tool draws. */
+    data class Box(
+        val page: Int,
+        val tool: AnnotateTool,
+        val style: ToolStyle,
+        val start: Offset,
+        val end: Offset,
+        val shape: Annotator.Shape = Annotator.Shape.Rectangle,
+    ) : ViewerAction
     data class Note(val page: Int, val style: ToolStyle, val at: Offset, val text: String) : ViewerAction
     data class AddStamp(val page: Int, val at: Offset, val kind: Stamps.Kind) : ViewerAction
     data class AddTextBox(val page: Int, val style: ToolStyle, val at: Offset, val text: String) : ViewerAction
@@ -296,6 +307,7 @@ fun ViewerScreen(
     var certificateFile by remember { mutableStateOf<Uri?>(null) }
     val toolStyles by viewModel.toolStyles.collectAsStateWithLifecycle()
     val marks by viewModel.marks.collectAsStateWithLifecycle()
+    val pendingInk by viewModel.pendingStrokes.collectAsStateWithLifecycle()
     val search by viewModel.search.collectAsStateWithLifecycle()
     val stamps by viewModel.stamps.collectAsStateWithLifecycle()
     val resources = LocalResources.current
@@ -391,6 +403,7 @@ fun ViewerScreen(
         redactProgress = redactProgress,
         toolStyles = toolStyles,
         marks = marks,
+        pendingInk = pendingInk,
         search = search,
         stamps = stamps,
         snackbarHostState = snackbarHostState,
@@ -439,6 +452,7 @@ fun ViewerScreen(
                 is ViewerAction.Watermark -> viewModel.watermark(action.pages, action.text, action.image, action.style)
                 is ViewerAction.RemoveWatermarks -> viewModel.removeWatermarks(action.pages)
                 is ViewerAction.Crop -> viewModel.cropPages(action.pages, action.margins)
+                is ViewerAction.TrimMargins -> viewModel.trimMargins(action.margins)
                 is ViewerAction.AddLink -> viewModel.addLink(action.page, action.box, action.target)
                 is ViewerAction.ChangeLink -> viewModel.changeLink(action.page, action.index, action.target)
                 is ViewerAction.RemoveLink -> viewModel.removeLink(action.page, action.index)
@@ -462,7 +476,7 @@ fun ViewerScreen(
                     if (kind != null) {
                         viewModel.markText(action.page, action.start, action.end, kind, action.style)
                     } else {
-                        viewModel.shape(action.page, action.start, action.end, action.style)
+                        viewModel.shape(action.page, action.start, action.end, action.style, action.shape)
                     }
                 }
                 is ViewerAction.Note -> viewModel.note(action.page, action.at, action.text, action.style)
@@ -537,6 +551,7 @@ fun ViewerContent(
     initialSelectedPage: Int = 0,
     initialSelectedPages: Set<Int> = setOf(initialSelectedPage),
     initialTool: Int? = null,
+    initialShape: Annotator.Shape = Annotator.Shape.Rectangle,
     initialSignField: Int? = null,
     initialRedactions: List<RedactBox> = emptyList(),
     initialConfirmRedact: Boolean = false,
@@ -552,6 +567,7 @@ fun ViewerContent(
     initialShowSignatures: Boolean = false,
     toolStyles: Map<AnnotateTool, ToolStyle> = emptyMap(),
     marks: List<Mark> = emptyList(),
+    pendingInk: List<PendingStroke> = emptyList(),
     search: SearchResults = SearchResults(),
     initialSearchQuery: String? = null,
     stamps: List<PlacedStamp> = emptyList(),
@@ -625,6 +641,7 @@ fun ViewerContent(
     var pendingNote by rememberSaveable(stateSaver = PageOffsetSaver) { mutableStateOf<Pair<Int, Offset>?>(null) }
     var pendingTextBox by rememberSaveable(stateSaver = PageOffsetSaver) { mutableStateOf<Pair<Int, Offset>?>(null) }
     var stampKind by rememberSaveable { mutableStateOf(Stamps.Kind.Approved) }
+    var shapeKind by rememberSaveable { mutableStateOf(initialShape) }
     var pendingText by rememberSaveable(stateSaver = PageOffsetSaver) { mutableStateOf<Pair<Int, Offset>?>(null) }
     // The line Edit text found under the last tap: its page, where it was tapped, and its words.
     var editingLine by rememberSaveable(stateSaver = EditingLineSaver) { mutableStateOf<Triple<Int, Offset, String>?>(null) }
@@ -1082,6 +1099,7 @@ fun ViewerContent(
                 // Choosing the active Annotate tool again puts it down, so one finger scrolls again.
                 mode == ViewerMode.Annotate -> Column {
                     if (AnnotateTool.forLabel(selectedTool) == AnnotateTool.Stamp) StampBar(stampKind, onSelect = { stampKind = it })
+                    if (AnnotateTool.forLabel(selectedTool) == AnnotateTool.Shapes) ShapeBar(shapeKind, onSelect = { shapeKind = it })
                     AnnotateTool.forLabel(selectedTool)?.takeIf { it.hasStyle }?.let { tool ->
                         StyleBar(tool, styleOf(tool), onStyleChange = {
                             styles = styles + (tool to it)
@@ -1227,6 +1245,9 @@ fun ViewerContent(
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
                     val signTool = SignTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Sign }
                     PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState, pageColors, columns) { page ->
+                        // Pen strokes still being saved stay where they were drawn, in every mode.
+                        val inkOnPage = pendingInk.filter { it.page == page }
+                        if (inkOnPage.isNotEmpty()) PendingInkLayer(page, inkOnPage, ready.pageSizes[page].widthPt)
                         if (mode == ViewerMode.Read && searching) {
                             val onPage = search.matches.withIndex().filter { it.value.page == page }
                             if (onPage.isNotEmpty()) SearchHighlights(onPage, currentMatch)
@@ -1363,7 +1384,8 @@ fun ViewerContent(
                                 style = style,
                                 pageWidthPt = ready.pageSizes[page].widthPt,
                                 onStroke = { onAction(ViewerAction.Stroke(page, tool, style, it)) },
-                                onBox = { start, end -> onAction(ViewerAction.Box(page, tool, style, start, end)) },
+                                onBox = { start, end -> onAction(ViewerAction.Box(page, tool, style, start, end, shapeKind)) },
+                                shape = shapeKind,
                                 words = words,
                                 onLines = { onAction(ViewerAction.MarkLines(page, tool, style, it)) },
                                 onTap = { at ->
@@ -1553,7 +1575,13 @@ fun ViewerContent(
             pageCount = pageCount,
             selectedPages = selectedPages.sorted(),
             pageAspect = ready?.pageSizes?.getOrNull(selectedPage)?.aspectRatio ?: 0.77f,
+            previewPage = selectedPage,
+            loadPage = loadPage,
             onDismiss = { cropping = false },
+            onTrim = { margins ->
+                cropping = false
+                editPages(ViewerAction.TrimMargins(margins), then = selectedPages)
+            },
             onCrop = { pages, margins ->
                 cropping = false
                 editPages(ViewerAction.Crop(pages, margins), then = selectedPages)
@@ -1693,7 +1721,7 @@ fun ViewerContent(
             onDismiss = { pendingTextNote = null },
             onAdd = { text ->
                 pendingTextNote = null
-                // A note on text is a highlight carrying the note, as Acrobat and others make it.
+                // A note on text is a highlight carrying the note, as most PDF readers make it.
                 onAction(ViewerAction.MarkLines(page, AnnotateTool.Highlight, styleOf(AnnotateTool.Highlight), lines, text))
             },
         )
