@@ -42,7 +42,7 @@ object PdfDocuments {
         val permissions = document.currentAccessPermission
         if (permissions.isOwnerPermission) return emptyList()
         return buildList {
-            if (!permissions.canPrint() && !permissions.canPrintFaithful()) add(Restriction.Print)
+            if (!permissions.canPrint()) add(Restriction.Print)
             if (!permissions.canExtractContent()) add(Restriction.Copy)
             if (!permissions.canModify()) add(Restriction.Edit)
             if (!permissions.canModifyAnnotations()) add(Restriction.Annotate)
