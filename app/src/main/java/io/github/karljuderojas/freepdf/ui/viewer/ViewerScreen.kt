@@ -111,6 +111,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
+import io.github.karljuderojas.freepdf.pdf.redact.RedactFill
 import io.github.karljuderojas.freepdf.files.DocumentEntry
 import io.github.karljuderojas.freepdf.pdf.annotate.Annotator
 import io.github.karljuderojas.freepdf.pdf.DisplayRect
@@ -178,6 +179,9 @@ sealed interface ViewerAction {
     data class RemoveWatermarks(val pages: Set<Int>) : ViewerAction
     /** Trims [pages] by [margins], or shows them in full again when [margins] is null. */
     data class Crop(val pages: Set<Int>, val margins: CropMargins?) : ViewerAction
+
+    /** Crops each page by its own margins, as found by [io.github.karljuderojas.freepdf.pdf.edit.MarginFinder]. */
+    data class TrimMargins(val margins: Map<Int, CropMargins>) : ViewerAction
     /** Adds a link over [box], an area of [page] as shown, leading to [target]. */
     data class AddLink(val page: Int, val box: DisplayRect, val target: LinkTarget) : ViewerAction
     /** Points the link at [index] in [page]'s annotations (see PageLink.index) at [target] instead. */
@@ -451,6 +455,7 @@ fun ViewerScreen(
                 is ViewerAction.Watermark -> viewModel.watermark(action.pages, action.text, action.image, action.style)
                 is ViewerAction.RemoveWatermarks -> viewModel.removeWatermarks(action.pages)
                 is ViewerAction.Crop -> viewModel.cropPages(action.pages, action.margins)
+                is ViewerAction.TrimMargins -> viewModel.trimMargins(action.margins)
                 is ViewerAction.AddLink -> viewModel.addLink(action.page, action.box, action.target)
                 is ViewerAction.ChangeLink -> viewModel.changeLink(action.page, action.index, action.target)
                 is ViewerAction.RemoveLink -> viewModel.removeLink(action.page, action.index)
@@ -554,6 +559,7 @@ fun ViewerContent(
     initialSignField: Int? = null,
     initialRedactions: List<RedactBox> = emptyList(),
     initialConfirmRedact: Boolean = false,
+    initialRedactFill: RedactFill? = null,
     savedSignatures: Map<SignatureStore.Kind, Bitmap> = emptyMap(),
     signerName: String = "",
     certificate: CertificateInfo? = null,
@@ -616,6 +622,8 @@ fun ViewerContent(
     // Areas marked with Redact stay until they are applied or removed; the screen does not forget them on Done.
     var redactions by rememberSaveable(stateSaver = RedactBoxesSaver) { mutableStateOf(initialRedactions) }
     var confirmRedact by rememberSaveable { mutableStateOf(initialConfirmRedact) }
+    // The box colour for new marks; null is Auto (see RedactBar).
+    var redactFill by rememberSaveable { mutableStateOf(initialRedactFill) }
     // The address a tapped link leads to, while asking whether to open it; and the box just dragged for a new link.
     var openingLink by rememberSaveable { mutableStateOf<String?>(null) }
     var newLinkBox by rememberSaveable(stateSaver = PageBoxSaver) { mutableStateOf<Pair<Int, DisplayRect>?>(null) }
@@ -1118,6 +1126,8 @@ fun ViewerContent(
                     if (selectedTool == R.string.tool_redact) {
                         RedactBar(
                             count = redactions.size,
+                            fill = redactFill,
+                            onFill = { redactFill = it },
                             onRemoveLast = { redactions = redactions.dropLast(1) },
                             onApply = { confirmRedact = true },
                         )
@@ -1358,7 +1368,18 @@ fun ViewerContent(
                                 active = redacting,
                                 pageWidthPt = ready.pageSizes[page].widthPt,
                                 words = words,
-                                onBox = { redactions = redactions + RedactBox(page, it) },
+                                onBox = { rect ->
+                                    val chosen = redactFill
+                                    val box = RedactBox(page, rect, chosen ?: RedactFill.Black)
+                                    redactions = redactions + box
+                                    if (chosen == null) {
+                                        // Auto: look at the page under the mark. A mark removed or cleared meanwhile stays gone.
+                                        scope.launch {
+                                            val fill = contrastingFill(runCatching { loadPage(page, AUTO_FILL_WIDTH_PX) }.getOrNull(), rect)
+                                            if (fill != box.fill) redactions = redactions.map { if (it === box) box.copy(fill = fill) else it }
+                                        }
+                                    }
+                                },
                             )
                         }
                         if (tool != null) {
@@ -1560,7 +1581,13 @@ fun ViewerContent(
             pageCount = pageCount,
             selectedPages = selectedPages.sorted(),
             pageAspect = ready?.pageSizes?.getOrNull(selectedPage)?.aspectRatio ?: 0.77f,
+            previewPage = selectedPage,
+            loadPage = loadPage,
             onDismiss = { cropping = false },
+            onTrim = { margins ->
+                cropping = false
+                editPages(ViewerAction.TrimMargins(margins), then = selectedPages)
+            },
             onCrop = { pages, margins ->
                 cropping = false
                 editPages(ViewerAction.Crop(pages, margins), then = selectedPages)
@@ -1710,7 +1737,7 @@ fun ViewerContent(
             onDismiss = { pendingTextNote = null },
             onAdd = { text ->
                 pendingTextNote = null
-                // A note on text is a highlight carrying the note, as Acrobat and others make it.
+                // A note on text is a highlight carrying the note, as most PDF readers make it.
                 onAction(ViewerAction.MarkLines(page, AnnotateTool.Highlight, styleOf(AnnotateTool.Highlight), lines, text))
             },
         )
@@ -2091,6 +2118,9 @@ private val AnnotateTool.markup: Annotator.TextMarkup?
     }
 
 private const val SEARCH_DELAY_MS = 300L
+
+/** The width a page is drawn at to see what colour lies under a new redaction mark. */
+private const val AUTO_FILL_WIDTH_PX = 400
 
 /** How long the view must be still before zoomed pages are sharpened. */
 private const val SETTLE_MILLIS = 150L

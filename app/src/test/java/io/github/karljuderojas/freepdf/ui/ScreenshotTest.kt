@@ -30,6 +30,7 @@ import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.captureToImage
@@ -107,6 +108,7 @@ import io.github.karljuderojas.freepdf.pdf.scan.ScanFilters
 import io.github.karljuderojas.freepdf.pdf.scan.ScanPage
 import io.github.karljuderojas.freepdf.pdf.scan.SyntheticPhoto
 import io.github.karljuderojas.freepdf.pdf.create.PageFit
+import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import io.github.karljuderojas.freepdf.ui.theme.FreePdfTheme
@@ -121,6 +123,7 @@ import io.github.karljuderojas.freepdf.ui.viewer.PendingStroke
 import io.github.karljuderojas.freepdf.ui.viewer.SearchResults
 import io.github.karljuderojas.freepdf.ui.viewer.TextMatch
 import io.github.karljuderojas.freepdf.ui.viewer.PlacedStamp
+import io.github.karljuderojas.freepdf.pdf.redact.RedactFill
 import io.github.karljuderojas.freepdf.ui.viewer.RedactBox
 import io.github.karljuderojas.freepdf.ui.viewer.RedactCheck
 import io.github.karljuderojas.freepdf.ui.viewer.RedactProgress
@@ -1472,6 +1475,38 @@ class ScreenshotTest {
         viewer(ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions())
     }
 
+    @Test
+    fun viewerRedactWhiteBoxes() {
+        // White chosen for new marks: the company name keeps its black boxes, the line marked after it gets white ones.
+        val from = wordIndex(0, "Lakeside")
+        val white = sampleWords[0].subList(from, from + 2).map { RedactBox(0, Rect(it.left, it.top, it.right, it.bottom), RedactFill.White) }
+        show { viewer(ViewerMode.Edit, tool = R.string.tool_redact, redactions = sampleRedactions() + white, redactFill = RedactFill.White) }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("redact-fill-white").assertIsSelected()
+        captureRoot("viewer_redact_white")
+    }
+
+    @Test
+    fun viewerRedactMarksGetTheChosenColour() {
+        val actions = mutableListOf<ViewerAction>()
+        show { viewer(ViewerMode.Edit, tool = R.string.tool_redact, onAction = { actions += it }) }
+        composeRule.onNodeWithTag("redact-fill-white").performClick()
+        val from = wordIndex(0, "Northwind")
+        val layer = "annotation-layer-0"
+        composeRule.onNodeWithTag(layer).performTouchInput {
+            down(wordCentre(layer, 0, from))
+            moveTo(wordCentre(layer, 0, from + 1))
+            up()
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Apply").performClick()
+        composeRule.waitForIdle()
+        // The confirmation asks for the marks to be checked, and they carry the colour picked before marking.
+        val boxes = actions.filterIsInstance<ViewerAction.CheckRedaction>().last().boxes
+        assertTrue(boxes.isNotEmpty())
+        assertTrue(boxes.toString(), boxes.all { it.fill == RedactFill.White })
+    }
+
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerRedactConfirm() {
@@ -1618,6 +1653,44 @@ class ScreenshotTest {
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_crop.png")
     }
 
+    // The crop dialog after Trim margins found the white around the page's text.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun cropTrimMargins() {
+        val found = io.github.karljuderojas.freepdf.pdf.edit.MarginFinder.find(scaled(loadSample("page-1.png"), 300))!!
+        show {
+            io.github.karljuderojas.freepdf.ui.viewer.CropPagesDialog(
+                pageCount = 6, selectedPages = listOf(1), pageAspect = 612f / 792f,
+                onDismiss = {}, onCrop = { _, _ -> }, initialTrim = mapOf(1 to found), previewPage = 1,
+            )
+        }
+        composeRule.waitForIdle()
+        captureScreenRoboImage("build/outputs/roborazzi/crop_trim_margins.png")
+    }
+
+    // A page before and after the trim: the same picture, cut to what the finder found.
+    @Test
+    fun cropTrimBeforeAfter() = capture("crop_trim_before_after") {
+        val page = loadSample("page-1.png")
+        val m = io.github.karljuderojas.freepdf.pdf.edit.MarginFinder.find(scaled(page, 300))!!
+        val x = (page.width * m.left).toInt()
+        val y = (page.height * m.top).toInt()
+        val trimmed = Bitmap.createBitmap(
+            page, x, y, page.width - x - (page.width * m.right).toInt(), page.height - y - (page.height * m.bottom).toInt(),
+        )
+        androidx.compose.foundation.layout.Row(
+            Modifier.padding(16.dp),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp),
+        ) {
+            for (bitmap in listOf(page, trimmed)) {
+                androidx.compose.foundation.Image(
+                    bitmap.asImageBitmap(), null,
+                    Modifier.weight(1f).border(1.dp, androidx.compose.ui.graphics.Color.Gray),
+                )
+            }
+        }
+    }
+
     @OptIn(ExperimentalRoborazziApi::class)
     @Test
     fun viewerPagesSplitEvery() {
@@ -1654,6 +1727,48 @@ class ScreenshotTest {
         open = true
         composeRule.mainClock.advanceTimeBy(1_000)
         captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_watermark_picture.png")
+    }
+
+    // The words are the user's own, typed over a preset; the row offers them next to the presets.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesWatermarkCustomText() {
+        var open by mutableStateOf(false)
+        show {
+            viewer(ViewerMode.Pages, sixPages, selectedPage = 1)
+            if (open) {
+                WatermarkDialog(
+                    pageCount = 6, selectedPages = listOf(1), pageAspect = 612f / 792f, image = null,
+                    onChooseImage = {}, onDismiss = {}, onWatermark = { _, _, _, _ -> }, onRemove = {},
+                    initialText = "FOR REVIEW ONLY",
+                )
+            }
+        }
+        composeRule.mainClock.autoAdvance = false
+        open = true
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_watermark_custom_text.png")
+    }
+
+    // A ready-made word chosen: the chip is marked and the field and the sketch show the word.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun viewerPagesWatermarkPresetSample() {
+        var open by mutableStateOf(false)
+        show {
+            viewer(ViewerMode.Pages, sixPages, selectedPage = 1)
+            if (open) {
+                WatermarkDialog(
+                    pageCount = 6, selectedPages = listOf(1), pageAspect = 612f / 792f, image = null,
+                    onChooseImage = {}, onDismiss = {}, onWatermark = { _, _, _, _ -> }, onRemove = {},
+                    initialText = "SAMPLE",
+                )
+            }
+        }
+        composeRule.mainClock.autoAdvance = false
+        open = true
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/viewer_pages_watermark_preset_sample.png")
     }
 
     // Text the fonts cannot show: the field is in error and Add is disabled. The text field never
@@ -2105,6 +2220,7 @@ class ScreenshotTest {
         selectedStamp: Long? = null,
         redactions: List<RedactBox> = emptyList(),
         confirmRedact: Boolean = false,
+        redactFill: RedactFill? = null,
         redactCheck: RedactCheck? = null,
         redactProgress: RedactProgress? = null,
         onAction: (ViewerAction) -> Unit = {},
@@ -2170,6 +2286,7 @@ class ScreenshotTest {
             initialSelectedStamp = selectedStamp,
             initialRedactions = redactions,
             initialConfirmRedact = confirmRedact,
+            initialRedactFill = redactFill,
             redactCheck = redactCheck,
             redactProgress = redactProgress,
             onAction = onAction,
