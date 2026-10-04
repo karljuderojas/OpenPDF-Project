@@ -56,7 +56,7 @@ fun unflattenRedactBoxes(flat: List<Float>): List<RedactBox> =
 private operator fun <T> List<T>.component6() = this[5]
 
 /** Keeps the marked areas across a rotation or other recreation of the screen. */
-val RedactBoxesSaver = listSaver<List<RedactBox>, Float>(save = ::flattenRedactBoxes, restore = ::unflattenRedactBoxes)
+val RedactBoxesSaver = listSaver<List<RedactBox>, Float>(save = { flattenRedactBoxes(it) }, restore = { unflattenRedactBoxes(it) })
 
 /**
  * The box colour that stands out against [page] under [rect] (fractions of the page, as in
@@ -156,7 +156,7 @@ fun RedactBar(count: Int, fill: RedactFill?, onFill: (RedactFill?) -> Unit, onRe
                             selected = fill == choice,
                             onClick = { onFill(choice) },
                             label = { Text(stringResource(label)) },
-                            leadingIcon = choice?.let { { Swatch(it) } },
+                            leadingIcon = if (choice != null) { { Swatch(choice) } } else null,
                             modifier = Modifier.testTag("redact-fill-${choice?.name?.lowercase() ?: "auto"}"),
                         )
                     }
