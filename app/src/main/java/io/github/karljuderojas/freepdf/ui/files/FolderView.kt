@@ -97,6 +97,8 @@ fun FolderScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
 
     val documents = (context.applicationContext as FreePdfApp).documents
     val sessions = (context.applicationContext as FreePdfApp).sessions
+    // Renaming and deleting need the write grant; with a read-only one they are not offered.
+    val writable = remember(folder) { store.canWrite(context) }
     var renaming by remember { mutableStateOf<FolderFile?>(null) }
     var deleting by remember { mutableStateOf<FolderFile?>(null) }
     // A file open here with unsaved changes is left alone, like in the Recent view.
@@ -121,8 +123,8 @@ fun FolderScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
             runCatching { Sharing.shareUri(context, Uri.parse(file.uri), file.name) }
                 .onFailure { Toast.makeText(context, R.string.share_failed, Toast.LENGTH_SHORT).show() }
         },
-        onRename = { if (!blockedByUnsaved(it)) renaming = it },
-        onDelete = { if (!blockedByUnsaved(it)) deleting = it },
+        onRename = if (writable) { it -> if (!blockedByUnsaved(it)) renaming = it } else null,
+        onDelete = if (writable) { it -> if (!blockedByUnsaved(it)) deleting = it } else null,
         modifier = modifier,
     )
 
@@ -205,8 +207,8 @@ fun FolderContent(
     onOpen: (FolderFile) -> Unit,
     modifier: Modifier = Modifier,
     onShare: (FolderFile) -> Unit = {},
-    onRename: (FolderFile) -> Unit = {},
-    onDelete: (FolderFile) -> Unit = {},
+    onRename: ((FolderFile) -> Unit)? = {},
+    onDelete: ((FolderFile) -> Unit)? = {},
 ) {
     if (files == null && !unreadable && folderName == null && !refreshing) {
         NoFolder(onChoose, modifier)
@@ -277,8 +279,8 @@ private fun FolderRow(
     file: FolderFile,
     onOpen: (FolderFile) -> Unit,
     onShare: (FolderFile) -> Unit,
-    onRename: (FolderFile) -> Unit,
-    onDelete: (FolderFile) -> Unit,
+    onRename: ((FolderFile) -> Unit)?,
+    onDelete: ((FolderFile) -> Unit)?,
 ) {
     val context = LocalContext.current
     var menu by remember { mutableStateOf(false) }
@@ -303,11 +305,15 @@ private fun FolderRow(
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(text = { Text(stringResource(R.string.tool_share)) }, onClick = { menu = false; onShare(file) })
-                DropdownMenuItem(text = { Text(stringResource(R.string.rename_file)) }, onClick = { menu = false; onRename(file) })
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.delete_file), color = MaterialTheme.colorScheme.error) },
-                    onClick = { menu = false; onDelete(file) },
-                )
+                onRename?.let { rename ->
+                    DropdownMenuItem(text = { Text(stringResource(R.string.rename_file)) }, onClick = { menu = false; rename(file) })
+                }
+                onDelete?.let { delete ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.delete_file), color = MaterialTheme.colorScheme.error) },
+                        onClick = { menu = false; delete(file) },
+                    )
+                }
             }
         }
     }

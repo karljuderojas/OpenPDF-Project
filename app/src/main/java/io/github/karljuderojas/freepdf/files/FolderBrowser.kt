@@ -39,8 +39,11 @@ class FolderStore(private val prefs: SharedPreferences) {
     val folder: StateFlow<String?> = _folder.asStateFlow()
 
     fun choose(context: Context, tree: Uri) {
-        // Keep access across restarts. Reading is all that is needed to browse and open.
-        runCatching { context.contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        // Keep access across restarts. Write access is asked for too, so files can be renamed and
+        // deleted; a provider that only grants reading still lets the folder be browsed and opened.
+        val read = Intent.FLAG_GRANT_READ_URI_PERMISSION
+        runCatching { context.contentResolver.takePersistableUriPermission(tree, read or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+            .recoverCatching { context.contentResolver.takePersistableUriPermission(tree, read) }
         val old = _folder.value
         if (old != null && old != tree.toString()) release(context, old)
         prefs.edit().putString(KEY, tree.toString()).apply()
@@ -54,8 +57,15 @@ class FolderStore(private val prefs: SharedPreferences) {
         _folder.value = null
     }
 
+    /** True if the app holds a lasting write grant on the chosen folder, so renaming and deleting can work. */
+    fun canWrite(context: Context): Boolean {
+        val tree = _folder.value ?: return false
+        return context.contentResolver.persistedUriPermissions.any { it.uri.toString() == tree && it.isWritePermission }
+    }
+
     private fun release(context: Context, tree: String) {
-        runCatching { context.contentResolver.releasePersistableUriPermission(Uri.parse(tree), Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching { context.contentResolver.releasePersistableUriPermission(Uri.parse(tree), flags) }
     }
 
     private companion object {
