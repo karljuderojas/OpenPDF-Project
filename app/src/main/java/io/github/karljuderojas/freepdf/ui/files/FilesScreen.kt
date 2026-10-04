@@ -29,6 +29,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -41,6 +42,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -58,7 +62,10 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.karljuderojas.freepdf.FreePdfApp
 import io.github.karljuderojas.freepdf.R
+import io.github.karljuderojas.freepdf.files.DeleteResult
 import io.github.karljuderojas.freepdf.files.DocumentEntry
+import io.github.karljuderojas.freepdf.files.FileActions
+import io.github.karljuderojas.freepdf.files.RenameResult
 import io.github.karljuderojas.freepdf.files.SafeWrite
 import io.github.karljuderojas.freepdf.share.Sharing
 import io.github.karljuderojas.freepdf.ui.rememberPdfPicker
@@ -71,6 +78,7 @@ import java.util.Calendar
 @Composable
 fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val documents = (context.applicationContext as FreePdfApp).documents
     val open by documents.open.collectAsStateWithLifecycle()
     val recent by documents.recent.collectAsStateWithLifecycle()
@@ -86,6 +94,20 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
     var saving by remember { mutableStateOf(emptySet<String>()) }
 
     val openFile = rememberPdfPicker(onOpenPdf)
+
+    // The file the rename or delete question is about, by URI, found again in the lists so the
+    // dialog goes if the entry does (and survives a turn).
+    var renamingUri by rememberSaveable { mutableStateOf<String?>(null) }
+    var deletingUri by rememberSaveable { mutableStateOf<String?>(null) }
+    val all = open + recent
+    val renaming = renamingUri?.let { uri -> all.firstOrNull { it.uri == uri } }
+    val deleting = deletingUri?.let { uri -> all.firstOrNull { it.uri == uri } }
+    // Closing the session of a file about to change under it; its edits are checked first.
+    fun blockedByUnsaved(entry: DocumentEntry): Boolean {
+        val blocked = entry.uri in unsaved
+        if (blocked) Toast.makeText(context, resources.getString(R.string.file_has_unsaved_changes, entry.name), Toast.LENGTH_LONG).show()
+        return blocked
+    }
 
     FilesContent(
         open = open,
@@ -107,8 +129,78 @@ fun FilesScreen(onOpenPdf: (Uri) -> Unit, modifier: Modifier = Modifier) {
                 .onFailure { Toast.makeText(context, R.string.share_failed, Toast.LENGTH_SHORT).show() }
         },
         onForget = { documents.forget(it.uri) },
+        onRename = { if (!blockedByUnsaved(it)) renamingUri = it.uri },
+        onDelete = { if (!blockedByUnsaved(it)) deletingUri = it.uri },
         modifier = modifier,
     )
+
+    renaming?.let { entry ->
+        var error by remember(entry.uri) { mutableStateOf<Int?>(null) }
+        RenameDialog(
+            currentName = entry.name,
+            error = error,
+            onConfirm = { typed ->
+                val name = FileActions.cleanName(typed)
+                when {
+                    name == null -> error = R.string.rename_invalid
+                    name == entry.name -> renamingUri = null
+                    // Re-checked: edits may have started since the menu was opened.
+                    sessions.get(entry.uri)?.hasUnsavedChanges == true -> {
+                        renamingUri = null
+                        blockedByUnsaved(entry)
+                    }
+                    else -> scope.launch {
+                        val result = withContext(Dispatchers.IO) { FileActions.rename(context, Uri.parse(entry.uri), name) }
+                        when (result) {
+                            is RenameResult.Renamed -> {
+                                renamingUri = null
+                                // Sessions are keyed by URI, and this one has nothing unsaved: let it go, the new URI starts fresh.
+                                sessions.close(entry.uri)
+                                documents.renamed(entry.uri, result.uri.toString(), result.name)
+                                // Without a lasting grant it would not reopen after a restart, so it stays out of the history.
+                                if (!result.persisted) documents.forget(result.uri.toString())
+                                Toast.makeText(context, resources.getString(R.string.renamed_toast, result.name), Toast.LENGTH_SHORT).show()
+                            }
+                            RenameResult.Unsupported -> error = R.string.rename_unsupported
+                            RenameResult.Failed -> error = R.string.rename_failed
+                        }
+                    }
+                }
+            },
+            onCancel = { renamingUri = null },
+        )
+    }
+
+    deleting?.let { entry ->
+        val uri = Uri.parse(entry.uri)
+        val canDelete = remember(entry.uri) { FileActions.canDelete(context, uri) }
+        DeleteDialog(
+            name = entry.name,
+            canDelete = canDelete,
+            onDelete = {
+                deletingUri = null
+                if (sessions.get(entry.uri)?.hasUnsavedChanges == true) {
+                    blockedByUnsaved(entry)
+                } else scope.launch {
+                    when (withContext(Dispatchers.IO) { FileActions.delete(context, uri) }) {
+                        DeleteResult.Deleted -> {
+                            documents.close(entry.uri)
+                            documents.forget(entry.uri)
+                            Toast.makeText(context, resources.getString(R.string.deleted_toast, entry.name), Toast.LENGTH_SHORT).show()
+                        }
+                        // The file stays; the dialog offered the list-only removal for this case.
+                        DeleteResult.Unsupported, DeleteResult.Failed ->
+                            Toast.makeText(context, R.string.delete_failed, Toast.LENGTH_LONG).show()
+                    }
+                }
+            },
+            onRemoveFromList = {
+                deletingUri = null
+                documents.forget(entry.uri)
+            },
+            onCancel = { deletingUri = null },
+        )
+    }
 
     closing?.let { entry ->
         val session = sessions.get(entry.uri)
@@ -175,6 +267,53 @@ fun UnsavedCloseDialog(onSave: () -> Unit, onDiscard: () -> Unit, onCancel: () -
     )
 }
 
+/** Asks for a new name, with ".pdf" kept off the text so it cannot be lost; [error] is a string resource to show. */
+@Composable
+fun RenameDialog(currentName: String, error: Int?, onConfirm: (String) -> Unit, onCancel: () -> Unit) {
+    val initial = FileActions.editableName(currentName)
+    var text by rememberSaveable(currentName, stateSaver = androidx.compose.ui.text.input.TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length)))
+    }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text(stringResource(R.string.rename_title)) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text(stringResource(R.string.rename_label)) },
+                singleLine = true,
+                suffix = { Text(".pdf") },
+                isError = error != null,
+                supportingText = error?.let { { Text(stringResource(it)) } },
+            )
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(text.text) }) { Text(stringResource(R.string.rename_confirm)) } },
+        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
+/**
+ * Confirms deleting a file. When the folder it is in does not allow deleting ([canDelete] false)
+ * the dialog says so and offers to only take it off the list.
+ */
+@Composable
+fun DeleteDialog(name: String, canDelete: Boolean, onDelete: () -> Unit, onRemoveFromList: () -> Unit, onCancel: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text(stringResource(if (canDelete) R.string.delete_title else R.string.delete_unsupported_title, name)) },
+        text = { Text(stringResource(if (canDelete) R.string.delete_body else R.string.delete_unsupported_body, name)) },
+        confirmButton = {
+            if (canDelete) {
+                TextButton(onClick = onDelete) { Text(stringResource(R.string.delete_file), color = MaterialTheme.colorScheme.error) }
+            } else {
+                TextButton(onClick = onRemoveFromList) { Text(stringResource(R.string.delete_remove_from_list)) }
+            }
+        },
+        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
 /** Stateless Files UI, for screenshot tests. [now] decides the Today/Yesterday grouping. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -188,6 +327,9 @@ fun FilesContent(
     onForget: (DocumentEntry) -> Unit,
     modifier: Modifier = Modifier,
     unsaved: Set<String> = emptySet(),
+    onRename: ((DocumentEntry) -> Unit)? = null,
+    onDelete: ((DocumentEntry) -> Unit)? = null,
+    menuFor: String? = null,
     now: Long = System.currentTimeMillis(),
 ) {
     Scaffold(
@@ -224,7 +366,7 @@ fun FilesContent(
             }
             groupByDay(recent, now).forEach { (label, entries) ->
                 item(key = "header-$label") { SectionHeader(stringResource(label)) }
-                items(entries, key = { "recent-${it.uri}" }) { RecentRow(it, onOpen, onShare, onForget) }
+                items(entries, key = { "recent-${it.uri}" }) { RecentRow(it, onOpen, onShare, onForget, onRename, onDelete, menuOpen = it.uri == menuFor) }
             }
         }
     }
@@ -300,8 +442,11 @@ internal fun RecentRow(
     onOpen: (DocumentEntry) -> Unit,
     onShare: (DocumentEntry) -> Unit,
     onForget: (DocumentEntry) -> Unit,
+    onRename: ((DocumentEntry) -> Unit)? = null,
+    onDelete: ((DocumentEntry) -> Unit)? = null,
+    menuOpen: Boolean = false,
 ) {
-    var menu by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(menuOpen) }
     val context = LocalContext.current
     Row(
         modifier = Modifier
@@ -325,7 +470,16 @@ internal fun RecentRow(
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(text = { Text(stringResource(R.string.tool_share)) }, onClick = { menu = false; onShare(entry) })
+                onRename?.let { rename ->
+                    DropdownMenuItem(text = { Text(stringResource(R.string.rename_file)) }, onClick = { menu = false; rename(entry) })
+                }
                 DropdownMenuItem(text = { Text(stringResource(R.string.forget_recent)) }, onClick = { menu = false; onForget(entry) })
+                onDelete?.let { delete ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.delete_file), color = MaterialTheme.colorScheme.error) },
+                        onClick = { menu = false; delete(entry) },
+                    )
+                }
             }
         }
     }

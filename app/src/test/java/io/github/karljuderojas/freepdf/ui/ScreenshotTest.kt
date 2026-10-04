@@ -87,7 +87,9 @@ import io.github.karljuderojas.freepdf.settings.SpeechRate
 import io.github.karljuderojas.freepdf.settings.ThemeChoice
 import io.github.karljuderojas.freepdf.ui.sign.TypedSignature
 import io.github.karljuderojas.freepdf.speech.ReadAloudState
+import io.github.karljuderojas.freepdf.ui.files.DeleteDialog
 import io.github.karljuderojas.freepdf.ui.files.FilesContent
+import io.github.karljuderojas.freepdf.ui.files.RenameDialog
 import io.github.karljuderojas.freepdf.ui.files.UnsavedCloseDialog
 import io.github.karljuderojas.freepdf.ui.sign.CertificatePasswordDialog
 import io.github.karljuderojas.freepdf.ui.sign.FinishSigningDialog
@@ -559,6 +561,58 @@ class ScreenshotTest {
 
     @Test
     fun viewerReflowSepia() = capture("viewer_reflow_sepia") { viewer(ViewerMode.Read, reflow = true, pageColors = PageColors.Sepia) }
+
+    @Test
+    fun filesFileMenu() = capture("files_file_menu") {
+        shell(MainTab.Files) {
+            FilesContent(
+                emptyList(), sampleRecent, onOpenFile = {}, onOpen = {}, onClose = {}, onShare = {}, onForget = {},
+                modifier = it, onRename = {}, onDelete = {}, menuFor = sampleRecent[1].uri, now = now,
+            )
+        }
+    }
+
+    // The name field takes focus, and its blinking cursor never lets Compose go idle, so the clock is driven by hand.
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun filesRenameDialog() = captureRenameDialog("files_rename_dialog", error = null)
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun filesRenameDialogError() = captureRenameDialog("files_rename_dialog_error", error = R.string.rename_failed)
+
+    @OptIn(ExperimentalRoborazziApi::class)
+    private fun captureRenameDialog(name: String, error: Int?) {
+        var open by mutableStateOf(false)
+        show {
+            shell(MainTab.Files) {
+                FilesContent(emptyList(), sampleRecent, {}, {}, {}, {}, {}, modifier = it, onRename = {}, onDelete = {}, now = now)
+                if (open) RenameDialog(currentName = sampleRecent[1].name, error = error, onConfirm = {}, onCancel = {})
+            }
+        }
+        // The dialog only opens once the clock is held, since its field's cursor blinks forever.
+        composeRule.mainClock.autoAdvance = false
+        open = true
+        composeRule.mainClock.advanceTimeBy(1_000)
+        captureScreenRoboImage("build/outputs/roborazzi/$name.png")
+    }
+
+    @Test
+    fun filesDeleteDialog() = capture("files_delete_dialog") {
+        shell(MainTab.Files) {
+            FilesContent(emptyList(), sampleRecent, {}, {}, {}, {}, {}, modifier = it, onRename = {}, onDelete = {}, now = now)
+            DeleteDialog(name = sampleRecent[1].name, canDelete = true, onDelete = {}, onRemoveFromList = {}, onCancel = {})
+        }
+    }
+
+    // A folder that does not allow deleting: the dialog offers to only remove the entry from the list.
+    @Test
+    fun filesDeleteUnsupportedDialog() = capture("files_delete_unsupported_dialog") {
+        shell(MainTab.Files) {
+            FilesContent(emptyList(), sampleRecent, {}, {}, {}, {}, {}, modifier = it, onRename = {}, onDelete = {}, now = now)
+            DeleteDialog(name = sampleRecent[1].name, canDelete = false, onDelete = {}, onRemoveFromList = {}, onCancel = {})
+        }
+    }
 
     @Test
     fun filesCloseUnsaved() = capture("files_close_unsaved") {

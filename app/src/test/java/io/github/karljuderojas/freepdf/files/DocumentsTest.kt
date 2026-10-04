@@ -147,4 +147,17 @@ class DocumentsTest {
         assertEquals(emptyList<DocumentEntry>(), documents.open.value)
         assertEquals(listOf("B.pdf", "A.pdf"), documents.recent.value.map { it.name })
     }
+
+    @Test
+    fun renamingKeepsTheEntryInPlaceInBothLists() {
+        val documents = documents()
+        documents.opened("content://a", "A.pdf", remember = true)
+        documents.opened("content://b", "B.pdf", remember = true)
+        documents.renamed("content://a", "content://a2", "Renamed.pdf")
+        assertEquals(listOf("B.pdf", "Renamed.pdf"), documents.recent.value.map { it.name })
+        assertEquals(listOf("content://b", "content://a2"), documents.open.value.map { it.uri })
+        assertEquals(listOf("B.pdf", "Renamed.pdf"), documentsAfterRestart().recent.value.map { it.name })
+    }
+
+    private fun documentsAfterRestart() = documents()
 }
