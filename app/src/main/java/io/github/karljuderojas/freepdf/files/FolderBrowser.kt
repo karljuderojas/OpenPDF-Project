@@ -69,12 +69,19 @@ data class FolderListing(val name: String, val files: List<FolderFile>)
 object FolderReader {
 
     /** Reads the PDFs directly inside [tree] (subfolders are not entered). Null if the folder cannot be read any more. */
-    fun read(resolver: ContentResolver, tree: Uri): FolderListing? = runCatching {
+    fun read(resolver: ContentResolver, tree: Uri): FolderListing? = try {
+        readOrThrow(resolver, tree)
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun readOrThrow(resolver: ContentResolver, tree: Uri): FolderListing? {
         val treeId = DocumentsContract.getTreeDocumentId(tree)
-        val folderName = resolver.query(
-            DocumentsContract.buildDocumentUriUsingTree(tree, treeId),
-            arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null,
-        )?.use { if (it.moveToFirst()) it.getString(0) else null } ?: treeId.substringAfterLast(':').ifEmpty { treeId }
+        val nameColumns = arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+        var folderName: String? = null
+        resolver.query(DocumentsContract.buildDocumentUriUsingTree(tree, treeId), nameColumns, null, null, null)?.use {
+            if (it.moveToFirst()) folderName = it.getString(0)
+        }
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, treeId)
         val columns = arrayOf(
             DocumentsContract.Document.COLUMN_DOCUMENT_ID,
@@ -83,22 +90,18 @@ object FolderReader {
             DocumentsContract.Document.COLUMN_LAST_MODIFIED,
             DocumentsContract.Document.COLUMN_SIZE,
         )
-        val files = resolver.query(children, columns, null, null, null)?.use { cursor ->
-            buildList {
-                while (cursor.moveToNext()) {
-                    val name = cursor.getString(1) ?: continue
-                    if (!isPdf(cursor.getString(2), name)) continue
-                    add(
-                        FolderFile(
-                            uri = DocumentsContract.buildDocumentUriUsingTree(tree, cursor.getString(0)).toString(),
-                            name = name,
-                            modified = if (cursor.isNull(3)) 0 else cursor.getLong(3),
-                            size = if (cursor.isNull(4)) 0 else cursor.getLong(4),
-                        ),
-                    )
-                }
+        val cursor = resolver.query(children, columns, null, null, null) ?: return null
+        val files = ArrayList<FolderFile>()
+        cursor.use {
+            while (it.moveToNext()) {
+                val name: String = it.getString(1) ?: continue
+                if (!isPdf(it.getString(2), name)) continue
+                val modified: Long = if (it.isNull(3)) 0L else it.getLong(3)
+                val size: Long = if (it.isNull(4)) 0L else it.getLong(4)
+                val uri = DocumentsContract.buildDocumentUriUsingTree(tree, it.getString(0)).toString()
+                files.add(FolderFile(uri, name, modified, size))
             }
-        } ?: return null
-        FolderListing(folderName, files)
-    }.getOrNull()
+        }
+        return FolderListing(folderName ?: treeId.substringAfterLast(':').ifEmpty { treeId }, files)
+    }
 }
