@@ -17,7 +17,7 @@ junit = "4.13.2"
 androidxTestJunit = "1.3.0"
 robolectric = "4.17"
 # Screenshot tests on the JVM; CI posts the images on every pull request.
-roborazzi = "1.76.0"
+roborazzi = "1.77.0"
 # No longer managed by the Compose BOM; the icon set is frozen at this version.
 materialIconsCore = "1.7.8"
 
