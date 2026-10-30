@@ -168,6 +168,7 @@ private fun MainScreen(openPdf: (Uri, ViewerMode, Int?) -> Unit, onCreateTool: (
                 val theme by app.settings.theme.collectAsStateWithLifecycle()
                 val rememberHistory by app.settings.rememberHistory.collectAsStateWithLifecycle()
                 val pageColors by app.settings.pageColors.collectAsStateWithLifecycle()
+                val seamlessPages by app.settings.seamlessPages.collectAsStateWithLifecycle()
                 val speechRate by app.settings.speechRate.collectAsStateWithLifecycle()
                 val showTips by app.tips.enabled.collectAsStateWithLifecycle()
                 SettingsContent(
@@ -189,6 +190,8 @@ private fun MainScreen(openPdf: (Uri, ViewerMode, Int?) -> Unit, onCreateTool: (
                     modifier = modifier,
                     pageColors = pageColors,
                     onPageColors = app.settings::setPageColors,
+                    seamlessPages = seamlessPages,
+                    onSeamlessPages = app.settings::setSeamlessPages,
                     speechRate = speechRate,
                     onSpeechRate = app.settings::setSpeechRate,
                 )

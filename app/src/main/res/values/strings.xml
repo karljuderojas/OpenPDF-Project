@@ -548,6 +548,8 @@
     <string name="page_colors_night">Night</string>
     <string name="page_colors_sepia">Sepia</string>
     <string name="settings_reading">Reading</string>
+    <string name="settings_seamless_pages">Seamless pages</string>
+    <string name="settings_seamless_pages_detail">Show the pages edge to edge, with no gaps, so the document reads as one long page. Your PDF is not changed.</string>
     <string name="settings_page_colors_detail">Night and sepia are easier on the eyes in the dark. Your PDF is not changed.</string>
     <string name="settings_speech_rate">Read aloud speed</string>
     <string name="settings_speech_rate_detail">How fast the voice reads. Takes effect from the next sentence.</string>
