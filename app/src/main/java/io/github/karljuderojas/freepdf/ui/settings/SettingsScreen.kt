@@ -50,6 +50,8 @@ fun SettingsContent(
     modifier: Modifier = Modifier,
     pageColors: PageColors = PageColors.Normal,
     onPageColors: (PageColors) -> Unit = {},
+    seamlessPages: Boolean = false,
+    onSeamlessPages: (Boolean) -> Unit = {},
     speechRate: SpeechRate = SpeechRate.Normal,
     onSpeechRate: (SpeechRate) -> Unit = {},
 ) {
@@ -87,6 +89,13 @@ fun SettingsContent(
                     }
                 }
             }
+
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.settings_seamless_pages)) },
+                supportingContent = { Text(stringResource(R.string.settings_seamless_pages_detail)) },
+                trailingContent = { Switch(checked = seamlessPages, onCheckedChange = onSeamlessPages) },
+                modifier = Modifier.clickable { onSeamlessPages(!seamlessPages) },
+            )
 
             ListItem(
                 headlineContent = { Text(stringResource(R.string.settings_speech_rate)) },

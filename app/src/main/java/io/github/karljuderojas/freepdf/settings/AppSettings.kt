@@ -34,6 +34,16 @@ class AppSettings(private val prefs: SharedPreferences) {
     /** Applies to every document, so a reader who likes Night keeps it for the next file too. */
     val pageColors: StateFlow<PageColors> = _pageColors.asStateFlow()
 
+    private val _seamlessPages = MutableStateFlow(prefs.getBoolean(KEY_SEAMLESS, false))
+
+    /** When true, the pages meet edge to edge, so a document reads as one long page. */
+    val seamlessPages: StateFlow<Boolean> = _seamlessPages.asStateFlow()
+
+    fun setSeamlessPages(seamless: Boolean) {
+        _seamlessPages.value = seamless
+        prefs.edit().putBoolean(KEY_SEAMLESS, seamless).apply()
+    }
+
     private val _readingTextSize = MutableStateFlow(prefs.getInt(KEY_TEXT_SIZE, DEFAULT_TEXT_SIZE).coerceIn(MIN_TEXT_SIZE, MAX_TEXT_SIZE))
 
     /** The size, in sp, of the text in reading mode. */
@@ -93,6 +103,7 @@ class AppSettings(private val prefs: SharedPreferences) {
         private const val KEY_THEME = "theme"
         private const val KEY_HISTORY = "remember_history"
         private const val KEY_PAGE_COLORS = "page_colors"
+        private const val KEY_SEAMLESS = "seamless_pages"
         private const val KEY_SPEECH_RATE = "speech_rate"
     }
 }

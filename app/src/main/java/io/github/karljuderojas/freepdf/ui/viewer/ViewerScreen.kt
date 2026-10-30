@@ -321,6 +321,7 @@ fun ViewerScreen(
     val settings = (context.applicationContext as FreePdfApp).settings
     val pageColors by settings.pageColors.collectAsStateWithLifecycle()
     val readingTextSize by settings.readingTextSize.collectAsStateWithLifecycle()
+    val seamlessPages by settings.seamlessPages.collectAsStateWithLifecycle()
     val readAloud by viewModel.readAloud.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var shownInfo by remember { mutableStateOf<ViewerEffect.ShowInfo?>(null) }
@@ -427,6 +428,7 @@ fun ViewerScreen(
         onViewPosition = viewModel::viewPositionChanged,
         pageColors = pageColors,
         onPageColors = settings::setPageColors,
+        seamlessPages = seamlessPages,
         readAloud = readAloud,
         readingTextSize = readingTextSize,
         onReadingTextSize = settings::setReadingTextSize,
@@ -600,6 +602,7 @@ fun ViewerContent(
     onViewPosition: (ViewPosition) -> Unit = {},
     pageColors: PageColors = PageColors.Normal,
     onPageColors: (PageColors) -> Unit = {},
+    seamlessPages: Boolean = false,
     readAloud: ReadAloudState = ReadAloudState(),
     readingTextSize: Int = AppSettings.DEFAULT_TEXT_SIZE,
     onReadingTextSize: (Int) -> Unit = {},
@@ -763,8 +766,8 @@ fun ViewerContent(
         currentField = field
         scope.launch {
             val viewport = snapshotFlow { listState.layoutInfo.viewportSize }.first { it.height > 0 }
-            // Pages fill the list's width, less its 8 dp padding on each side and the gaps between them.
-            val pageHeight = ((viewport.width - with(density) { (8.dp * (columns + 1)).toPx() }) / columns) / size.aspectRatio
+            // Pages fill the list's width, less its padding on each side and the gaps between them.
+            val pageHeight = ((viewport.width - with(density) { (pageGap(seamlessPages) * (columns + 1)).toPx() }) / columns) / size.aspectRatio
             val offset = (field.box.top * pageHeight - viewport.height / 3f).roundToInt().coerceAtLeast(0)
             if (animate) listState.animateScrollToItem(rowOf(field.page, columns), offset) else listState.scrollToItem(rowOf(field.page, columns), offset)
         }
@@ -1264,7 +1267,7 @@ fun ViewerContent(
                 else -> {
                     val tool = AnnotateTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Annotate }
                     val signTool = SignTool.forLabel(selectedTool).takeIf { mode == ViewerMode.Sign }
-                    PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState, pageColors, columns, onPageShown) { page ->
+                    PageList(ready.pageSizes, ready.revision, loadPage, loadRegion, listState, pageColors, columns, onPageShown, seamlessPages) { page ->
                         // Pen strokes still being saved stay where they were drawn, in every mode.
                         val inkOnPage = pendingInk.filter { it.page == page }
                         if (inkOnPage.isNotEmpty()) PendingInkLayer(page, inkOnPage, ready.pageSizes[page].widthPt)
@@ -1945,8 +1948,10 @@ private fun PageList(
     pageColors: PageColors,
     columns: Int = 1,
     onPageShown: (index: Int, revision: Int) -> Unit = { _, _ -> },
+    seamless: Boolean = false,
     overlay: @Composable BoxScope.(page: Int) -> Unit = {},
 ) {
+    val gap = pageGap(seamless)
     var zoom by remember { mutableFloatStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
     // The sharp zoomed tiles get the same night or sepia colors as the page under them.
@@ -1964,7 +1969,7 @@ private fun PageList(
 
     BoxWithConstraints(Modifier.fillMaxSize().onGloballyPositioned { detail.viewport = it }) {
         // Each page is as wide as its share of the row, so one is rendered at that width.
-        val widthPx = with(LocalDensity.current) { ((maxWidth - 8.dp * (columns + 1)) / columns).roundToPx() }
+        val widthPx = with(LocalDensity.current) { ((maxWidth - gap * (columns + 1)) / columns).roundToPx() }
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -1994,13 +1999,13 @@ private fun PageList(
                     detectTapGestures(onDoubleTap = { zoom = 1f; pan = Offset.Zero })
                 }
                 .graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = pan.x; translationY = pan.y },
-            contentPadding = PaddingValues(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(gap),
+            verticalArrangement = Arrangement.spacedBy(gap),
         ) {
             items(rowCount(pageSizes.size, columns)) { row ->
                 val first = firstPageOf(row, columns)
                 val next = firstPageOf(row + 1, columns)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.Top) {
                     // The first page of a two-page view sits alone on the right, as a book's cover does.
                     if (next - first < columns) Spacer(Modifier.weight((columns - (next - first)).toFloat()))
                     for (index in first until minOf(pageSizes.size, next)) {
@@ -2165,6 +2170,9 @@ private val PageSetSaver = listSaver<Set<Int>, Int>(save = { it.toList() }, rest
 internal fun rowOf(page: Int, columns: Int): Int = if (columns == 1) page else (page + 1) / columns
 
 /** The first page of [row]; one past the last page for the row after the last. */
+/** The space around and between pages: none when the pages are seamless. */
+internal fun pageGap(seamless: Boolean) = if (seamless) 0.dp else 8.dp
+
 internal fun firstPageOf(row: Int, columns: Int): Int = if (columns == 1) row else (row * columns - 1).coerceAtLeast(0)
 
 /** How many rows [pageCount] pages take. */

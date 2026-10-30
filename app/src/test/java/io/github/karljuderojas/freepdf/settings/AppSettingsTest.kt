@@ -22,6 +22,7 @@ class AppSettingsTest {
         assertTrue(settings.rememberHistory.value)
         assertEquals(PageColors.Normal, settings.pageColors.value)
         assertEquals(SpeechRate.Normal, settings.speechRate.value)
+        assertFalse(settings.seamlessPages.value)
     }
 
     @Test
@@ -31,12 +32,14 @@ class AppSettingsTest {
             setRememberHistory(false)
             setPageColors(PageColors.Sepia)
             setSpeechRate(SpeechRate.Fast)
+            setSeamlessPages(true)
         }
         val restarted = AppSettings(prefs)
         assertEquals(ThemeChoice.Dark, restarted.theme.value)
         assertFalse(restarted.rememberHistory.value)
         assertEquals(PageColors.Sepia, restarted.pageColors.value)
         assertEquals(SpeechRate.Fast, restarted.speechRate.value)
+        assertTrue(restarted.seamlessPages.value)
     }
 
     @Test

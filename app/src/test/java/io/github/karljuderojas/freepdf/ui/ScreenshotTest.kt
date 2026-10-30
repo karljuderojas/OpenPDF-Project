@@ -451,6 +451,23 @@ class ScreenshotTest {
     }
 
     @Test
+    fun settingsSeamless() = capture("settings_seamless") {
+        shell(MainTab.Settings) {
+            SettingsContent(
+                theme = ThemeChoice.System,
+                onTheme = {},
+                rememberHistory = true,
+                onRememberHistory = {},
+                onClearHistory = {},
+                version = "0.1.0",
+                onSourceCode = {},
+                modifier = it,
+                seamlessPages = true,
+            )
+        }
+    }
+
+    @Test
     fun settingsSpeechRate() = capture("settings_speech_rate") {
         shell(MainTab.Settings) {
             SettingsContent(
@@ -771,6 +788,9 @@ class ScreenshotTest {
 
     @Test
     fun viewerReadNight() = capture("viewer_read_night") { viewer(ViewerMode.Read, pageColors = PageColors.Night) }
+
+    @Test
+    fun viewerReadSeamless() = capture("viewer_read_seamless") { viewer(ViewerMode.Read, seamlessPages = true) }
 
     @Test
     fun viewerReadSepia() = capture("viewer_read_sepia") { viewer(ViewerMode.Read, pageColors = PageColors.Sepia) }
@@ -2481,6 +2501,7 @@ class ScreenshotTest {
         openDocuments: List<DocumentEntry> = emptyList(),
         unsavedDocuments: Set<String> = emptySet(),
         pageColors: PageColors = PageColors.Normal,
+        seamlessPages: Boolean = false,
         reflow: Boolean = false,
         readingTextSize: Int = 18,
         readAloud: ReadAloudState = ReadAloudState(),
@@ -2549,6 +2570,7 @@ class ScreenshotTest {
             unsavedDocuments = unsavedDocuments,
             currentUri = openDocuments.firstOrNull()?.uri,
             pageColors = pageColors,
+            seamlessPages = seamlessPages,
             initialReflow = reflow,
             readAloud = readAloud,
             readingTextSize = readingTextSize,
